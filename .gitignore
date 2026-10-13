@@ -6,6 +6,7 @@
 .env.*
 !.env.example
 .codex/config.toml
+LEARNINGS_CODEX.md
 
 # Xcode and Swift build products
 DerivedData/

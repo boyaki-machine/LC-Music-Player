@@ -1,42 +1,42 @@
-# LC Music Player (LCMP)
+# LC Music Player（LCMP）
 
-LC Music Player is a native music player project focused on a quiet, personal listening experience. It keeps track information unobtrusive and makes playback enjoyable through visualizations such as a graphic equalizer.
+LC Music Player（LCMP）は、静かで個人的な音楽鑑賞体験を目指すネイティブ音楽プレイヤーです。楽曲情報を控えめに表示し、グラフィックイコライザーなどの可視化によって再生を楽しめるようにします。
 
-The initial release targets macOS. The design aims to keep playback and playlist functionality reusable for a future iPhone version while separating platform-specific UI, audio output, and file access.
+初期リリースではmacOSを対象とします。将来のiPhone版を見据え、再生やプレイリストの機能を共用できるようにしつつ、画面表示、音声出力、ファイルアクセスなどのOS依存機能を分離する方針です。
 
-## Project status
+## プロジェクトの状況
 
-The project is in its basic-design phase. The current draft and its open questions are in [`docs/basic-design.md`](docs/basic-design.md); [`docs/README.md`](docs/README.md) is the design-document index.
+現在は基本設計の段階です。設計のドラフトと未決事項は[基本設計書](docs/basic-design.md)に、設計書の一覧は[設計書一覧](docs/README.md)に記載しています。
 
-Current agreed direction:
+現時点で合意している方針：
 
-- Select and play local music files and folders without copying the audio files into the app.
-- Start with one graphic-equalizer visualization, with room to add and switch visualizations later.
-- Keep visualization analysis separate from audio effects; a sound-shaping equalizer is planned for a later phase.
-- Remember the app's playback volume per output device and restore it on reconnect. A newly encountered device starts at the current app volume.
-- Treat subscription music support as a separate future consideration.
+- ローカルの音楽ファイル／フォルダを選択して再生します。音楽ファイル自体はアプリへコピーしません。
+- 初期版ではグラフィックイコライザーを1種類搭載し、将来、別の可視化を追加・切替できるようにします。
+- 可視化のための解析と、音声に効果を加える処理を分離します。音声イコライザーは後続で追加する予定です。
+- 出力デバイスごとにアプリ内の再生音量を記憶し、再接続時に復元します。初めて使うデバイスでは現在のアプリ内音量を使用します。
+- サブスクリプション音源への対応は、将来の検討事項とします。
 
-Implementation technologies, supported audio formats, library persistence, and several safety details remain open. See the design document before making assumptions.
+実装技術、対応する音声形式、ライブラリ情報の保存方法、安全機能の詳細などは未決定です。未確定事項を前提で補わず、設計書を確認してください。
 
-## Session knowledge
+## セッションの引き継ぎ
 
-At the beginning of every work session, read [`LEARNINGS_CODEX.md`](LEARNINGS_CODEX.md) and apply relevant prior findings. The root [`AGENTS.md`](AGENTS.md) records this as a repository working instruction. Add a concise dated entry to `LEARNINGS_CODEX.md` at the end of a session when there are decisions, useful findings, or handoff items to preserve. Do not put credentials or other secrets in this file.
+`LEARNINGS_CODEX.md`はローカル環境でのみ使用するセッション記録であり、Gitの管理対象外です。作業を始めるときは、ファイルが存在すれば内容を読み、過去の知見を反映してください。このルールはリポジトリ直下の[`AGENTS.md`](AGENTS.md)にも記載しています。判断や有用な知見、次回への引き継ぎ事項があれば、作業終了時に日付を付けて簡潔に追記してください。認証情報などの秘密情報は記録しないでください。
 
-## Git workflow
+## Gitの運用
 
-This repository uses Gitflow-style branches and currently has no remote configured.
+このリポジトリではGitflowを基にブランチを運用します。現在、リモートリポジトリは設定していません。
 
-- `main` contains release-ready history and version tags.
-- `develop` is the integration branch for ongoing work.
-- Create `feature/<short-name>` branches from `develop`; merge completed features back into `develop`.
-- Create `release/<version>` from `develop` when preparing a release. After validation, merge it into `main`, tag the release, and merge the release changes back into `develop`.
-- Use `hotfix/<short-name>` from `main` for urgent fixes to a released version, then merge the fix into both `main` and `develop`.
-- Do not commit directly to `main` for ordinary development.
+- `main`：リリース可能な履歴とバージョンタグを管理します。
+- `develop`：日常の開発内容を統合するブランチです。
+- `feature/<短い名前>`：`develop`から作成し、機能の作業完了後に`develop`へ統合します。
+- `release/<バージョン>`：リリース準備時に`develop`から作成します。検証後に`main`へ統合してタグを付け、リリースブランチの変更を`develop`にも反映します。
+- `hotfix/<短い名前>`：リリース済みバージョンへの緊急修正用として`main`から作成し、修正を`main`と`develop`の両方へ統合します。
+- 通常の開発では`main`へ直接コミットしません。
 
-The initial baseline is version `v0.0.1`. No remote URL is set; configure one only when the project owner is ready to publish or collaborate remotely.
+初期状態のバージョンは`v0.0.1`です。公開やリモートでの共同作業を始める際に、プロジェクトの管理者がリモートURLを設定してください。
 
-## Repository contents
+## ディレクトリとファイル
 
-- `docs/` — product and technical design documents.
-- `LEARNINGS_CODEX.md` — session findings and handoff notes.
-- `AGENTS.md` — repository-specific working instructions for coding agents.
+- `docs/`：製品および技術の設計書。
+- `LEARNINGS_CODEX.md`：ローカル環境のみで使用するセッションの知見・引き継ぎ記録。Git管理対象外です。
+- `AGENTS.md`：コーディングエージェント向けのリポジトリ固有の作業指示。
