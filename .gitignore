@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# Local credentials and machine-specific configuration
+.env
+.env.*
+!.env.example
+.codex/config.toml
+
+# Xcode and Swift build products
+DerivedData/
+build/
+.build/
+*.xcuserstate
+*.xcuserdatad/
+*.dSYM/
+*.ipa
+*.app
+
+# Swift package workspace user data
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+
+# Editor and temporary files
+*.swp
+*.swo
+*~
