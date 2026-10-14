@@ -7,11 +7,13 @@
 !.env.example
 .codex/config.toml
 LEARNINGS_CODEX.md
+/DEVELOPMENT_NOTES.md
 
 # Xcode and Swift build products
 DerivedData/
 build/
 .build/
+__pycache__/
 *.xcuserstate
 *.xcuserdatad/
 *.dSYM/

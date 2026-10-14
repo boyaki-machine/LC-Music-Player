@@ -1,0 +1,214 @@
+import Foundation
+import Testing
+@testable import PlaybackCore
+
+@MainActor
+private final class FakeBackend: PlaybackBackend {
+    let duration: TimeInterval = 12
+    var currentTime: TimeInterval = 0
+    var volume: Float = 1
+    var onEvent: (@MainActor (PlaybackEvent) -> Void)?
+    var playCount = 0
+    var pauseCount = 0
+    var resumeCount = 0
+    var stopCount = 0
+    var playError: PlaybackError?
+
+    func play() throws {
+        if let playError { throw playError }
+        playCount += 1
+        currentTime = 0
+    }
+    func pause() throws { pauseCount += 1 }
+    func resume() throws { resumeCount += 1 }
+    func stop() { stopCount += 1; currentTime = 0 }
+}
+
+private final class ReleaseCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func increment() { lock.withLock { value += 1 } }
+}
+
+@MainActor
+private struct FakeAccess: FileAccess {
+    var failure: PlaybackError?
+    let releases: ReleaseCounter
+    func acquire(_ url: URL) throws -> FileLease {
+        if let failure { throw failure }
+        return FileLease { releases.increment() }
+    }
+}
+
+@Suite @MainActor
+struct PlaybackControllerTests {
+    private let first = URL(fileURLWithPath: "/tmp/first.wav")
+    private let second = URL(fileURLWithPath: "/tmp/second.flac")
+
+    @Test func playPauseResumeStopAndReplay() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(
+            fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend }
+        )
+        #expect(!controller.canPlay)
+        controller.select(first)
+        #expect(controller.state == .ready)
+        controller.togglePlayPause()
+        #expect(controller.state == .playing)
+        backend.currentTime = 4
+        controller.togglePlayPause()
+        #expect(controller.state == .paused)
+        #expect(controller.currentTime == 4)
+        controller.togglePlayPause()
+        #expect(controller.state == .playing)
+        #expect(backend.resumeCount == 1)
+        controller.stop()
+        #expect(controller.state == .stopped)
+        #expect(controller.currentTime == 0)
+        controller.togglePlayPause()
+        #expect(backend.playCount == 2)
+        #expect(backend.pauseCount == 1)
+    }
+
+    @Test func cancellationAndFailedSelectionPreserveCurrentPlayback() {
+        let backend = FakeBackend()
+        let releases = ReleaseCounter()
+        let controller = PlaybackController(fileAccess: FakeAccess(releases: releases)) { url in
+            if url == second { throw PlaybackError.loadingFailed("破損") }
+            return backend
+        }
+        controller.select(first)
+        controller.togglePlayPause()
+        backend.currentTime = 3
+        controller.selectionCancelled()
+        #expect(controller.state == .playing)
+        #expect(controller.currentTime == 3)
+        controller.select(URL(fileURLWithPath: "/tmp/music.dsf"))
+        #expect(controller.error == .unsupportedFormat)
+        controller.select(second)
+        #expect(controller.error == .loadingFailed("破損"))
+        #expect(controller.selectedURL == first)
+        #expect(controller.state == .playing)
+        #expect(controller.currentTime == 3)
+        #expect(releases.count == 1)
+    }
+
+    @Test func inaccessibleFileDoesNotCreatePlayer() {
+        var attempts = 0
+        let controller = PlaybackController(
+            fileAccess: FakeAccess(failure: .inaccessibleFile, releases: ReleaseCounter())
+        ) { _ in attempts += 1; return FakeBackend() }
+        controller.select(first)
+        #expect(controller.error == .inaccessibleFile)
+        #expect(controller.state == .empty)
+        #expect(attempts == 0)
+        #expect(!controller.canPlay)
+    }
+
+    @Test func switchingTracksStopsOldPlaybackAndReleasesAccess() {
+        let old = FakeBackend()
+        let next = FakeBackend()
+        let releases = ReleaseCounter()
+        let controller = PlaybackController(fileAccess: FakeAccess(releases: releases)) { url in
+            url == first ? old : next
+        }
+        controller.select(first)
+        controller.togglePlayPause()
+        let lateCallback = old.onEvent
+        controller.select(second)
+        controller.togglePlayPause()
+        #expect(old.stopCount == 1)
+        #expect(releases.count == 1)
+        lateCallback?(.failed(.playbackFailed("古い通知")))
+        #expect(controller.state == .playing)
+        #expect(controller.error == nil)
+        #expect(controller.selectedURL == second)
+        controller.close()
+        #expect(releases.count == 2)
+        #expect(next.stopCount == 1)
+        #expect(controller.state == .empty)
+    }
+
+    @Test func lateCompletionAfterStopOrReplayDoesNotEndCurrentRun() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(
+            fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend }
+        )
+        controller.select(first)
+        controller.togglePlayPause()
+        let lateCallback = backend.onEvent
+        controller.stop()
+        lateCallback?(.finished)
+        #expect(controller.state == .stopped)
+        controller.togglePlayPause()
+        lateCallback?(.finished)
+        #expect(controller.state == .playing)
+        backend.onEvent?(.finished)
+        #expect(controller.state == .finished)
+        #expect(controller.currentTime == 12)
+        controller.togglePlayPause()
+        #expect(controller.currentTime == 0)
+        #expect(backend.playCount == 3)
+    }
+
+    @Test func synchronousAndAsynchronousErrorsAllowRetry() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(
+            fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend }
+        )
+        controller.select(first)
+        backend.playError = .playbackFailed("出力なし")
+        controller.togglePlayPause()
+        #expect(controller.state == .failed)
+        #expect(controller.error == .playbackFailed("出力なし"))
+        backend.playError = nil
+        controller.togglePlayPause()
+        #expect(controller.state == .playing)
+        backend.onEvent?(.failed(.playbackFailed("デコード失敗")))
+        #expect(controller.state == .failed)
+        controller.togglePlayPause()
+        #expect(controller.error == nil)
+        #expect(controller.state == .playing)
+    }
+
+    @Test func outputChangeStopsUntilUserRestarts() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(
+            fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend }
+        )
+        controller.select(first)
+        controller.togglePlayPause()
+        backend.onEvent?(.outputChanged)
+        #expect(controller.state == .stopped)
+        #expect(!controller.canStop)
+        #expect(controller.message.contains("音声出力"))
+        controller.togglePlayPause()
+        #expect(controller.state == .playing)
+    }
+
+    @Test func volumeIsClampedAndNonfiniteValuesAreIgnored() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(
+            fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend }
+        )
+        controller.setVolume(0.4)
+        controller.select(first)
+        #expect(backend.volume == 0.4)
+        controller.setVolume(2)
+        #expect(backend.volume == 1)
+        controller.setVolume(-2)
+        #expect(backend.volume == 0)
+        controller.setVolume(.nan)
+        controller.setVolume(.infinity)
+        #expect(backend.volume == 0)
+    }
+
+    @Test func localFileAccessRejectsFoldersAndMissingFiles() throws {
+        let access = LocalFileAccess()
+        #expect(throws: PlaybackError.inaccessibleFile) { try access.acquire(URL(fileURLWithPath: "/tmp")) }
+        #expect(throws: PlaybackError.inaccessibleFile) {
+            try access.acquire(URL(fileURLWithPath: "/tmp/lcmp-missing-\(UUID()).wav"))
+        }
+    }
+}
