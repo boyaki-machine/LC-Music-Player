@@ -10,6 +10,8 @@ public final class PlaybackController {
     public private(set) var error: PlaybackError?
     public private(set) var message = "音楽ファイルを選択してください。"
     public private(set) var volume: Float = 0.25
+    public private(set) var isMuted = false
+    @ObservationIgnored private var volumeBeforeMute: Float = 0.25
 
     @ObservationIgnored private var backend: (any PlaybackBackend)?
     @ObservationIgnored private var lease: FileLease?
@@ -26,6 +28,9 @@ public final class PlaybackController {
     }
 
     public var canPlay: Bool { selectedURL != nil }
+    public var canSeek: Bool {
+        backend?.supportsSeeking == true && duration.isFinite && duration > 0 && state != .failed
+    }
     public var canStop: Bool { state == .playing || state == .paused }
     public var currentTime: TimeInterval {
         if state == .finished { return duration }
@@ -94,7 +99,42 @@ public final class PlaybackController {
     public func setVolume(_ value: Float) {
         guard value.isFinite else { return }
         volume = min(1, max(0, value))
+        isMuted = false
+        if volume > 0 { volumeBeforeMute = volume }
         backend?.volume = volume
+    }
+
+    public func toggleMute() {
+        if isMuted {
+            isMuted = false
+            volume = volumeBeforeMute
+        } else {
+            volumeBeforeMute = volume
+            isMuted = true
+            volume = 0
+        }
+        backend?.volume = volume
+    }
+
+    /// The UI previews locally and commits once. Seeking never starts idle audio.
+    public func seek(to seconds: TimeInterval) {
+        guard canSeek, seconds.isFinite, let backend else { return }
+        let target = min(duration, max(0, seconds))
+        if target == duration {
+            endRun()
+            state = .finished
+            error = nil
+            message = "再生が終了しました。"
+            return
+        }
+        do {
+            bindEvents(to: backend)
+            try backend.seek(to: target)
+            if state == .finished { state = .stopped }
+            error = nil
+        } catch {
+            handle(.failed((error as? PlaybackError) ?? .playbackFailed(error.localizedDescription)))
+        }
     }
 
     /// Called on app termination. No bookmarks or library entries are persisted.

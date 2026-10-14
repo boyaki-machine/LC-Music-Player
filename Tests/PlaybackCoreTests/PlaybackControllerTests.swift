@@ -5,6 +5,9 @@ import Testing
 @MainActor
 private final class FakeBackend: PlaybackBackend {
     let duration: TimeInterval = 12
+    var supportsSeeking = true
+    var seekError: PlaybackError?
+    var seekCount = 0
     var currentTime: TimeInterval = 0
     var volume: Float = 1
     var onEvent: (@MainActor (PlaybackEvent) -> Void)?
@@ -17,10 +20,14 @@ private final class FakeBackend: PlaybackBackend {
     func play() throws {
         if let playError { throw playError }
         playCount += 1
-        currentTime = 0
+        // Preserve a prepared seek position on playback.
     }
     func pause() throws { pauseCount += 1 }
     func resume() throws { resumeCount += 1 }
+    func seek(to seconds: TimeInterval) throws {
+        if let seekError { throw seekError }
+        seekCount += 1; currentTime = seconds
+    }
     func stop() { stopCount += 1; currentTime = 0 }
 }
 
@@ -202,6 +209,74 @@ struct PlaybackControllerTests {
         controller.setVolume(.nan)
         controller.setVolume(.infinity)
         #expect(backend.volume == 0)
+    }
+
+    @Test func seekPreservesTransportAndInvalidatesOldNotifications() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend })
+        controller.seek(to: 3)
+        #expect(backend.seekCount == 0)
+        controller.select(first)
+        controller.seek(to: 3)
+        #expect(controller.state == .ready && controller.currentTime == 3)
+        controller.togglePlayPause()
+        let oldCallback = backend.onEvent
+        controller.seek(to: 8)
+        oldCallback?(.finished)
+        #expect(controller.state == .playing && controller.currentTime == 8)
+        controller.togglePlayPause()
+        controller.seek(to: 5)
+        #expect(controller.state == .paused && controller.currentTime == 5)
+        controller.togglePlayPause()
+        #expect(controller.state == .playing)
+        controller.stop()
+        controller.seek(to: 6)
+        #expect(controller.state == .stopped && controller.currentTime == 6)
+        controller.seek(to: 12)
+        #expect(controller.state == .finished && controller.currentTime == 12)
+        controller.seek(to: 4)
+        #expect(controller.state == .stopped && controller.currentTime == 4)
+        controller.select(second)
+        #expect(controller.currentTime == 0)
+    }
+
+    @Test func seekBoundsUnsupportedAndFailures() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend })
+        controller.select(first)
+        controller.seek(to: -8)
+        #expect(controller.currentTime == 0)
+        controller.seek(to: .nan); controller.seek(to: .infinity)
+        #expect(backend.seekCount == 1)
+        backend.supportsSeeking = false
+        #expect(!controller.canSeek)
+        controller.seek(to: 5)
+        #expect(backend.seekCount == 1)
+        backend.supportsSeeking = true
+        backend.seekError = .playbackFailed("シーク失敗")
+        controller.seek(to: 4)
+        #expect(controller.state == .failed)
+        #expect(controller.error == backend.seekError)
+        #expect(!controller.canSeek)
+        backend.seekError = nil
+        controller.togglePlayPause()
+        #expect(controller.state == .playing && controller.error == nil)
+    }
+
+    @Test func muteRestoresPreviousVolumeAndManualAdjustmentUnmutes() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend })
+        controller.setVolume(0.6); controller.select(first)
+        controller.toggleMute()
+        #expect(controller.isMuted && controller.volume == 0 && backend.volume == 0)
+        controller.select(second)
+        #expect(backend.volume == 0)
+        controller.toggleMute()
+        #expect(!controller.isMuted && controller.volume == 0.6 && backend.volume == 0.6)
+        controller.toggleMute(); controller.setVolume(0.3)
+        #expect(!controller.isMuted && backend.volume == 0.3)
+        controller.toggleMute(); controller.toggleMute()
+        #expect(controller.volume == 0.3)
     }
 
     @Test func localFileAccessRejectsFoldersAndMissingFiles() throws {

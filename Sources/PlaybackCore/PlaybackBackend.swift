@@ -10,11 +10,13 @@ public enum PlaybackEvent: Sendable {
 @MainActor
 public protocol PlaybackBackend: AnyObject {
     var duration: TimeInterval { get }
+    var supportsSeeking: Bool { get }
     var currentTime: TimeInterval { get }
     var volume: Float { get set }
     var onEvent: (@MainActor (PlaybackEvent) -> Void)? { get set }
     func play() throws
     func pause() throws
     func resume() throws
+    func seek(to seconds: TimeInterval) throws
     func stop()
 }
