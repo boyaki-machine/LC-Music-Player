@@ -13,7 +13,9 @@ let package = Package(
     ],
     targets: [
         .target(name: "PlaybackCore", dependencies: ["SFBAudioEngine"]),
-        .executableTarget(name: "LCMPApp", dependencies: ["PlaybackCore"]),
+        .target(name: "PlayerUI", dependencies: ["PlaybackCore"]),
+        .executableTarget(name: "LCMPApp", dependencies: ["PlaybackCore", "PlayerUI"]),
+        .testTarget(name: "PlayerUITests", dependencies: ["PlayerUI"]),
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore", "SFBAudioEngine"],
                     resources: [.copy("Fixtures")]),
     ]

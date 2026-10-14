@@ -61,6 +61,23 @@ struct AudioOutputTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(controller.state == .playing)
         #expect(controller.currentTime > paused)
+        controller.seek(to: 1.2)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(controller.state == .playing)
+        #expect(controller.currentTime >= 1.2 && controller.currentTime < 1.5)
+        controller.togglePlayPause()
+        controller.seek(to: 0.7)
+        #expect(controller.state == .paused)
+        #expect(abs(controller.currentTime - 0.7) < 0.001)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(abs(controller.currentTime - 0.7) < 0.001)
+        controller.togglePlayPause()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(controller.currentTime > 0.7)
+        controller.toggleMute()
+        #expect(controller.volume == 0)
+        controller.toggleMute()
+        #expect(controller.volume == 0.1)
         controller.stop()
         #expect(controller.state == .stopped)
         #expect(controller.currentTime == 0)
@@ -78,6 +95,30 @@ struct AudioOutputTests {
         } else {
             print("System output volume: device does not expose a readable scalar; comparison not performed")
         }
+    }
+
+    @Test(arguments: ["tone.wav", "tone.aiff", "tone-aac.m4a", "tone-alac.m4a", "tone.mp3",
+                      "tone.flac", "tone-96k-24bit.wav", "tone-96k-24bit.flac"])
+    func preparedSeekRendersFromPosition(_ filename: String) async throws {
+        let url = try #require(Bundle.module.url(forResource: filename, withExtension: nil, subdirectory: "Fixtures"))
+        let controller = PlaybackController()
+        defer { controller.close() }
+        controller.setVolume(0.05)
+        controller.select(url)
+        #expect(controller.canSeek)
+        controller.seek(to: 0.1)
+        #expect(controller.state == .ready)
+        #expect(abs(controller.currentTime - 0.1) < 0.001)
+        controller.togglePlayPause()
+        for _ in 0..<150 {
+            if controller.state != .playing { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(controller.state == .finished)
+        #expect(controller.error == nil)
+        controller.seek(to: 0.05)
+        #expect(controller.state == .stopped)
+        #expect(abs(controller.currentTime - 0.05) < 0.001)
     }
 
     // Read only: the app must never set macOS's device volume.
