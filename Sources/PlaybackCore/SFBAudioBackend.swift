@@ -1,6 +1,7 @@
 import AVFAudio
 import Foundation
 import SFBAudioEngine
+import AnalysisCore
 
 @MainActor
 public final class SFBAudioBackend: PlaybackBackend {
@@ -18,6 +19,52 @@ public final class SFBAudioBackend: PlaybackBackend {
     private var runID: UUID?
     private var pendingTime: TimeInterval = 0
     private var paused = false
+    private var analysisConfiguration: AnalysisConfiguration?
+    private var receiveAnalysis: (@MainActor (AnalysisFrame) -> Void)?
+    private var analysis: AnalysisSession?
+    private var analysisTask: Task<Void, Never>?
+    private var analysisGeneration: UUID?
+    private var analysisNode: AVAudioUnitEQ?
+    private var analysisUnit: AudioUnit?
+
+    public func configureAnalysis(_ configuration: AnalysisConfiguration?,
+                                  receive: (@MainActor (AnalysisFrame) -> Void)?) {
+        endAnalysis()
+        analysisConfiguration = configuration
+        receiveAnalysis = receive
+        if player != nil && !paused { startAnalysis() }
+    }
+
+    private func startAnalysis() {
+        guard player != nil, let node = analysisNode,
+              let analysisConfiguration, receiveAnalysis != nil,
+              let session = try? AnalysisSession(configuration: analysisConfiguration) else { return }
+        let unit = node.audioUnit
+        let status = session.attach(to: unit, sampleRate: node.outputFormat(forBus: 0).sampleRate,
+                                    outputLatency: node.outputPresentationLatency)
+        guard status == noErr else { session.finish(); return }
+        analysisUnit = unit
+        analysis = session
+        analysisGeneration = session.generation
+        analysisTask = Task { [weak self, frames = session.frames, id = session.generation] in
+            for await frame in frames {
+                guard !Task.isCancelled, let self, self.analysisGeneration == id else { break }
+                self.receiveAnalysis?(frame)
+            }
+        }
+    }
+
+    private func endAnalysis() {
+        analysisGeneration = nil
+        analysisTask?.cancel()
+        analysisTask = nil
+        if let analysis, let analysisUnit {
+            _ = analysis.detach(from: analysisUnit)
+        }
+        analysisUnit = nil
+        analysis?.finish()
+        analysis = nil
+    }
 
     public init(url: URL) throws {
         self.url = url
@@ -61,7 +108,30 @@ public final class SFBAudioBackend: PlaybackBackend {
             delegate = nextDelegate
             next.delegate = nextDelegate
             next.mainMixerNode.outputVolume = volume
+            // Zero filters, zero global gain: a pass-through AU with a public
+            // render-notification API. Future compensation belongs downstream.
+            let observation = AVAudioUnitEQ(numberOfBands: 0)
+            let converter = AVAudioMixerNode()
+            let outputFormat = next.mainMixerNode.outputFormat(forBus: 0)
+            guard let observationFormat = AVAudioFormat(standardFormatWithSampleRate: outputFormat.sampleRate,
+                                                         channels: outputFormat.channelCount) else {
+                try? decoder.close()
+                throw PlaybackError.playbackFailed("解析接続用の音声形式を作成できません。")
+            }
+            next.modifyProcessingGraph { engine in
+                // Keep SFB's initial source format: SFB must reconfigure its own
+                // decoder ring before changing it. The mixer accepts that change.
+                let sourceFormat = next.sourceNode.outputFormat(forBus: 0)
+                engine.attach(converter)
+                engine.attach(observation)
+                engine.disconnectNodeOutput(next.sourceNode)
+                engine.connect(next.sourceNode, to: converter, format: sourceFormat)
+                engine.connect(converter, to: observation, format: observationFormat)
+                engine.connect(observation, to: engine.mainMixerNode, format: observationFormat)
+            }
+            analysisNode = observation
             try next.play(decoder)
+            startAnalysis()
         } catch {
             stop()
             throw PlaybackError.playbackFailed(error.localizedDescription)
@@ -87,6 +157,7 @@ public final class SFBAudioBackend: PlaybackBackend {
             throw PlaybackError.playbackFailed("一時停止できませんでした。")
         }
         paused = true
+        endAnalysis()
     }
 
     public func resume() throws {
@@ -95,15 +166,18 @@ public final class SFBAudioBackend: PlaybackBackend {
             throw PlaybackError.playbackFailed("再開できませんでした。")
         }
         paused = false
+        startAnalysis()
     }
 
     public func stop() {
+        endAnalysis()
         pendingTime = 0
         paused = false
         runID = nil
         player?.delegate = nil
         player?.stop()
         player = nil
+        analysisNode = nil
         delegate = nil
     }
 }

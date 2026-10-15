@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import OSLog
+import AnalysisCore
 
 @Observable
 @MainActor
@@ -12,6 +13,8 @@ public final class PlaybackController {
     public private(set) var message = "音楽ファイルを選択してください。"
     public private(set) var volume: Float = 0.25
     public private(set) var isMuted = false
+    public private(set) var analysisFrame: AnalysisFrame?
+    public private(set) var analysisConfiguration: AnalysisConfiguration? = try? AnalysisConfiguration()
     @ObservationIgnored private var volumeBeforeMute: Float = 0.25
     @ObservationIgnored public var onNaturalFinish: (@MainActor () -> Void)?
 
@@ -52,6 +55,7 @@ public final class PlaybackController {
             try committing()
             endRun()
             backend = next
+            connectAnalysis()
             selectedURL = url
             duration = next.duration
             state = .ready
@@ -77,6 +81,7 @@ public final class PlaybackController {
             case .playing:
                 try backend.pause()
                 state = .paused
+                analysisFrame = nil
                 message = "一時停止中"
             case .paused:
                 try backend.resume()
@@ -102,6 +107,20 @@ public final class PlaybackController {
         state = .stopped
         error = nil
         message = "停止中"
+    }
+
+    /// Display implementations choose their resolution/cadence; nil unsubscribes.
+    public func configureAnalysis(_ configuration: AnalysisConfiguration?) {
+        analysisConfiguration = configuration
+        analysisFrame = nil
+        connectAnalysis()
+    }
+
+    private func connectAnalysis() {
+        backend?.configureAnalysis(analysisConfiguration) { [weak self] frame in
+            guard let self, self.state == .playing else { return }
+            self.analysisFrame = frame
+        }
     }
 
     public func setVolume(_ value: Float) {
@@ -139,6 +158,7 @@ public final class PlaybackController {
             // Idle backends may read while seeking; hold access only for that operation.
             let temporaryAccess = try lease == nil ? selectedURL.map { try fileAccess.acquire($0) } : nil
             defer { withExtendedLifetime(temporaryAccess) {} }
+            analysisFrame = nil
             bindEvents(to: backend)
             try backend.seek(to: target)
             if state == .finished { state = .stopped }
@@ -191,6 +211,7 @@ public final class PlaybackController {
     }
 
     private func endRun() {
+        analysisFrame = nil
         let started = ContinuousClock.now
         let hadAccess = lease != nil
         selectionID = UUID()

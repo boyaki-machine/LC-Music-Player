@@ -1,0 +1,185 @@
+import AVFAudio
+import AnalysisTransport
+import Foundation
+
+/// One immutable configuration and timeline generation per playback run.
+/// The C queue is SPSC: one render notification (or synthetic accept producer),
+/// drain ONLY by worker. Never use both producers on the same session.
+public final class AnalysisSession: @unchecked Sendable {
+    public let generation = UUID()
+    public let frames: AsyncStream<AnalysisFrame>
+    private let continuation: AsyncStream<AnalysisFrame>.Continuation
+    private let transport: OpaquePointer
+    private let worker = DispatchQueue(label: "local.lcmp.analysis", qos: .userInitiated)
+    private let timer: DispatchSourceTimer
+    private let analyzer: SpectrumAnalyzer
+    private let stateLock = NSLock()
+    private var ended = false // protected by stateLock
+    private var producerSequence: UInt64 = 0 // producer only
+    private var lastSequence: UInt64? // worker only below
+    private var rate: Double = 0
+    private var previousSampleEnd: Double?
+    private var previousHostEnd: Double?
+    private var windowStartSample: Double?
+    private var windowStartHost: Double?
+    private var windowLatency: Double?
+    private var leftWindow: [Float] = []
+    private var rightWindow: [Float] = []
+    private var leftScratch = Array(repeating: Float(0), count: 16384)
+    private var rightScratch = Array(repeating: Float(0), count: 16384)
+    private var frameSequence: UInt64 = 0
+    private var nextDelivery = -Double.infinity
+    private var pending: (left: [Float], right: [Float], sample: Double?, host: Double?, latency: Double?)?
+
+    public init(configuration: AnalysisConfiguration) throws {
+        analyzer = try SpectrumAnalyzer(configuration: configuration)
+        guard let queue = lcmp_pcm_create(8, 16384) else { throw AnalysisError.allocationFailed }
+        transport = queue
+        let stream = AsyncStream<AnalysisFrame>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        frames = stream.stream
+        continuation = stream.continuation
+        timer = DispatchSource.makeTimerSource(queue: worker)
+        leftWindow.reserveCapacity(configuration.fftSize)
+        rightWindow.reserveCapacity(configuration.fftSize)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .milliseconds(1))
+        timer.setEventHandler { [weak self] in self?.drain() }
+        timer.resume()
+    }
+
+    deinit {
+        timer.cancel()
+        continuation.finish()
+        lcmp_pcm_destroy(transport)
+    }
+
+    /// No allocation, FFT, locks, tasks or UI work in this callback.
+    /// Buffer belongs to the engine: only samples copied before returning are retained.
+    public func accept(_ buffer: AVAudioPCMBuffer, at time: AVAudioTime, outputLatency: Double?) {
+        producerSequence &+= 1
+        guard buffer.format.commonFormat == .pcmFormatFloat32,
+              !buffer.format.isInterleaved, let channels = buffer.floatChannelData,
+              buffer.format.channelCount > 0 else { return }
+        var stamp = LCMPPCMStamp()
+        stamp.frames = buffer.frameLength
+        stamp.sample_rate = buffer.format.sampleRate
+        stamp.sample_time_valid = time.isSampleTimeValid
+        stamp.sample_time = Double(time.sampleTime)
+        stamp.host_time_valid = time.isHostTimeValid
+        stamp.host_seconds = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) : 0
+        stamp.latency_valid = outputLatency.map { $0.isFinite && $0 >= 0 } ?? false
+        stamp.output_latency = outputLatency ?? 0
+        stamp.sequence = producerSequence
+        _ = lcmp_pcm_push(transport, channels[0],
+                          buffer.format.channelCount > 1 ? channels[1] : nil, stamp)
+    }
+
+    /// Call after unregistering the render notification. Idempotent; does not wait for FFT work.
+    public func finish() {
+        stateLock.lock()
+        ended = true
+        continuation.finish()
+        stateLock.unlock()
+        timer.cancel()
+    }
+
+    public var droppedBuffers: UInt64 { lcmp_pcm_dropped(transport) }
+
+    /// Production producer: C render notification copies PCM without entering Swift.
+    public func attach(to unit: AudioUnit, sampleRate: Double, outputLatency: Double) -> OSStatus {
+        lcmp_pcm_attach(transport, unit, sampleRate, outputLatency)
+    }
+
+    public func detach(from unit: AudioUnit) -> OSStatus {
+        lcmp_pcm_detach(transport, unit)
+    }
+
+    private func isEnded() -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return ended
+    }
+
+    private func drain() {
+        guard !isEnded() else { return }
+        var stamp = LCMPPCMStamp()
+        // Bound each drain even if the producer continues to fill the queue.
+        for _ in 0..<8 {
+            let available = leftScratch.withUnsafeMutableBufferPointer { left in
+                rightScratch.withUnsafeMutableBufferPointer { right in
+                    lcmp_pcm_pop(transport, left.baseAddress!, right.baseAddress!, &stamp)
+                }
+            }
+            guard available, !isEnded() else { break }
+            consume(stamp)
+        }
+        produce()
+    }
+
+    private func consume(_ stamp: LCMPPCMStamp) {
+        guard stamp.sample_rate.isFinite, stamp.sample_rate >= 8000 else { return }
+        let sample = stamp.sample_time_valid ? stamp.sample_time : nil
+        let host = stamp.host_time_valid ? stamp.host_seconds : nil
+        let sampleGap = sample.flatMap { s in previousSampleEnd.map { abs(s - $0) > 0.5 } } ?? false
+        let hostGap = host.flatMap { h in previousHostEnd.map { abs(h - $0) > 2 / stamp.sample_rate } } ?? false
+        let discontinuity = rate != stamp.sample_rate || lastSequence.map { $0 &+ 1 != stamp.sequence } == true
+            || sampleGap || hostGap || ((sample == nil) != (previousSampleEnd == nil))
+            || ((host == nil) != (previousHostEnd == nil))
+        if discontinuity {
+            leftWindow.removeAll(keepingCapacity: true); rightWindow.removeAll(keepingCapacity: true)
+            pending = nil
+        }
+        rate = stamp.sample_rate
+        lastSequence = stamp.sequence
+        previousSampleEnd = sample.map { $0 + Double(stamp.frames) }
+        previousHostEnd = host.map { $0 + Double(stamp.frames) / rate }
+        let n = analyzer.configuration.fftSize
+        var offset = 0
+        while offset < Int(stamp.frames) {
+            if leftWindow.isEmpty {
+                windowStartSample = sample.map { $0 + Double(offset) }
+                windowStartHost = host.map { $0 + Double(offset) / rate }
+                windowLatency = stamp.latency_valid ? stamp.output_latency : nil
+            }
+            let count = min(n - leftWindow.count, Int(stamp.frames) - offset)
+            leftWindow.append(contentsOf: leftScratch[offset..<(offset + count)])
+            rightWindow.append(contentsOf: rightScratch[offset..<(offset + count)])
+            offset += count
+            if leftWindow.count == n {
+                pending = (leftWindow, rightWindow, windowStartSample, windowStartHost, windowLatency)
+                let hop = min(n / 2, max(1, Int(rate / Double(analyzer.configuration.framesPerSecond))))
+                leftWindow.removeFirst(hop); rightWindow.removeFirst(hop)
+                windowStartSample = windowStartSample.map { $0 + Double(hop) }
+                windowStartHost = windowStartHost.map { $0 + Double(hop) / rate }
+            }
+        }
+    }
+
+    private func produce() {
+        let now = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+        let interval = 1 / Double(analyzer.configuration.framesPerSecond)
+        // Late work publishes only the latest frame at a bounded cadence, never catch-up bursts.
+        guard now >= nextDelivery, let pending else { return }
+        self.pending = nil
+        let started = now
+        guard let result = analyzer.analyze(left: pending.left, right: pending.right, sampleRate: rate) else { return }
+        let completed = AVAudioTime.seconds(forHostTime: mach_absolute_time())
+        frameSequence &+= 1
+        let timing = AnalysisTiming(windowStartSample: pending.sample,
+            windowFrameCount: analyzer.configuration.fftSize, sampleRate: rate,
+            windowCenterHostTime: pending.host.map { $0 + Double(analyzer.configuration.fftSize) / (2 * rate) },
+            estimatedOutputLatency: pending.latency, appliedAudioDelay: 0, producedHostTime: completed)
+        let frame = AnalysisFrame(generation: generation, sequence: frameSequence, timing: timing,
+            bandEdgesHz: result.edges, bandDBFS: result.db, levels: result.levels,
+            leftRMS: result.rms[0], rightRMS: result.rms[1], leftPeak: result.peak[0], rightPeak: result.peak[1],
+            droppedBuffers: droppedBuffers, queuedBufferHighWatermark: lcmp_pcm_high_water(transport),
+            computationSeconds: completed - started)
+        stateLock.lock()
+        if !ended {
+            continuation.yield(frame)
+            // Keep a clock-based phase: adding the FFT duration to every interval
+            // otherwise lowers 60Hz to ~40–50Hz. Skip missed deadlines, never burst.
+            let following = nextDelivery + interval
+            nextDelivery = following > completed ? following : completed + interval
+        }
+        stateLock.unlock()
+    }
+}

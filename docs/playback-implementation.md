@@ -4,6 +4,8 @@
 
 本書は、`Sources/LCMPApp`と`Sources/PlaybackCore`にある単曲再生機能の構造と動作を記述します。製品で目指す機能構成は[基本設計](./basic-design.md)に記載します。
 
+再生PCMの観測ノード、解析セッションと同期用時刻の契約は[周波数解析の実装設計](./analysis-implementation.md)に記載します。解析は再生用ファイルを別途開かず、再生経路からデータを取得します。
+
 ## 1. 構成と責務
 
 対象はmacOS 14以降です。画面はSwiftUI、ファイル選択はNSOpenPanel、再生はSFBAudioEngine 0.14.0を使用します。依存バージョンは`Package.resolved`で固定します。
