@@ -1,4 +1,5 @@
 import Foundation
+import AnalysisCore
 
 public enum PlaybackEvent: Sendable {
     case finished
@@ -19,4 +20,11 @@ public protocol PlaybackBackend: AnyObject {
     func resume() throws
     func seek(to seconds: TimeInterval) throws
     func stop()
+    func configureAnalysis(_ configuration: AnalysisConfiguration?,
+                           receive: (@MainActor (AnalysisFrame) -> Void)?)
+}
+
+public extension PlaybackBackend {
+    func configureAnalysis(_ configuration: AnalysisConfiguration?,
+                           receive: (@MainActor (AnalysisFrame) -> Void)?) {}
 }
