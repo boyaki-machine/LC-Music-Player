@@ -23,7 +23,7 @@ SFBAudioEngine source
 
 - Accelerate/vDSPのFFTと周期的Hann窓を使用する。DCを除き、20Hz〜min(20kHz, Nyquist)を対数帯域に分ける。
 - 入力の平均値（DC）を窓掛け前に除き、窓の二乗和でパワーを補正し、片側スペクトラムのDC/Nyquist以外を2倍する。左右それぞれで求めたパワーを平均して帯域内を加算する。逆相の左右信号を波形平均して相殺しない。
-- `bandDBFS`は平均二乗値1を0dBFSとし、−100〜0dBFSに制限する。正弦波のpeak1は全帯域合計で約−3.01dBFS。表示用`levels`はこのdB範囲を0〜1へ写す。狭すぎて独立FFT binがない帯域は下限値になる。
+- `bandDBFS`は平均二乗値1を0dBFSとし、−100〜0dBFSに制限する。正弦波のpeak1は全帯域合計で約−3.01dBFS。汎用の`levels`はこのdB範囲を0〜1へ写す。可視化は`bandDBFS`から固有の表示範囲へ写し直せる。`LCMP_default_GEQ`は−80〜0dBFSを使う。狭すぎて独立FFT binがない帯域は下限値になる。
 - RMSとpeakはDC除去前の窓内の左右波形から求める。NaN/Infinity入力は0として扱う。表示の減衰・残像・ピークホールドは表示側の責務とする。
 - FFT窓の長さは帯域数と独立する。2048点/48kHzの窓長は約42.7ms。細かい帯域を選んでもFFTの周波数分解能が増えるわけではない。
 
@@ -54,7 +54,7 @@ SFBAudioEngine source
 
 host時刻や遅延を取得できない場合はnilとし、0で代用しません。ノードの`outputPresentationLatency`は開始・再開・再設定時に取得し、機器の遅延を別途加えて二重計上しません。将来、下流の遅延段がノード報告値に含まれる場合は、その既知の補償量を報告値から分離してから設定します。
 
-`SynchronizationEstimate.additionalAudioDelay`は、追加量=max(0, 表示までの遅延＋余裕−既存出力遅延)を計算する純粋な補助関数です。音声の時刻・速度・出力機器設定を変更しません。実際の音声遅延段や、表示を提示時刻まで待たせるスケジューラーは将来の機能です。
+`SynchronizationEstimate.additionalAudioDelay`は、追加量=max(0, 表示までの遅延＋余裕−既存出力遅延)を計算する純粋な補助関数です。音声の時刻・速度・出力機器設定を変更しません。表示を推定提示時刻まで待たせる処理は[可視化側](./visualization-implementation.md)が担当します。実際に音声を遅らせる段は将来の機能です。
 
 将来の補償器では、次を満たす構成にします。
 

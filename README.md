@@ -17,6 +17,8 @@ macOS上のネイティブアプリとし、iPhone版にも共用できるよう
 
 単曲再生の対応形式はMP3、M4A（AAC・ALAC）、WAV、AIFF、FLACです。
 
+再生中の周波数レベルは`LCMP_default_GEQ`の16列蛍光管LEDで、−80〜0dBFSの範囲に表示します。緑・黄・赤のセルを点灯し、消灯には短い残光を添えます。ミュート中も音源のレベルに反応します。表示と時刻処理は[可視化の実装設計](docs/visualization-implementation.md)、実装フォルダとモジュールI/F・追加方法は[Player UI・可視化の開発ガイド](docs/playerUI_developers.md)を参照してください。
+
 ## ローカルで起動する
 
 macOS 14以降、Swift 6対応のXcode／Command Line Tools、Python 3を使用します。
@@ -36,10 +38,10 @@ open build/LCMP.app
 
 ```sh
 ./scripts/swift.sh test
-LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test
+LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 ```
 
-2つ目は既定出力先へ小さいテスト音を送る実再生テストです。通常のテストは音声を出力しません。ファイル選択画面、聴感、デバイス切替の手動確認方法は[実装設計](docs/playback-implementation.md)を参照してください。
+2つ目は既定出力先へ小さいテスト音を送る実再生テストです。短い音源の観測が他のテストの処理に妨げられないよう、全体の実出力検証では`--no-parallel`を明示します。通常のテストは音声を出力しません。ファイル選択画面、聴感、デバイス切替の手動確認方法は[実装設計](docs/playback-implementation.md)を参照してください。
 
 ## セッションの引き継ぎ
 
