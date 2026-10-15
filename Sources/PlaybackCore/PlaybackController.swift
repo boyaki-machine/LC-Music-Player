@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import OSLog
 
 @Observable
 @MainActor
@@ -12,6 +13,7 @@ public final class PlaybackController {
     public private(set) var volume: Float = 0.25
     public private(set) var isMuted = false
     @ObservationIgnored private var volumeBeforeMute: Float = 0.25
+    @ObservationIgnored public var onNaturalFinish: (@MainActor () -> Void)?
 
     @ObservationIgnored private var backend: (any PlaybackBackend)?
     @ObservationIgnored private var lease: FileLease?
@@ -39,23 +41,27 @@ public final class PlaybackController {
     }
 
     /// Selection is transactional: a bad file leaves the existing playback intact.
-    public func select(_ url: URL) {
+    @discardableResult
+    public func select(_ url: URL, using access: FileLease? = nil, committing: () throws -> Void = {}) -> Bool {
         do {
             guard SupportedAudio.accepts(url) else { throw PlaybackError.unsupportedFormat }
-            let nextLease = try fileAccess.acquire(url)
+            let nextLease = try access ?? fileAccess.acquire(url)
+            defer { withExtendedLifetime(nextLease) {} }
             let next = try makeBackend(url)
             next.volume = volume
+            try committing()
             endRun()
             backend = next
-            lease = nextLease
             selectedURL = url
             duration = next.duration
             state = .ready
             error = nil
             message = "再生できます。"
+            return true
         } catch {
             self.error = (error as? PlaybackError) ?? .loadingFailed(error.localizedDescription)
             message = "ファイルを選択できませんでした。"
+            return false
         }
     }
 
@@ -64,7 +70,7 @@ public final class PlaybackController {
         message = "ファイル選択を取り消しました。"
     }
 
-    public func togglePlayPause() {
+    public func togglePlayPause(using access: FileLease? = nil) {
         guard let backend else { return }
         do {
             switch state {
@@ -77,6 +83,8 @@ public final class PlaybackController {
                 state = .playing
                 message = "再生中"
             default:
+                guard let selectedURL else { return }
+                lease = try access ?? fileAccess.acquire(selectedURL)
                 bindEvents(to: backend)
                 try backend.play()
                 state = .playing
@@ -128,6 +136,9 @@ public final class PlaybackController {
             return
         }
         do {
+            // Idle backends may read while seeking; hold access only for that operation.
+            let temporaryAccess = try lease == nil ? selectedURL.map { try fileAccess.acquire($0) } : nil
+            defer { withExtendedLifetime(temporaryAccess) {} }
             bindEvents(to: backend)
             try backend.seek(to: target)
             if state == .finished { state = .stopped }
@@ -137,11 +148,13 @@ public final class PlaybackController {
         }
     }
 
-    /// Called on app termination. No bookmarks or library entries are persisted.
+    /// Releases only the current playback resource; library persistence is independent.
     public func close() {
+        let logger = Logger(subsystem: "local.lcmp.player", category: "shutdown")
+        let started = ContinuousClock.now
         endRun()
         backend = nil
-        lease = nil
+        logger.notice("Playback resources cleared after \(String(describing: started.duration(to: .now)), privacy: .public)")
         selectedURL = nil
         duration = 0
         state = .empty
@@ -156,6 +169,7 @@ public final class PlaybackController {
             state = .finished
             message = "再生が終了しました。"
             error = nil
+            onNaturalFinish?()
         case .failed(let failure):
             state = .failed
             error = failure
@@ -177,8 +191,14 @@ public final class PlaybackController {
     }
 
     private func endRun() {
+        let started = ContinuousClock.now
+        let hadAccess = lease != nil
         selectionID = UUID()
         backend?.onEvent = nil
         backend?.stop()
+        let logger = Logger(subsystem: "local.lcmp.player", category: "shutdown")
+        if hadAccess { logger.notice("Audio run stopped after \(String(describing: started.duration(to: .now)), privacy: .public)") }
+        lease = nil
+        if hadAccess { logger.notice("Active file access released after \(String(describing: started.duration(to: .now)), privacy: .public)") }
     }
 }

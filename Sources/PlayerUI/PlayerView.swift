@@ -1,19 +1,23 @@
 import SwiftUI
 import PlaybackCore
+import LibraryCore
 
 public struct PlayerView: View {
     let playback: PlaybackController
+    let library: LibraryController?
     @Bindable var presentation: PlayerPresentation
     let chooseFile: () -> Void
     let toggleExtension: () -> Void
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var volumeOutsideClick = VolumeOutsideClickHandler()
+    @State private var seekOutsideClick = VolumeOutsideClickHandler()
     @State private var seekPreview: Double?
     @State private var seekSelection: URL?
 
-    public init(playback: PlaybackController, presentation: PlayerPresentation,
+    public init(playback: PlaybackController, presentation: PlayerPresentation, library: LibraryController? = nil,
                 chooseFile: @escaping () -> Void, toggleExtension: @escaping () -> Void) {
         self.playback = playback; self.presentation = presentation
+        self.library = library
         self.chooseFile = chooseFile; self.toggleExtension = toggleExtension
     }
     private var playLabel: String {
@@ -30,7 +34,7 @@ public struct PlayerView: View {
                 VisualizationPlaceholder()
                 AnimationDragSurface { presentation.seekVisible.toggle() }
                 VStack {
-                    if playback.error != nil {
+                    if playback.error != nil || library?.error != nil {
                         Button { presentation.section = .source; if !presentation.extensionVisible { toggleExtension(); presentation.section = .source } } label: {
                             Label("再生エラー・詳細を確認", systemImage: "exclamationmark.triangle")
                                 .font(.caption).padding(5).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 4))
@@ -45,11 +49,11 @@ public struct PlayerView: View {
                 if presentation.volumeVisible { volumePopup.frame(width: 54, height: 132).offset(x: 99, y: -6) }
             }.frame(height: 144)
             HStack(spacing: 9) {
-                LEDButton(symbol: "backward.end.fill", label: "前の曲", enabled: false) {}
+                LEDButton(symbol: "backward.end.fill", label: "前の曲", enabled: library?.canPrevious == true) { library?.previous() }
                 LEDButton(symbol: "play.fill", label: playLabel, enabled: playback.canPlay,
-                          activeColor: playColor, status: status, action: playback.togglePlayPause)
+                          activeColor: playColor, status: status) { if let library { library.togglePlayPause() } else { playback.togglePlayPause() } }
                     .keyboardShortcut(.space, modifiers: [])
-                LEDButton(symbol: "forward.end.fill", label: "次の曲", enabled: false) {}
+                LEDButton(symbol: "forward.end.fill", label: "次の曲", enabled: library?.canNext == true) { library?.next() }
                 LEDButton(symbol: "stop.fill", label: "停止", enabled: playback.canStop, pulseColor: .orange, action: playback.stop)
                 LEDButton(symbol: playback.isMuted || playback.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
                           label: "音量", activeColor: presentation.volumeVisible ? .green : nil) { presentation.volumeVisible.toggle() }
@@ -57,10 +61,7 @@ public struct PlayerView: View {
                 LEDButton(symbol: "line.3.horizontal", label: "メニュー", activeColor: presentation.extensionVisible ? .green : nil, action: toggleExtension)
             }.frame(maxWidth: .infinity).frame(height: 66)
                 .background {
-                    ZStack {
-                        GlassSurface(reducedTransparency: reduceTransparency)
-                        Color(red: 0.12, green: 0.13, blue: 0.14).opacity(reduceTransparency ? 1 : 0.65)
-                    }
+                    PlayerGlassBackground()
                 }
         }
         .foregroundStyle(.white.opacity(0.85))
@@ -78,15 +79,20 @@ public struct PlayerView: View {
             HStack(spacing: 6) {
                 Text(timeText(seekPreview ?? playback.currentTime)).font(.system(size: 10, design: .monospaced))
                 NativeSlider(value: Binding(get: { seekPreview ?? playback.currentTime }, set: {
+                    presentation.cancelSeekHide()
                     if seekPreview == nil { seekSelection = playback.selectedURL }
                     seekPreview = $0
                 }), range: 0...max(1, playback.duration), vertical: false, label: "再生位置", commit: {
                     if let seekPreview, seekSelection == playback.selectedURL { playback.seek(to: seekPreview) }
                     seekPreview = nil
-                }, cancel: { presentation.closeOverlays(); seekPreview = nil }).frame(height: 20).disabled(!playback.canSeek)
+                }, cancel: { presentation.closeOverlays(); seekPreview = nil }, focusChanged: { focused in
+                    if focused { presentation.cancelSeekHide() } else { presentation.scheduleSeekHide() }
+                }).frame(height: 20).disabled(!playback.canSeek)
                 Text(timeText(playback.duration)).font(.system(size: 10, design: .monospaced))
             }.frame(height: 24)
         }
+        .onHover { inside in if inside { presentation.cancelSeekHide() } else { presentation.scheduleSeekHide() } }
+        .background(VolumeClickRegion(handler: seekOutsideClick, isPopup: true, dismiss: presentation.scheduleSeekHide))
     }
     private var volumePopup: some View {
         VStack(spacing: 3) {

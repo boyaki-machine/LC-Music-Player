@@ -13,11 +13,13 @@ ROOT = Path(__file__).resolve().parent.parent
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--configuration", choices=["debug", "release"], default="debug")
+    parser.add_argument("--output", type=Path, default=ROOT / "build/LCMP.app",
+                        help="Output .app path; use a different path while the current app is running")
     args = parser.parse_args()
     command = [str(ROOT / "scripts/swift.sh"), "build", "-c", args.configuration]
     subprocess.run(command, check=True, cwd=ROOT)
     products = Path(subprocess.check_output(command + ["--show-bin-path"], text=True, cwd=ROOT).strip())
-    app = ROOT / "build/LCMP.app"
+    app = args.output.resolve()
     if app.exists():
         shutil.rmtree(app)
     contents = app / "Contents"

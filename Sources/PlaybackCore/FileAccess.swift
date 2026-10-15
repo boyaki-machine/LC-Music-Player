@@ -1,6 +1,6 @@
 import Foundation
 
-/// Keeps a user-selected URL's access alive until playback releases the file.
+/// Keeps file access alive only for the operation or active playback that owns it.
 public final class FileLease: Sendable {
     private let release: @Sendable () -> Void
 

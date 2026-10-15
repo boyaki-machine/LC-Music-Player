@@ -34,7 +34,10 @@ private final class FakeBackend: PlaybackBackend {
 private final class ReleaseCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var value = 0
+    private var acquisitions = 0
     var count: Int { lock.withLock { value } }
+    var activeCount: Int { lock.withLock { acquisitions - value } }
+    func acquired() { lock.withLock { acquisitions += 1 } }
     func increment() { lock.withLock { value += 1 } }
 }
 
@@ -42,8 +45,11 @@ private final class ReleaseCounter: @unchecked Sendable {
 private struct FakeAccess: FileAccess {
     var failure: PlaybackError?
     let releases: ReleaseCounter
+    var denied: @MainActor () -> Bool = { false }
     func acquire(_ url: URL) throws -> FileLease {
+        if denied() { throw PlaybackError.inaccessibleFile }
         if let failure { throw failure }
+        releases.acquired()
         return FileLease { releases.increment() }
     }
 }
@@ -52,6 +58,51 @@ private struct FakeAccess: FileAccess {
 struct PlaybackControllerTests {
     private let first = URL(fileURLWithPath: "/tmp/first.wav")
     private let second = URL(fileURLWithPath: "/tmp/second.flac")
+
+    @Test func idleStatesReleaseAccessWhilePauseRetainsIt() {
+        let backend = FakeBackend(), releases = ReleaseCounter()
+        let controller = PlaybackController(fileAccess: FakeAccess(releases: releases), makeBackend: { _ in backend })
+        controller.select(first)
+        #expect(releases.activeCount == 0 && controller.canPlay && controller.canSeek)
+        controller.seek(to: 3)
+        #expect(releases.activeCount == 0 && controller.currentTime == 3)
+        for _ in 0..<4 {
+            controller.togglePlayPause()
+            #expect(releases.activeCount == 1)
+            controller.togglePlayPause()
+            #expect(controller.state == .paused && releases.activeCount == 1)
+            controller.togglePlayPause()
+            backend.onEvent?(.finished)
+            #expect(controller.state == .finished && releases.activeCount == 0 && backend.onEvent == nil)
+            #expect(controller.selectedURL == first && controller.duration == 12)
+        }
+        controller.seek(to: 5)
+        #expect(controller.state == .stopped && controller.currentTime == 5 && releases.activeCount == 0)
+        controller.togglePlayPause(); controller.stop()
+        #expect(controller.state == .stopped && releases.activeCount == 0)
+        controller.togglePlayPause(); backend.onEvent?(.outputChanged)
+        #expect(releases.activeCount == 0)
+        controller.togglePlayPause(); backend.onEvent?(.failed(.playbackFailed("test")))
+        #expect(releases.activeCount == 0)
+        controller.close()
+        #expect(releases.activeCount == 0)
+    }
+
+    @Test func lostAccessOnRestartFailsWithoutOpeningAudioAndCanBeRetried() {
+        let backend = FakeBackend(), releases = ReleaseCounter()
+        var denied = false
+        let controller = PlaybackController(fileAccess: FakeAccess(releases: releases, denied: { denied }), makeBackend: { _ in backend })
+        controller.select(first)
+        denied = true
+        controller.togglePlayPause()
+        #expect(controller.state == .failed && backend.playCount == 0 && releases.activeCount == 0)
+        denied = false
+        controller.togglePlayPause()
+        #expect(controller.state == .playing && backend.playCount == 1 && releases.activeCount == 1)
+        controller.stop()
+        denied = true; controller.seek(to: 2)
+        #expect(controller.state == .failed && releases.activeCount == 0)
+    }
 
     @Test func playPauseResumeStopAndReplay() {
         let backend = FakeBackend()
@@ -98,7 +149,7 @@ struct PlaybackControllerTests {
         #expect(controller.selectedURL == first)
         #expect(controller.state == .playing)
         #expect(controller.currentTime == 3)
-        #expect(releases.count == 1)
+        #expect(releases.activeCount == 1)
     }
 
     @Test func inaccessibleFileDoesNotCreatePlayer() {
@@ -126,13 +177,13 @@ struct PlaybackControllerTests {
         controller.select(second)
         controller.togglePlayPause()
         #expect(old.stopCount == 1)
-        #expect(releases.count == 1)
+        #expect(releases.activeCount == 1)
         lateCallback?(.failed(.playbackFailed("古い通知")))
         #expect(controller.state == .playing)
         #expect(controller.error == nil)
         #expect(controller.selectedURL == second)
         controller.close()
-        #expect(releases.count == 2)
+        #expect(releases.activeCount == 0)
         #expect(next.stopCount == 1)
         #expect(controller.state == .empty)
     }
