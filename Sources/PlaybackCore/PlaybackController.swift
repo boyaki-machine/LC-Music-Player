@@ -14,6 +14,8 @@ public final class PlaybackController {
     public private(set) var volume: Float = 0.25
     public private(set) var isMuted = false
     public private(set) var analysisFrame: AnalysisFrame?
+    /// Invalidates cached display state even when analysisFrame was already nil.
+    public private(set) var analysisResetID = UUID()
     public private(set) var analysisConfiguration: AnalysisConfiguration? = try? AnalysisConfiguration()
     @ObservationIgnored private var volumeBeforeMute: Float = 0.25
     @ObservationIgnored public var onNaturalFinish: (@MainActor () -> Void)?
@@ -84,12 +86,15 @@ public final class PlaybackController {
                 analysisFrame = nil
                 message = "一時停止中"
             case .paused:
+                invalidateAnalysis()
+                connectAnalysis()
                 try backend.resume()
                 state = .playing
                 message = "再生中"
             default:
                 guard let selectedURL else { return }
                 lease = try access ?? fileAccess.acquire(selectedURL)
+                connectAnalysis()
                 bindEvents(to: backend)
                 try backend.play()
                 state = .playing
@@ -112,13 +117,14 @@ public final class PlaybackController {
     /// Display implementations choose their resolution/cadence; nil unsubscribes.
     public func configureAnalysis(_ configuration: AnalysisConfiguration?) {
         analysisConfiguration = configuration
-        analysisFrame = nil
+        invalidateAnalysis()
         connectAnalysis()
     }
 
     private func connectAnalysis() {
+        let id = analysisResetID
         backend?.configureAnalysis(analysisConfiguration) { [weak self] frame in
-            guard let self, self.state == .playing else { return }
+            guard let self, self.state == .playing, self.analysisResetID == id else { return }
             self.analysisFrame = frame
         }
     }
@@ -158,7 +164,8 @@ public final class PlaybackController {
             // Idle backends may read while seeking; hold access only for that operation.
             let temporaryAccess = try lease == nil ? selectedURL.map { try fileAccess.acquire($0) } : nil
             defer { withExtendedLifetime(temporaryAccess) {} }
-            analysisFrame = nil
+            invalidateAnalysis()
+            connectAnalysis()
             bindEvents(to: backend)
             try backend.seek(to: target)
             if state == .finished { state = .stopped }
@@ -211,7 +218,7 @@ public final class PlaybackController {
     }
 
     private func endRun() {
-        analysisFrame = nil
+        invalidateAnalysis()
         let started = ContinuousClock.now
         let hadAccess = lease != nil
         selectionID = UUID()
@@ -222,4 +229,6 @@ public final class PlaybackController {
         lease = nil
         if hadAccess { logger.notice("Active file access released after \(String(describing: started.duration(to: .now)), privacy: .public)") }
     }
+
+    private func invalidateAnalysis() { analysisFrame = nil; analysisResetID = UUID() }
 }

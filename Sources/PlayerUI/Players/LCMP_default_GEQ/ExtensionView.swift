@@ -62,7 +62,13 @@ public struct ExtensionView: View {
                 case .playlist: playlistContent
                 case .source: sourceContent
                 case .visualization:
-                    VStack(alignment: .leading, spacing: 12) { Text("可視化"); Text("音声解析とデザイン切替は準備中です。").foregroundStyle(.secondary); Spacer() }
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(LCMPDefaultGEQ.name)
+                        Text("16列の周波数レベルを、緑・黄・赤のLEDで表示します。")
+                        Text("セルごとに点灯し、消灯後は淡い残光が消えていきます。音量やミュートを変えても表示は音源のレベルに反応します。")
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
                 case .settings:
                     VStack(alignment: .leading, spacing: 12) {
                         Text("再生と表示")

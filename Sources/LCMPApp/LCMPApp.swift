@@ -79,6 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if mainWindow.isMiniaturized { mainWindow.deminiaturize(nil) }
         arrange()
         mainWindow.makeKeyAndOrderFront(nil)
+        setVisualizationVisible(true)
         if presentation.extensionVisible { mainWindow.addChildWindow(extensionWindow, ordered: .above); extensionWindow.orderFront(nil) }
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -99,11 +100,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if notification.object as? NSWindow === mainWindow { arrange() }
     }
     func applicationDidChangeScreenParameters(_ notification: Notification) { arrange() }
-    func windowWillMiniaturize(_ notification: Notification) { extensionWindow.orderOut(nil); presentation.closeOverlays() }
+    func windowWillMiniaturize(_ notification: Notification) { extensionWindow.orderOut(nil); presentation.closeOverlays(); setVisualizationVisible(false) }
     func windowDidDeminiaturize(_ notification: Notification) { showPlayer() }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender === extensionWindow { if presentation.extensionVisible { toggleExtension() }; return false }
         extensionWindow.orderOut(nil)
+        setVisualizationVisible(false)
         presentation.closeOverlays()
         return true
     }
@@ -117,10 +119,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         shutdownLog.notice("Application accepted termination request")
         activePanel?.cancel(nil)
         presentation.closeOverlays()
+        setVisualizationVisible(false)
         library.shutdown()
         return .terminateNow
     }
     func applicationWillTerminate(_ notification: Notification) {
+        setVisualizationVisible(false)
         library.shutdown()
         if let quitRequestedAt { shutdownLog.notice("Application will terminate after \(String(describing: quitRequestedAt.duration(to: .now)), privacy: .public)") }
     }
@@ -128,6 +132,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         quitRequestedAt = .now
         shutdownLog.notice("Quit command received")
         NSApp.terminate(self)
+    }
+
+    private func setVisualizationVisible(_ visible: Bool) {
+        presentation.visualizationVisible = visible
+        let configuration = visible ? LCMPDefaultGEQ.configuration : nil
+        if playback.analysisConfiguration != configuration { playback.configureAnalysis(configuration) }
     }
 
     @objc private func chooseFile() { selectSources(folder: false) }

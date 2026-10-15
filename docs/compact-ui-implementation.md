@@ -4,22 +4,25 @@
 
 ## 構成
 
+現在の実装名は`LCMP_default_GEQ`とし、画面・操作・可視化を`Sources/PlayerUI/Players/LCMP_default_GEQ/`の1つのフォルダ配下へまとめる。可視化は内部の`Visualization/`に置く。`PlayerUI/PlayerView.swift`はアプリ向けの入口として実装Viewを呼び出す。テストは`Tests/PlayerUITests/Players/LCMP_default_GEQ/`へまとめる。全体の配置と追加規約は[Player UI・可視化の開発ガイド](./playerUI_developers.md)を参照する。
+
 | 要素 | 責務 |
 | --- | --- |
 | `LCMPApp/AppDelegate` | AppKitのアプリメニュー、ウィンドウの生成・開閉・配置、NSOpenPanel |
-| `PlayerUI/PlayerView` | 360×210ptのメイン、144ptの表示領域、6つの44pt操作、シークと音量 |
+| `PlayerUI/PlayerView` | アプリ向け入口。`LCMPDefaultGEQPlayerView`へ依存を渡す |
+| `LCMPDefaultGEQPlayerView` | 360×210ptのメイン、144ptの表示領域、6つの44pt操作、シークと音量 |
 | `PlayerPresentation` | シーク・音量・拡張の表示状態、拡張画面の選択領域 |
 | `ExtensionView` | 現在リスト、音源、表示、設定と詳細エラーの表示 |
 | `LibraryControls` | 共通グラス、薄い塗りのボタン、細いスクローラー、現在曲の初期表示、拡張の高さ変更と追加済み表示 |
 | `NativeControls` | 背景マテリアル、表示領域の移動操作、キーボードと支援技術に対応したスライダー |
 | `WindowLayout` | 画面の可視領域内にメインと直下の拡張を配置する計算 |
-| `Visualization/Placeholder` | 音声解析を行わない静的な表示領域 |
+| `Visualization/PlaybackVisualization` | 実解析の時刻・世代・再生状態とVisualizationKitの接続 |
 
 メインはタイトルバーのない透明なAppKitウィンドウで、SwiftUIをNSHostingViewに載せる。メインと拡張の角丸は12pt。操作背景は暗いNSVisualEffectViewと半透明チャコールを重ねる。透明度を下げるアクセシビリティ環境では背景マテリアルを隠し、チャコールを不透明にする。
 
 三角は常設し、再生中は緑PLAY、一時停止中は琥珀PAUSE、それ以外は消灯に近いSTOPを表示する。操作名は再生／一時停止／再開へ追従する。短い入力反応は220msで消灯する。音量とメニューは開いている間点灯する。利用できない前後曲は無効で、発光・曲変更を行わない。
 
-現在リストと音源管理は`LibraryController`へ接続し、前後曲・順次再生・複数リストの編集を扱う。拡張の詳細は[ライブラリ・プレイリストの実装設計](./library-implementation.md)を参照する。音声解析・可視化デザインの切替は、その機能が提供する境界へ接続する。静的な表示領域を再生音に反応した可視化として表示しない。
+現在リストと音源管理は`LibraryController`へ接続し、前後曲・順次再生・複数リストの編集を扱う。拡張の詳細は[ライブラリ・プレイリストの実装設計](./library-implementation.md)を参照する。表示領域は実解析を16列の蛍光管LEDへ渡す。表示タブは現在のデザインを説明し、単一候補の選択UIを置かない。時刻・残光・欠落・寿命は[可視化の実装設計](./visualization-implementation.md)に記載する。
 
 ## ウィンドウ操作
 

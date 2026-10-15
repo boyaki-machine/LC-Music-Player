@@ -17,6 +17,13 @@ public final class PlayerPresentation {
     public private(set) var extensionVisible = false
     public var section: ExtensionSection = .playlist
     public var selectingFile = false
+    @ObservationIgnored public let visualizationDriver = VisualizationDriver()
+    public var visualizationVisible = true {
+        didSet {
+            // Stop immediately, even if an ordered-out hosting view no longer updates.
+            if !visualizationVisible { visualizationDriver.synchronize(activity: .inactive, visible: false) }
+        }
+    }
     public init(seekHideDelay: Duration = .seconds(2)) { self.seekHideDelay = seekHideDelay }
     public func cancelSeekHide() { seekHideTask?.cancel(); seekHideTask = nil }
     public func scheduleSeekHide() {
