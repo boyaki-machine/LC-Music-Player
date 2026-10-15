@@ -3,6 +3,21 @@ import Testing
 @testable import PlayerUI
 
 struct WindowLayoutTests {
+    @Test @MainActor func seekHidesAfterDisengagementAndInteractionCancelsOldTimer() async throws {
+        let model = PlayerPresentation(seekHideDelay: .milliseconds(80))
+        model.seekVisible = true; model.cancelSeekHide()
+        try await Task.sleep(for: .milliseconds(130))
+        #expect(model.seekVisible)
+        model.scheduleSeekHide()
+        try await Task.sleep(for: .milliseconds(130))
+        #expect(!model.seekVisible)
+        model.seekVisible = true
+        model.closeOverlays()
+        model.seekVisible = true; model.cancelSeekHide()
+        try await Task.sleep(for: .milliseconds(130))
+        #expect(model.seekVisible)
+        model.closeOverlays()
+    }
     @Test func extensionFitsBelowAtScreenEdgesAndNegativeCoordinates() {
         for screen in [CGRect(x: 0, y: 0, width: 1440, height: 900), CGRect(x: -1280, y: -200, width: 1280, height: 800)] {
             for origin in [CGPoint(x: screen.minX - 50, y: screen.minY), CGPoint(x: screen.maxX, y: screen.maxY)] {
@@ -28,6 +43,29 @@ struct WindowLayoutTests {
         #expect(screen.contains(result.extensionWindow))
         #expect(result.extensionWindow.height == 238)
         #expect(!result.main.intersects(result.extensionWindow))
+    }
+    @Test func verticalResizeKeepsTopWidthAndGapWithinScreen() {
+        let screen = CGRect(x: -1280, y: -200, width: 1280, height: 900)
+        let main = CGRect(x: -800, y: 450, width: 360, height: 210)
+        for proposed in [CGFloat(100), 300, 500, 2000, .nan] {
+            let height = WindowLayout.resizedExtensionHeight(proposed, main: main, visible: screen)
+            let result = WindowLayout.frames(main: main, visible: screen, expanded: true, extensionHeight: height)
+            #expect(result.main == main)
+            #expect(result.extensionWindow.width == main.width)
+            #expect(result.extensionWindow.maxY == main.minY - WindowLayout.gap)
+            #expect(screen.contains(result.extensionWindow))
+            #expect(result.extensionWindow.height >= WindowLayout.minimumExtensionHeight)
+        }
+        let taller = WindowLayout.frames(main: main, visible: screen, expanded: true, extensionHeight: 500)
+        #expect(taller.extensionWindow.height == 500)
+        #expect(WindowLayout.resizedExtensionHeight(100, main: main, visible: screen) == 240)
+        #expect(WindowLayout.resizedExtensionHeight(2000, main: main, visible: screen) == 648)
+        let short = CGRect(x: 0, y: 0, width: 800, height: 400)
+        let clipped = WindowLayout.frames(main: main, visible: short, expanded: true, extensionHeight: 500)
+        #expect(clipped.extensionWindow.height == 188)
+        #expect(short.contains(clipped.extensionWindow))
+        let restored = WindowLayout.frames(main: taller.main, visible: screen, expanded: true, extensionHeight: 500)
+        #expect(restored == taller)
     }
     @Test @MainActor func menuReopensCurrentListAndOverlaysAreIndependent() {
         let model = PlayerPresentation()

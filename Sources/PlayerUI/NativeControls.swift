@@ -69,6 +69,7 @@ struct NativeSlider: NSViewRepresentable {
     let label: String
     var commit: (() -> Void)? = nil
     var cancel: (() -> Void)? = nil
+    var focusChanged: ((Bool) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSSlider {
@@ -77,12 +78,13 @@ struct NativeSlider: NSViewRepresentable {
         slider.minValue = range.lowerBound; slider.maxValue = range.upperBound; slider.doubleValue = value
         slider.target = context.coordinator; slider.action = #selector(Coordinator.changed(_:))
         slider.isVertical = vertical
-        slider.focusOnAttach = true
+        slider.focusOnAttach = vertical
         slider.isEnabled = context.environment.isEnabled
         slider.isContinuous = true
         slider.controlSize = .small
         slider.onCommit = { context.coordinator.parent.commit?() }
         slider.onCancel = { context.coordinator.parent.cancel?() }
+        slider.onFocusChanged = { context.coordinator.parent.focusChanged?($0) }
         slider.setAccessibilityLabel(label)
         return slider
     }
@@ -103,6 +105,15 @@ struct NativeSlider: NSViewRepresentable {
         var onCommit: (() -> Void)?
         var focusOnAttach = false
         var onCancel: (() -> Void)?
+        var onFocusChanged: ((Bool) -> Void)?
+        override func becomeFirstResponder() -> Bool {
+            let result = super.becomeFirstResponder()
+            if result { onFocusChanged?(true) }; return result
+        }
+        override func resignFirstResponder() -> Bool {
+            let result = super.resignFirstResponder()
+            if result { onFocusChanged?(false) }; return result
+        }
         override var acceptsFirstResponder: Bool { isEnabled }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
@@ -187,7 +198,7 @@ final class VolumeOutsideClickHandler {
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
             MainActor.assumeIsolated {
                 guard let self, let popup = self.popup else { return }
-                func contains(_ view: NSView?) -> Bool {
+                @MainActor func contains(_ view: NSView?) -> Bool {
                     guard let view, let window = view.window, event.window === window else { return false }
                     return view.bounds.contains(view.convert(event.locationInWindow, from: nil))
                 }
