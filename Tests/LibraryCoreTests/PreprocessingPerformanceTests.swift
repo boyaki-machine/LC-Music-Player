@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 import Testing
 import PlaybackCore
+import PreprocessingCore
 @testable import LibraryCore
 
 @Suite(.serialized) @MainActor struct PreprocessingPerformanceTests {
@@ -132,6 +133,94 @@ import PlaybackCore
         try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted,.sortedKeys])
             .write(to: URL(fileURLWithPath: directory).appendingPathComponent("normalization-profile.json"))
     }
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_PLAYLIST_SOAK"] == "1"))
+    func tenMinutePlaylistSweepWithPlaybackInterruptions() async throws {
+        let root = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_FIXTURES"]))
+        let suite = "lcmp-playlist-soak-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "normalizeVolume"); defaults.set(true, forKey: "measureMaximumVolume")
+        let processor = AudioPreprocessor(cache: .init(url: root.appendingPathComponent("cache-\(UUID())/measurements.sqlite"),
+            program: .init(applicationVersion: "soak", build: "1", executableDigest: "playlist-soak", environment: "test")))
+        let refs = TestReferences(), playback = PlaybackController(); playback.setVolume(0)
+        playback.configureAnalysis(try .init(bandCount: 16, framesPerSecond: 30))
+        let model = LibraryController(playback: playback, store: MemoryStore(), references: refs, preprocessingEnabled: true,
+            playlistPreprocessingEnabled: true, preferences: defaults, preprocessor: processor)
+        defer { model.shutdown() }
+        let list = try #require(model.document.currentPlaylistID)
+        await model.importFiles([root.appendingPathComponent("tone.wav"), root.appendingPathComponent("tone.flac")], into: list)
+        let backgroundList = try #require(model.createPlaylist("background"))
+        model.playPlaylist(list)
+        let readyDeadline = now() + 10
+        while playback.state != .playing, now() < readyDeadline { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(playback.state == .playing && model.currentTrackMetrics != nil)
+        let duration = Double(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_SOAK_SECONDS"] ?? "600") ?? 600
+        let started = now(), cpuStart = cpu()
+        var nextWork = started + 2, nextSample = started + 10
+        var transitions = 0, measuredFrames = 0, maxDrop: UInt64 = 0
+        var generation: UUID?, sequence: UInt64 = 0
+        var samples: [[String: Double]] = [], latencies: [[String: Double]] = []
+        func observeFrame() {
+            if let frame = playback.analysisFrame {
+                if frame.generation != generation || frame.sequence != sequence {
+                    measuredFrames += 1; generation = frame.generation; sequence = frame.sequence
+                }
+                maxDrop = max(maxDrop, frame.droppedBuffers)
+            }
+        }
+        while now() - started < duration {
+            try await Task.sleep(for: .milliseconds(20)); observeFrame()
+            #expect(playback.error == nil && model.error == nil)
+            if now() >= nextWork {
+                let before = await processor.statistics().levelScans
+                let url = root.appendingPathComponent("background-\(UUID()).flac")
+                // APFS clones keep fixture blocks shared with independent file identity/revision.
+                // Refuse to fall back to hard links, whose ctime changes invalidate every alias.
+                guard clonefile(root.appendingPathComponent("large.flac").path, url.path, 0) == 0 else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
+                await model.importFiles([url], into: backgroundList)
+                let scanDeadline = now() + 5
+                while await processor.statistics().levelScans <= before, now() < scanDeadline {
+                    try await Task.sleep(for: .milliseconds(5)); observeFrame()
+                }
+                #expect(await processor.statistics().levelScans > before)
+                try await Task.sleep(for: .milliseconds(400)); observeFrame()
+                #expect(playback.state == .playing && model.currentTrackMetrics != nil)
+                let request = now()
+                if model.canNext { model.next() } else { model.playPlaylist(list) }
+                let retiring = model.playlistWorkRetirement
+                await retiring?.value
+                let retiredAt = now()
+                let playDeadline = now() + 5
+                while (model.isPreparing || playback.state != .playing), now() < playDeadline {
+                    try await Task.sleep(for: .milliseconds(2)); observeFrame()
+                }
+                #expect(playback.state == .playing && model.currentTrackMetrics != nil && model.error == nil)
+                latencies.append(["retirementSeconds": retiredAt-request, "requestToPlayingSeconds": now()-request])
+                transitions += 1; nextWork += 6
+            }
+            if now() >= nextSample {
+                let sample = ["seconds": now()-started, "rssMiB": rss(), "cpuSeconds": cpu()-cpuStart]
+                samples.append(sample); print("PLAYLIST_CHECKPOINT \(sample)"); fflush(nil); nextSample += 10
+            }
+        }
+        model.stop()
+        let deadline = now() + 5
+        while refs.scopes.active != 0, now() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        let stats = await processor.statistics()
+        #expect(refs.scopes.active == 0 && refs.scopes.maximum <= 2 && !model.isPreparing)
+        #expect(maxDrop == 0 && measuredFrames > Int(duration * 15) && transitions >= Int(duration / 6)-1)
+        #expect(stats.levelScans >= transitions + 2)
+        let warmed = samples.filter { $0["seconds", default: 0] >= 60 }.compactMap { $0["rssMiB"] }
+        if duration >= 600 { #expect((warmed.max() ?? 0) - (warmed.min() ?? 0) < 10) }
+        let report: [String: Any] = ["seconds": now()-started, "cpuPercentOfOneCore": (cpu()-cpuStart)/(now()-started)*100,
+            "maxScopes": refs.scopes.maximum, "postStopScopes": refs.scopes.active, "transitions": transitions,
+            "analysisFrames": measuredFrames, "droppedBuffers": maxDrop, "levelScans": stats.levelScans,
+            "cacheHits": stats.cacheHits, "cacheWriteFailures": stats.cacheWriteFailures, "samples": samples, "interruptions": latencies]
+        try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+            .write(to: root.appendingPathComponent("playlist-soak.json"))
+    }
+
 }
 private func now() -> Double { AVAudioTime.seconds(forHostTime: mach_absolute_time()) }
 private func cpu() -> Double {

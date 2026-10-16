@@ -102,7 +102,7 @@ public struct ExtensionView: View {
                             }
                             Toggle("最大音量を測定", isOn: Binding(get: { library.measuresMaximumVolume },
                                 set: { library.setMeasuresMaximumVolume($0) }))
-                            Text("曲全体の最大サンプル音量を測定します。再生音量は変更しません。")
+                            Text("最大サンプル音量を表示します。リストの曲は背景でも測定し、再生音量は変更しません。")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             switch library.peakMeasurement {
                             case .disabled: EmptyView()

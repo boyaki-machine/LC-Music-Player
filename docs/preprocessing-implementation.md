@@ -17,11 +17,11 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 `PreprocessingCore`はFoundation、AVFAudio、固定版SFBAudioEngineに依存し、LibraryCore、PlaybackCore、UIには依存しない。`AudioDecoderFactory`はここで共有し、PlaybackCoreからも参照できる。特定の短いM4Aでopen時にeofErrが生じる場合のAVAudioFile互換デコーダを維持し、既知の末尾位置では長さ0の正常な読み取りを返す。
 
-`AudioPreprocessing`は先頭準備・測定・Auditの非同期境界で、取消を確認して戻るまで呼出側がファイルアクセスを保持する。アプリは永続キャッシュを設定したAudioPreprocessorを`LibraryController(preprocessingEnabled: true, preprocessor: ...)`へ注入する。`false`は同期操作の互換経路であり、注入した再生バックエンドの単体検証等に使う。単曲再生の同期APIは残すが、アプリのリスト選択・再生開始は背景準備を経由する。
+`AudioPreprocessing`は先頭準備・測定・Auditの非同期境界で、取消を確認して戻るまで呼出側がファイルアクセスを保持する。アプリは永続キャッシュを設定したAudioPreprocessorを`LibraryController(preprocessingEnabled: true, playlistPreprocessingEnabled: true, preprocessor: ...)`へ注入する。`playlistPreprocessingEnabled`の既定はfalseで、独立した呼出元や既存の単曲/次曲検証に出力形式依存の全リスト巡回を暗黙に追加しない。`false`は同期操作の互換経路であり、注入した再生バックエンドの単体検証等に使う。単曲再生の同期APIは残すが、アプリのリスト選択・再生開始は背景準備を経由する。
 
 ## 先頭バッファと再生への移譲
 
-- 対象は、現在再生リストの現在エントリの直後1件だけ。別リストの閲覧では対象を変更しない。
+- 先頭PCMを保持する対象は、現在再生リストの現在エントリの直後1件だけ。全曲測定の巡回とは先行枠を共有する。別リストの閲覧では対象を変更しない。
 - `AudioPreprocessor.prepare`はデコーダを背景で開き、最大2秒または32MiBの先に達した量まで、元のprocessingFormatでPCMを読む。全ファイルをメモリへ読み込まない。上限は先頭PCMの確保量であり、デコーダ内部・最大8192フレームの作業バッファは別に必要になる。
 - `PreparedAudio`はファイル識別情報、時間、シーク可否、確保量と、一度だけ取得できるデコーダを持つ。ロックは所有権の移譲に使い、同じデコーダを複数スレッドで操作する許可にはしない。
 - `PrefixDecoder`は外向きのpositionを0から開始する。キャッシュ済みPCMを返し、その直後から同じデコーダの読み取りを続ける。再openと再走査を挟まない。
@@ -34,7 +34,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 ## 全曲最大音量
 
-設定「最大音量を測定」は既定OFFで、UserDefaultsの`measureMaximumVolume`へ保存する。ONのときだけ、現在曲と準備した次曲を測定する。この設定は音量調整の有効化ではない。
+設定「最大音量を測定」は既定OFFで、UserDefaultsの`measureMaximumVolume`へ保存する。ONのときに現在曲の測定値を公開する。この設定は音量調整の有効化ではない。アプリのリスト巡回はこの設定と独立し、OFFでもLUFS・true peak・sample peakを事前測定して保存する。
 
 測定値は全チャンネル・全フレームの絶対値最大、すなわちsample peakである。線形値と`20 log10(peak)`のdBFSを提供する。無音は線形0、dBFSは負の無限大。LUFS、true peak、聴感上の音量一致の指標にはしない。
 
@@ -52,7 +52,21 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 将来のEQ併用時は、補正用測定でも形式変換と同じ設定のEQを適用し、レベル自動調整段へ入る音声を測る。EQの有効状態・設定・実装版をprofileへ含め、変更時は再測定する。手動音量・ミュートと純粋な同期用ディレイは測定後の処理であり、その変更では全曲測定を取り直さない。これらの加工段は[後処理の構成と順序](./audio-processing-design.md)に従う。
 
-自動調整ONでは測定完了を再生開始条件とし、OFFでは従来の測定待ちなし経路を維持する。現在曲と直後1曲だけを対象にし、同じsource/profileの要求は合流し、条件が一致した永続結果があれば全曲scanを省く。mono/stereo変換、短い曲、gating対象なし、true-peak補間の末尾、資源上限と再生要求の優先順位は[拡張設計](./audio-processing-design.md)に従う。
+自動調整ONでは測定完了を再生開始条件とし、OFFでは従来の測定待ちなし経路を維持する。先頭準備は直後1曲に限定し、全曲測定はプレイリスト所属曲を順次巡回する。同じsource/profileの要求は合流し、条件が一致した永続結果があれば全曲scanを省く。mono/stereo変換、短い曲、gating対象なし、true-peak補間の末尾、資源上限と再生要求の優先順位は[拡張設計](./audio-processing-design.md)に従う。
+
+## プレイリストの事前測定
+
+`LibraryCore.PlaylistPreprocessing`は、保存に成功した全プレイリストに含まれる音源を一件ずつ処理する。正常起動/復元、曲追加・M3U8インポート・リスト編集・参照修復と再生状態の変更で候補を再評価する。ライブラリ登録だけでどのリストにも属さない音源は巡回しない。インポート中は巡回を始めず、登録用アクセスの寿命が終わってから開始する。
+
+優先順位は、明示的な再生要求、再生中の現在曲、直後、直前、現在リストの残り、他リストの保存順とする。リスト端は折り返さず、同じtrackIDの重複行を除く。別IDの同じsource/profileは既存cache照合と所有対応を使う。閲覧中のリストでは再生リストを変更しない。既存の`measureLevels`から有効cacheを検索し、未測定ならLUFS・true peak・sample peakを一走査で求める。補正ON/OFFと測定値の表示ON/OFFは巡回の開始条件ではなく、補正OFFの音声経路と設定値はそのまま維持する。
+
+次曲の先頭準備と巡回は同じ先行枠を使う。次曲測定が終わって他曲へ進むときは先頭PCM・decoder・leaseを解放し、完了測定値はSQLiteに残す。巡回中の次曲再生では先頭だけを再準備する。一巡後、再生が続いていれば直後曲の先頭準備を戻す。全曲分のPCMやTaskを保持しない。現在曲の測定は再生leaseを共有し、先行leaseは一つまで、合計最大2を維持する。
+
+再生要求と同じtrackID/参照/profileの巡回中処理は、Task・取消token・測定状態・leaseを再生側へ移す。先頭がない要求では同じleaseで先頭を追加準備する。異なる要求は背景処理を取消し、その終了を待ってから枠を使う。OFFの再生を全曲測定完了まで待たせない。
+
+完了/失敗した候補は巡回内で記録し、破損・参照切れ・保存不可を高速に再試行しない。失敗しても後続を続け、現在の再生は止めない。参照修復/新しい編集、出力profileや音源属性の変更、次の正常起動で再評価する。出力identity/レート/チャンネル構成はCore Audioの通知で観測し、UIのないアイドル巡回中でも旧profileの処理を無効化する。未対応profileでは巡回を見送り、通常再生を制限しない。最大音量の表示を有効にした場合は、現在曲のnative sample peak専用経路を維持する。
+
+Stop・一時停止・末尾終了・終了は巡回と出力監視も止める。Stop直後には自動再開せず、再生または新しい編集/追加で再開する。完了値は永続cacheに残し、停止後の基盤I/O終了時にはlease0、一時停止では再生leaseだけを保持する。進捗バー・スピナー・割合・残り時間は追加しない。
 
 ## キュー、取消とファイルアクセス
 
@@ -79,3 +93,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 5. `LCMP_UI_SNAPSHOTS=<出力先>`で設定のON/OFFを最小240ptの拡張画面へ描き、説明が読めることを確認する。ビルドは`python3 scripts/build-app.py --output build/preprocessing-verified/LCMP.app`等で別出力し、起動中bundleを置換しない。
 
 利用者向け開始時間・CPUの評価はReleaseで行う。`scripts/build-app.py`は既定Release、Debugは`--configuration debug`で明示する。`NextPreparationTests`は非同期workerの返却を制御し、測定未完了／先頭未完了の同じ要求が一度だけ実行されること、手動／自然送り、停止、保存失敗、別エントリ、削除、設定変更とlease最大2を確認する。`LCMP_NEXT_PROMOTION_PROFILE=1 LCMP_PREPROCESS_FIXTURES=<生成したstartup音源ディレクトリ>`で大容量FLACの走査中引き継ぎを実測する。予定初回renderのhost時刻と解析PCM dropを、物理出音や音声ringの供給不足と混同しない。
+
+`PlaylistPreprocessingTests`は固定profileと待機可能なworkerで、順位・全リスト巡回・重複・失敗後続・測定中の移譲・割込み退役・音源/profile失効・永続再利用・追加と停止を検証する。実出力と巡回負荷は専用の一時cache/独自音源を使い、実ユーザーの保存領域を検証対象にしない。
+
+`LCMP_PLAYLIST_SOAK=1 LCMP_PREPROCESS_FIXTURES=<独自音源の専用領域> ./scripts/swift.sh test --configuration release --disable-automatic-resolution --no-parallel --filter tenMinutePlaylistSweepWithPlaybackInterruptions`で、600秒のリスト巡回と再生割込みを実行する。領域には独自生成の`tone.wav`・`tone.flac`（60秒）と`large.flac`（600秒）を置く。APFSのclonefileで独立した音源識別子を持つ複製を追加し、走査開始から400ms後に再生を切り替える。専用の一時SQLiteを使い、`playlist-soak.json`へCPU・RSS・解析drop・最大lease・停止後解放と、背景取消の退役時間／要求からplayingまでを分けて記録する。先頭準備だけの費用や物理出音時刻とは区別する。性能実行中は別のSwift build/testを動かさない。
