@@ -23,7 +23,7 @@ macOS上のネイティブアプリとし、iPhone版にも共用できるよう
 
 ## ローカルで起動する
 
-macOS 14以降、Swift 6.2以降に対応するXcode／Command Line Tools、Python 3を使用します。
+macOS 14以降、Swift 6.2以降に対応するXcode／Command Line Tools、Python 3.9以降を使用します。
 
 ```sh
 make release

@@ -31,4 +31,5 @@ archive: release
 	  printf '%s\n' "$(ARCHIVE)"
 
 test:
+	$(PYTHON) scripts/test_acknowledgements.py
 	LCMP_TEST_AUDIO_OUTPUT=0 ./scripts/swift.sh test --no-parallel
