@@ -73,6 +73,33 @@ public struct ExtensionView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("再生と表示")
+                            Toggle("曲ごとの音量をそろえる", isOn: Binding(get: { library.normalizesVolume },
+                                set: { library.setNormalizesVolume($0) }))
+                            Text("曲全体の音量とピークを測定して補正します。未測定の曲は再生前に待ちます。設定変更時は一時停止します。")
+                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            if library.normalizesVolume {
+                                Picker("目標音量", selection: Binding(get: { library.normalizationSettings.targetLUFS },
+                                    set: { library.setNormalizationTarget($0) })) {
+                                    Text("基準 −23 LUFS").tag(-23.0)
+                                    Text("−18 LUFS").tag(-18.0)
+                                    Text("−16 LUFS").tag(-16.0)
+                                }
+                                switch library.levelMeasurement {
+                                case .disabled: EmptyView()
+                                case .pending: Text("音量補正：未測定／準備待ち").foregroundStyle(.secondary)
+                                case .failed: Text("音量を測定できません。対象曲を選び直して再試行してください。").foregroundStyle(.orange)
+                                case .complete(let result):
+                                    Text(result.levels.loudness.value.map { String(format: "全曲音量：%.1f LUFS", $0) } ?? "全曲音量：無音／測定対象外")
+                                    Text(result.levels.truePeak == 0 ? "ピーク：無音" : String(format: "ピーク：%.1f dBTP", result.levels.truePeakDBTP))
+                                }
+                                if let plan = playback.normalizationPlan {
+                                    Text(String(format: "補正：%+.1f dB", plan.gainDB))
+                                    if plan.constraint == .peakLimited || plan.constraint == .boostLimited {
+                                        Text("ピークまたは増幅上限により、目標より小さく再生します。")
+                                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
                             Toggle("最大音量を測定", isOn: Binding(get: { library.measuresMaximumVolume },
                                 set: { library.setMeasuresMaximumVolume($0) }))
                             Text("曲全体の最大サンプル音量を測定します。再生音量は変更しません。")
@@ -93,7 +120,7 @@ public struct ExtensionView: View {
 
                 }
             }.font(.system(size: 12)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            if library.isPreparing { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("再生を準備しています…").font(.system(size: 11)) } }
+            if library.isPreparing { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(library.preparationStage ?? "再生を準備しています…").font(.system(size: 11)) } }
             if library.isBusy { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("音源を登録しています…").font(.system(size: 11)) } }
             if let notice = library.error ?? library.message ?? playback.error?.localizedDescription {
                 HStack(alignment: .top, spacing: 4) {

@@ -9,11 +9,13 @@
 ```text
 SFBAudioEngine source
     → 形式変換mixer → 観測ノード ──→ PCMコピー → 有界キュー → FFTワーカー → 最新結果 → 表示側
-    → 将来の音声加工・同期遅延段
+    → 音量自動調整gain → 将来の同期遅延段
     → mainMixer（アプリ音量）→ OS出力
 ```
 
 現在の観測ノードは`AVAudioUnitEQ(numberOfBands: 0)`です。フィルターはなく、globalGainは0dBです。公開AudioUnitへのレンダー通知を使用するために置き、音声イコライザーの利用者向け機能は提供しません。観測側の形式はmainMixerの出力レート・チャンネル数に対応する標準Float32 PCMです。前段のmixerが音源から出力形式へ変換し、後段mainMixerと同じ形式を使って不要な追加レート変換を避けます。SFBの初期source形式は変更せず、デコーダと内部ring bufferの形式変更をSFB自身へ委ねます。SFBAudioEngineの`modifyProcessingGraph`内でsourceとmainMixerの間だけを変更し、engineを直接開始・停止しません。
+
+[音量自動調整](./audio-processing-design.md)では、この観測ノードの後に専用gain段を置く。観測用EQのgainは変更せず、解析の購読解除でも自動補正は継続させる。可視化の解析値と、LUFS/true peakによる出力補正の測定値・状態は別のデータとして扱う。自動調整ONでは、共通の形式変換を行うProfileDecoderの出力を観測する。gain段は購読解除中も維持する。
 
 通知はpost-renderかつエラーがない場合だけ処理し、音声データを変更せずコピーします。Float32非interleavedを受け取り、monoは左右へ同じ値、2ch以上は出力形式の先頭2chを解析します。全チャンネルのサラウンド解析ではありません。解析はアプリ音量・ミュートより前なので、音量ゼロでも音源のレベルを返します。
 

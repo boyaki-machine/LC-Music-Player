@@ -24,6 +24,7 @@ import LibraryCore
         defer { window.orderOut(nil); window.contentView = nil }
         for enabled in [false, true] {
             library.setMeasuresMaximumVolume(enabled)
+            library.setNormalizesVolume(enabled)
             host.layoutSubtreeIfNeeded(); host.display()
             try await Task.sleep(for: .milliseconds(60))
             #expect(host.fittingSize.width <= 360 && host.fittingSize.height <= 240)

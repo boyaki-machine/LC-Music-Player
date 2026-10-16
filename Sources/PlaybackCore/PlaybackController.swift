@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import OSLog
 import AnalysisCore
+import AudioProcessingCore
 
 @Observable
 @MainActor
@@ -13,6 +14,16 @@ public final class PlaybackController {
     public private(set) var message = "音楽ファイルを選択してください。"
     public private(set) var volume: Float = 0.25
     public private(set) var isMuted = false
+    public private(set) var normalizationRequired = false
+    public var normalizationPlan: NormalizationPlan? { normalizationReady ? backend?.normalizationPlan : nil }
+    @ObservationIgnored private var normalizationReady = false
+
+    public func requireNormalization(_ enabled: Bool) {
+        if state == .playing { togglePlayPause() }
+        normalizationRequired = enabled
+        normalizationReady = false
+        if !enabled { backend?.clearNormalization() }
+    }
     public private(set) var analysisFrame: AnalysisFrame?
     /// Invalidates cached display state even when analysisFrame was already nil.
     public private(set) var analysisResetID = UUID()
@@ -92,12 +103,15 @@ public final class PlaybackController {
     /// A completed background preparation enters the same transactional selection path.
     @discardableResult
     public func selectPrepared(_ prepared: PreparedAudio, using access: FileLease,
+                               metrics: TrackAudioMetrics? = nil, settings: NormalizationSettings = .standard,
                                committing: () throws -> Void = {}) -> Bool {
         do {
-            let next = try SFBAudioBackend(prepared: prepared)
+            guard !normalizationRequired || metrics != nil else { throw AudioProcessingFailure.missingPlan }
+            let next = try SFBAudioBackend(prepared: prepared, metrics: metrics, settings: settings)
             do { try committing() } catch { next.stop(); throw error }
             endRun()
             backend = next
+            normalizationReady = metrics != nil
             lease = access
             selectedURL = prepared.source.url
             duration = next.duration
@@ -121,6 +135,7 @@ public final class PlaybackController {
     public func togglePlayPause(using access: FileLease? = nil) {
         guard let backend else { return }
         do {
+            if state != .playing, normalizationRequired, !normalizationReady { throw AudioProcessingFailure.missingPlan }
             switch state {
             case .playing:
                 try backend.pause()
@@ -266,6 +281,7 @@ public final class PlaybackController {
     }
 
     private func endRun() {
+        normalizationReady = false
         invalidateAnalysis()
         let started = ContinuousClock.now
         let hadAccess = lease != nil

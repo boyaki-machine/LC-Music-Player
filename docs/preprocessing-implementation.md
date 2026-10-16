@@ -4,6 +4,8 @@
 
 前処理は、音源参照と[単曲再生](./playback-implementation.md)の間で、再生に使う先頭PCMと全曲の最大サンプル音量を準備する。再生音のゲインや周波数特性は変更しない。[リアルタイム周波数解析](./analysis-implementation.md)は再生経路のPCMを観測する別機能である。
 
+本書のAPIと動作は現行実装を記述する。Integrated LUFS・true peakの全曲測定と、自動調整ON時の再生待ちは[音量自動調整と前処理拡張](./audio-processing-design.md)を参照する。sample peak専用APIも互換機能として維持する。
+
 ## 構成と境界
 
 ```text
@@ -24,7 +26,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 - `PreparedAudio`はファイル識別情報、時間、シーク可否、確保量と、一度だけ取得できるデコーダを持つ。ロックは所有権の移譲に使い、同じデコーダを複数スレッドで操作する許可にはしない。
 - `PrefixDecoder`は外向きのpositionを0から開始する。キャッシュ済みPCMを返し、その直後から同じデコーダの読み取りを続ける。再openと再走査を挟まない。
 - SFBAudioEngineは要求より短い読み取りをEOFと解釈する。キャッシュ境界では同じ呼び出しのバッファをファイル本体のPCMで満たし、境界を途中の短い読み取りとして返さない。波形・順番・フレーム数は変更しない。
-- 次曲の準備が未完了なら、その結果を待つことを必須にせず、選択対象を背景で新たに準備する。全曲測定の完了は再生開始を妨げない。
+- 次曲の準備が未完了なら、その結果を待つことを必須にせず、選択対象を背景で新たに準備する。自動調整OFFでは全曲測定の完了は再生開始を妨げない。ONでは有効なLUFS/true peak測定と補正計画の完了を待つ。
 - 未再生の曲選択では、背景で読み込み確認した後にURL・時間・シーク可否だけを保持する。アイドル中はデコーダとファイルアクセスを残さず、再生時に取り直す。
 - `selectPrepared`は再生へ移譲するまで渡されたleaseを保持し、停止でも解放する。通常の未再生選択は`selectMetadata`を使い、アイドル中に先頭バッファを残さない。
 - `selectPrepared`／`selectMetadata`は、ライブラリの保存が成功してから現在の再生を差し替える。準備や保存に失敗した場合は、現在の選択と再生を維持する。準備中は拡張画面に状態を示し、停止ボタンで取り消せる。
@@ -41,6 +43,16 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 `LibraryController.peakMeasurement`はdisabled／pending／complete／failedをUIへ提供する。音声処理側は`currentTrackPeak`を使用する。このプロパティは設定がONで現在再生のURLと一致し、ファイル識別情報・サイズ・更新日時が一致する完了値だけを返す。未完了・変更済みの値ではnilとなる。音声処理でのゲイン適用は別責務とし、前処理から音量を操作しない。`currentTrackPeak`はMainActor上で設定用の値を取得するAPIであり、ファイル属性を確認するためrender callbackから呼ばない。
 
+## 音量自動調整の全曲測定
+
+追加測定は、全曲のIntegrated LUFS・sample peak・true peakを同じ背景走査から生成する。ファイル参照、デコーダ、一時的なblockエネルギー列と取消はPreprocessingCoreが所有し、数値DSPと補正量の算出はAudioProcessingCoreが担当する設計とする。前処理から再生音量を操作しない境界は維持する。
+
+`TrackAudioMetrics`には既存のfingerprintに加えて、出力レート・チャンネル変換と測定版を含むprofileを付ける。`TrackPeak`はsample peak専用として保持し、LUFS/true peakの代用にはしない。補正用には新しい`measureLevels`／`currentTrackMetrics`を使う。これらは全曲測定用の公開APIである。測定と自動調整ONの再生は`ProfileConversion`を共有し、再生側は`ProfileDecoder`で変換する。
+
+将来のEQ併用時は、補正用測定でも形式変換と同じ設定のEQを適用し、レベル自動調整段へ入る音声を測る。EQの有効状態・設定・実装版をprofileへ含め、変更時は再測定する。手動音量・ミュートと純粋な同期用ディレイは測定後の処理であり、その変更では全曲測定を取り直さない。これらの加工段は[後処理の構成と順序](./audio-processing-design.md)に従う。
+
+自動調整ONでは測定完了を再生開始条件とし、OFFでは従来の測定待ちなし経路を維持する。現在曲と直後1曲だけを対象にし、同じ結果を複数の全曲scanで作り直さない。mono/stereo変換、短い曲、gating対象なし、true-peak補間の末尾、資源上限と再生要求の優先順位は[拡張設計](./audio-processing-design.md)に従う。
+
 ## キュー、取消とファイルアクセス
 
 単一のutility DispatchQueueがデコーダのopenと読み取りを担当する。全曲測定は1チャンクごとに再投入し、後から到着した先頭準備を長い測定全体の後ろへ待たせない。I/Oや測定を音声render callbackへ追加しない。
@@ -49,7 +61,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 - 曲順・次曲対象・参照の変更では次曲準備を破棄して作り直す。現在曲の変更では測定結果も破棄する。
 - 一時停止では次曲準備と測定を取り消し、再開で必要な処理を作り直す。音声は通常の一時停止位置を保持する。
-- 停止・末尾終了・失敗・出力変更・終了では背景処理とキャッシュを破棄する。自然終了から次曲へ進む際は準備済みデコーダを先に引き継ぐ。明示的な曲選択が準備中なら自然送りで上書きしない。
+- 停止・末尾終了・失敗・出力変更・終了では背景処理とキャッシュを破棄する。自動調整の完了結果はpause中に保持し、同じ音源/出力profileのresume・seekでは再測定しない。自然終了から次曲へ進む際は準備済みデコーダを先に引き継ぐ。明示的な曲選択が準備中なら自然送りで上書きしない。
 - 通常は現在再生のlease1つと次曲準備のlease1つを保持する。測定は該当する同じleaseを共有する。取消中の基盤I/Oと非同期後処理が完了してから最後の参照が解放される。
 - 先行準備の失敗だけで現在再生を停止したり、未選択の曲を削除したりしない。再生対象として選んだときに参照・読み込みエラーを表示する。
 
@@ -63,4 +75,4 @@ LibraryCore（参照解決・再生順序・設定・取消）
 2. `scripts/generate-fixtures.py`で独自の長い音源をignoredディレクトリへ生成する。`LCMP_PREPROCESS_PROFILE=1 LCMP_PREPROCESS_FIXTURES=<絶対パス>`で`PreprocessingTests/startupPreparationProfile`を実行し、従来の2回openと、背景準備・取得後最初のPCMまでを分けて記録する。初回はOSキャッシュの完全なcold状態を保証しない。
 3. 同じディレクトリを指定し、`LCMP_PREPROCESS_OUTPUT_PROFILE=1`で`PreprocessingPerformanceTests/engineAndFirstAnalysisTiming`を実行する。順番を交互にし、選択・play呼出・最初の解析受信を分ける。最後の値は物理出音時刻ではない。
 4. `LCMP_PREPROCESS_SOAK=1`と同ディレクトリを指定し、`PreprocessingPerformanceTests/tenMinutePlaybackPreparationAndMeasurementRemainBounded`を実行する。既定600秒、アプリ音量0の実出力で測定ON・FFT・反復曲変更を動かし、CPU、RSS、バッファ量、lease数、停止後解放とPCM欠落を確認する。通常の全回帰では性能測定をskipする。
-5. `LCMP_UI_SNAPSHOTS=<出力先>`で設定のON/OFFを最小240ptの拡張画面へ描き、説明が読めることを確認する。ビルドは`python3 scripts/build-app.py --output build/ticket7-verified/LCMP.app`等で別出力し、起動中bundleを置換しない。
+5. `LCMP_UI_SNAPSHOTS=<出力先>`で設定のON/OFFを最小240ptの拡張画面へ描き、説明が読めることを確認する。ビルドは`python3 scripts/build-app.py --output build/preprocessing-verified/LCMP.app`等で別出力し、起動中bundleを置換しない。

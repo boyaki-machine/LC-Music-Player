@@ -35,7 +35,9 @@ Sources/
 │   └── Shared/
 │       ├── SpectrumSample.swift       UIに依存しない表示用レベル・時刻の値型
 │       └── VisualizationClock.swift   共通host clock・activity
-├── PreprocessingCore/                 先頭PCM準備・全曲最大音量・共通デコーダ
+├── PreprocessingCore/                 先頭PCM準備・LUFS/ピーク測定・共通デコーダ/形式変換
+├── AudioProcessingCore/               測定値・設定・補正計画・独立gain段
+├── LevelDSP/                          worker用K-weighting/true peak補間（C）
 ├── PlaybackCore/                      再生制御・音声バックエンド
 ├── LibraryCore/                       ライブラリ・リスト・ファイル参照
 ├── AnalysisCore/                      FFT・帯域パワー・解析時刻
@@ -68,6 +70,10 @@ flowchart LR
     UI --> Analysis[AnalysisCore]
     Library --> Preprocessing[PreprocessingCore]
     Playback --> Preprocessing
+    Library --> Processing[AudioProcessingCore]
+    Playback --> Processing
+    Preprocessing --> Processing
+    Processing --> LevelDSP[LevelDSP]
     Playback --> Analysis[AnalysisCore]
     Analysis --> Transport[AnalysisTransport]
     Analysis -. AnalysisFrame .-> Playback
@@ -89,6 +95,8 @@ flowchart LR
 | 状態 → 描画 | `LCMPDefaultGEQView(driver:)` | `snapshot`と`drawTime`を描く。描画内から再生や解析を開始しない |
 
 背景選択は非同期で確定する。前処理のバッファや全曲測定をUIへ持ち込まず、音声処理へ測定値を渡す場合は検証済みの`currentTrackPeak`を使う。詳細は[再生前処理の実装設計](./preprocessing-implementation.md)を参照する。
+
+LUFS/true peakによる自動調整は[音量自動調整の設計](./audio-processing-design.md)を参照する。上記の現行`currentTrackPeak`はsample peak専用であり、自動調整用の完了結果として流用しない。設定は`setNormalizesVolume`／`setNormalizationTarget`、測定結果は`levelMeasurement`／`currentTrackMetrics`を使い、`preparationStage`で全曲測定待ちを表示する。EQ/delayの処理段は将来の拡張として区別する。
 
 公開入口の実装は[PlayerView.swift](../Sources/PlayerUI/PlayerView.swift)、実際の橋渡しは[PlaybackVisualization.swift](../Sources/PlayerUI/Players/LCMP_default_GEQ/Visualization/PlaybackVisualization.swift)にある。後者は約30Hzの解析結果の観測を局所化し、操作部全体の再評価を抑える。
 

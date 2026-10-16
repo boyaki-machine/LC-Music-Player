@@ -2,6 +2,7 @@ import AVFAudio
 import Foundation
 import SFBAudioEngine
 import AnalysisCore
+import AudioProcessingCore
 
 @MainActor
 public final class SFBAudioBackend: PlaybackBackend {
@@ -11,6 +12,20 @@ public final class SFBAudioBackend: PlaybackBackend {
     public let supportsSeeking: Bool
     public var currentTime: TimeInterval { player?.currentTime ?? pendingTime }
     public var onEvent: (@MainActor (PlaybackEvent) -> Void)?
+    public private(set) var normalizationPlan: NormalizationPlan?
+    private var normalizationMetrics: TrackAudioMetrics?
+    private var processingChain: AudioProcessingChain?
+
+    public func clearNormalization() {
+        normalizationMetrics = nil; normalizationPlan = nil
+        processingChain?.levelNode.globalGain = 0
+    }
+
+    public static func measurementProfile() throws -> MeasurementProfile {
+        let probe = AudioPlayer()
+        let format = probe.mainMixerNode.outputFormat(forBus: 0)
+        return try MeasurementProfile(sampleRate: format.sampleRate, channels: format.channelCount)
+    }
     public var volume: Float = 0.25 {
         didSet { player?.mainMixerNode.outputVolume = volume }
     }
@@ -70,7 +85,14 @@ public final class SFBAudioBackend: PlaybackBackend {
         self.url = url; self.duration = duration; self.supportsSeeking = supportsSeeking
     }
 
-    public init(prepared: PreparedAudio) throws {
+    public init(prepared: PreparedAudio, metrics: TrackAudioMetrics? = nil,
+                settings: NormalizationSettings = .standard) throws {
+        if let metrics {
+            guard metrics.source == prepared.source else { throw AudioProcessingFailure.invalidMeasurement }
+            try metrics.source.validate()
+            normalizationPlan = try NormalizationPlan(metrics: metrics.levels, profile: metrics.profile, settings: settings)
+            normalizationMetrics = metrics
+        }
         url = prepared.source.url
         duration = prepared.duration
         let decoder = try prepared.takeDecoder()
@@ -100,17 +122,30 @@ public final class SFBAudioBackend: PlaybackBackend {
 
     private func start(at seconds: TimeInterval) throws {
         do {
-            let decoder: any PCMDecoding
+            var decoder: any PCMDecoding
             if let preparedDecoder {
                 decoder = preparedDecoder
                 self.preparedDecoder = nil
             } else { decoder = try AudioDecoderFactory.open(url) }
+            if let metrics = normalizationMetrics {
+                do { decoder = try ProfileDecoder(base: decoder, profile: metrics.profile, frameLength: metrics.levels.frameCount) }
+                catch { try? decoder.close(); throw error }
+            }
             if seconds > 0 {
                 let frame = AVAudioFramePosition(seconds * decoder.processingFormat.sampleRate)
                 do { try decoder.seek(to: min(frame, decoder.length - 1)) }
                 catch { try? decoder.close(); throw error }
             }
             let next = AudioPlayer()
+            if let metrics = normalizationMetrics {
+                do {
+                    try metrics.source.validate()
+                    let format = next.mainMixerNode.outputFormat(forBus: 0)
+                    guard try MeasurementProfile(sampleRate: format.sampleRate, channels: format.channelCount) == metrics.profile else {
+                        throw AudioProcessingFailure.outputChanged
+                    }
+                } catch { try? decoder.close(); throw error }
+            }
             let id = UUID()
             let nextDelegate = PlayerDelegate { [weak self] event in
                 guard let self, self.runID == id else { return }
@@ -127,6 +162,7 @@ public final class SFBAudioBackend: PlaybackBackend {
             // Zero filters, zero global gain: a pass-through AU with a public
             // render-notification API. Future compensation belongs downstream.
             let observation = AVAudioUnitEQ(numberOfBands: 0)
+            let chain = AudioProcessingChain(plan: normalizationPlan)
             let converter = AVAudioMixerNode()
             let outputFormat = next.mainMixerNode.outputFormat(forBus: 0)
             guard let observationFormat = AVAudioFormat(standardFormatWithSampleRate: outputFormat.sampleRate,
@@ -140,11 +176,14 @@ public final class SFBAudioBackend: PlaybackBackend {
                 let sourceFormat = next.sourceNode.outputFormat(forBus: 0)
                 engine.attach(converter)
                 engine.attach(observation)
+                engine.attach(chain.levelNode)
                 engine.disconnectNodeOutput(next.sourceNode)
                 engine.connect(next.sourceNode, to: converter, format: sourceFormat)
                 engine.connect(converter, to: observation, format: observationFormat)
-                engine.connect(observation, to: engine.mainMixerNode, format: observationFormat)
+                engine.connect(observation, to: chain.levelNode, format: observationFormat)
+                engine.connect(chain.levelNode, to: engine.mainMixerNode, format: observationFormat)
             }
+            processingChain = chain
             analysisNode = observation
             try next.play(decoder)
             startAnalysis()
@@ -180,6 +219,10 @@ public final class SFBAudioBackend: PlaybackBackend {
     }
 
     public func resume() throws {
+        if let metrics = normalizationMetrics {
+            try metrics.source.validate()
+            guard try Self.measurementProfile() == metrics.profile else { throw AudioProcessingFailure.outputChanged }
+        }
         if player == nil && paused { try start(at: pendingTime); return }
         guard let player, player.resume() else {
             throw PlaybackError.playbackFailed("再開できませんでした。")
@@ -200,6 +243,7 @@ public final class SFBAudioBackend: PlaybackBackend {
         player = nil
         analysisSource = nil
         analysisNode = nil
+        processingChain = nil
         delegate = nil
     }
 }

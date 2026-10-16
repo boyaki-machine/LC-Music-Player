@@ -17,6 +17,8 @@ macOS上のネイティブアプリとし、iPhone版にも共用できるよう
 
 単曲再生の対応形式はMP3、M4A（AAC・ALAC）、WAV、AIFF、FLACです。次曲の先頭PCMを背景で準備します。設定の「最大音量を測定」をONにすると全曲のsample peakを測定します。初期状態はOFFで、測定しても再生音量は変更しません。詳細は[再生前処理の実装設計](docs/preprocessing-implementation.md)を参照してください。
 
+設定の「曲ごとの音量をそろえる」は、全曲のLUFSとtrue peakを測定して固定ゲインを適用します。既定OFFで、ON時は未測定の曲の測定を再生前に待ちます。手動音量・ミュートは独立して使えます。補正方式、対応出力形式、設定変更時の一時停止は[音量自動調整](docs/audio-processing-design.md)を参照してください。
+
 再生中の周波数レベルは`LCMP_default_GEQ`の16列蛍光管LEDで、−80〜0dBFSの範囲に表示します。緑・黄・赤のセルを点灯し、消灯には短い残光を添えます。ミュート中も音源のレベルに反応します。表示と時刻処理は[可視化の実装設計](docs/visualization-implementation.md)、実装フォルダとモジュールI/F・追加方法は[Player UI・可視化の開発ガイド](docs/playerUI_developers.md)を参照してください。
 
 ## ローカルで起動する
