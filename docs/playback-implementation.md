@@ -91,7 +91,7 @@ UIに渡す状態とイベントはmain actorで処理します。SFBAudioEngine
 
 ミュート中は再生音量を0とし、解除時はミュート前の値を復元する。スライダーを変更するとミュートを解除する。音源選択は音量とミュート状態を維持する。
 
-手動音量はPlaybackCoreの責務である。PlayerUIが操作を受け、`PlaybackController.setVolume`／`toggleMute`が値と状態を管理し、SFBAudioBackendが`mainMixerNode.outputVolume`へ反映する。音量・ミュート変更は再生を継続して行う。
+手動音量はPlaybackCoreの責務である。PlayerUIが操作を受け、`PlaybackController.setVolume`／`toggleMute`が値と状態を管理し、SFBAudioBackendが`mainMixerNode.outputVolume`へ反映する。音量・ミュート変更は再生を継続して行う。PlayerUIは音量バーの操作位置を小音量側の曲線から実倍率へ変換し、このAPIへ渡す。再生層は非線形の操作位置を保持しない。
 
 [後処理の追加設計](./audio-processing-design.md)では、EQ・レベル自動調整・同期用ディレイを直列に置き、その後のmainMixerで手動音量を適用する。自動補正と手動音量は別の倍率として管理する。手動音量を全曲測定や補正計画の入力に含めず、その変更で再測定・自動ゲイン再計算を行わない。EQ・ディレイの処理段は将来の追加対象であり、現行実装と区別する。
 

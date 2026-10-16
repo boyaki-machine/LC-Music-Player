@@ -33,6 +33,15 @@ import PlaybackCore
             for _ in 0..<5 { try file.write(from: buffer) }
         }
         let playback = PlaybackController(), presentation = PlayerPresentation()
+        let driver = presentation.visualizationDriver
+        // Output presentation includes device latency; a fixed 180/350ms sleep can
+        // finish while valid frames are still waiting for their presentation time.
+        func waitForLitFrame() async throws {
+            let deadline = ContinuousClock.now + .seconds(2)
+            while driver.snapshot.counts.allSatisfy({ $0 == 0 }), ContinuousClock.now < deadline {
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
         defer { presentation.visualizationVisible = false; playback.close() }
         playback.setVolume(0)
         let host = NSHostingView(rootView: PlayerView(playback: playback, presentation: presentation,
@@ -45,9 +54,8 @@ import PlaybackCore
         defer { window.orderOut(nil); window.contentView = nil }
         host.layoutSubtreeIfNeeded()
         playback.select(url); playback.togglePlayPause()
-        try await Task.sleep(for: .milliseconds(350))
+        try await waitForLitFrame()
         host.layoutSubtreeIfNeeded()
-        let driver = presentation.visualizationDriver
         #expect(playback.analysisConfiguration?.bandCount == 16)
         #expect(playback.analysisFrame != nil && driver.snapshot.counts.contains(where: { $0 > 0 }))
         #expect(driver.presentation.adoptionCount > 0)
@@ -70,14 +78,14 @@ import PlaybackCore
         try await Task.sleep(for: .milliseconds(60))
         #expect(driver.snapshot.counts.allSatisfy { $0 == 0 })
         playback.togglePlayPause()
-        try await Task.sleep(for: .milliseconds(180))
+        try await waitForLitFrame()
         #expect(driver.snapshot.counts.contains(where: { $0 > 0 }))
         presentation.visualizationVisible = false
         #expect(!driver.isRunning)
         try await Task.sleep(for: .milliseconds(60))
         #expect(playback.analysisConfiguration == nil && playback.state == .playing)
         presentation.visualizationVisible = true
-        try await Task.sleep(for: .milliseconds(180))
+        try await waitForLitFrame()
         #expect(playback.state == .playing && driver.snapshot.counts.contains(where: { $0 > 0 }))
         playback.stop()
         try await Task.sleep(for: .milliseconds(80))

@@ -112,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showPlayer(); return true }
     func windowDidResignKey(_ notification: Notification) {
-        if notification.object as? NSWindow === mainWindow { presentation.scheduleSeekHide() }
+        if notification.object as? NSWindow === mainWindow { presentation.volumeVisible = false; presentation.scheduleSeekHide() }
     }
     func applicationDidResignActive(_ notification: Notification) { presentation.volumeVisible = false; presentation.scheduleSeekHide() }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

@@ -22,6 +22,8 @@ Sources/
 │           ├── ExtensionView.swift            拡張画面
 │           ├── WindowLayout.swift             ウィンドウ配置の計算
 │           ├── NativeControls.swift           移動・シーク・音量の入力
+│           ├── VolumeControls.swift           音量の操作曲線・内部フォーカス境界
+│           ├── PlaylistClickSurface.swift      マウスのクリック回数・ドラッグ取消
 │           ├── LibraryControls.swift          リスト操作・グラス等
 │           ├── SourceFolderList.swift         音源フォルダ一覧
 │           ├── QuickTooltip.swift            省略されたタイトルの表示

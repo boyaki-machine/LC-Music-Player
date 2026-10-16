@@ -257,8 +257,7 @@ public struct ExtensionView: View {
         return HStack(spacing: 6) {
             Text(current ? (playback.state == .playing ? "▸" : playback.state == .paused ? "Ⅱ" : "•") : String(format: "%02d", index + 1)).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
             Button {
-                if missing { originID = list.id; sourceID = track.id; presentation.section = .source }
-                else if !current { library.selectEntry(entry.id, in: list.id) }
+                activatePlaylistRow(track, entry: entry, list: list, clickCount: 1)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     OverflowTitle(name: track.name).foregroundStyle(current ? indicator : .white.opacity(0.85))
@@ -270,6 +269,9 @@ public struct ExtensionView: View {
                     }.font(.system(size: 11))
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.buttonStyle(.plain).accessibilityLabel("\(track.name)\(current ? "、\(currentWord)" : "")\(missing ? "、音源を確認" : "")")
+                .overlay(PlaylistClickSurface(entryID: entry.id) { count in
+                    activatePlaylistRow(track, entry: entry, list: list, clickCount: count)
+                }.accessibilityHidden(true))
             PlaylistRowActions(name: track.name, canMoveUp: index > 0 && library.canEdit,
                                canMoveDown: index + 1 < list.entries.count && library.canEdit, canRemove: library.canEdit,
                                moveUp: { library.moveEntry(entry.id, in: list.id, offset: -1) },
@@ -279,6 +281,11 @@ public struct ExtensionView: View {
         }.frame(height: 44).padding(.horizontal, 3)
             .overlay(alignment: .leading) { if current { RoundedRectangle(cornerRadius: 1).fill(indicator.opacity(playback.state == .playing ? 0.55 : 0.3)).frame(width: 2, height: 22) } }
             .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.05)).frame(height: 1) }
+    }
+    private func activatePlaylistRow(_ track: LibraryTrack, entry: PlaylistEntry, list: MusicPlaylist, clickCount: Int) {
+        if library.unavailable[track.id] != nil {
+            originID = list.id; sourceID = track.id; presentation.section = .source
+        } else { library.clickEntry(entry.id, in: list.id, clickCount: clickCount) }
     }
     @ViewBuilder private var sourceContent: some View {
         if let sourceID, let track = library.track(sourceID) {
