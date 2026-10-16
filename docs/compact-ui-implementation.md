@@ -74,3 +74,5 @@ PlayerPresentationは2秒の取消可能な非表示タイマーを持つ。シ�
 ## 再生前処理への接続
 
 Player UIは再生の開始・前後曲・停止をLibraryControllerへ渡し、停止は準備中にも有効にする。拡張画面は`isPreparing`を表示する。設定タブはScrollView内に最大音量測定のToggle、説明、測定状態・dBFSまたは無音を表示し、`setMeasuresMaximumVolume(_:)`で変更する。最小240ptでも説明を折り返し、残りはスクロールで読める構成にする。デコード・測定・キャッシュはViewが所有しない。仕様は[再生前処理](./preprocessing-implementation.md)を参照する。
+
+設定には音量自動調整のToggleと目標LUFSのPickerも置く。`setNormalizesVolume`／`setNormalizationTarget`へ操作を渡し、`levelMeasurement`に基づくLUFS/true peak、`playback.normalizationPlan`の補正dBと制限理由を表示する。`preparationStage`で全曲測定中を案内する。自動調整設定変更による一時停止と、再生を継続する手動音量操作を区別する。測定・補正の契約は[音量自動調整](./audio-processing-design.md)を参照する。

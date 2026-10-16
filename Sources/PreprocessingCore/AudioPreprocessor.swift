@@ -2,12 +2,32 @@ import AVFAudio
 import AudioToolbox
 import Foundation
 import SFBAudioEngine
+import AudioProcessingCore
 
 /// One utility queue, shared by prefix preparation and incremental full-track scans.
 public final class AudioPreprocessor: Sendable {
     public static let shared = AudioPreprocessor()
     private let queue = DispatchQueue(label: "local.lcmp.preprocessing", qos: .utility)
-    public init() {}
+    public init() { LoudnessMeter.cleanAbandonedFiles() }
+
+    public func measureLevels(_ url: URL, profile: MeasurementProfile,
+                              cancellation: PreparationCancellation = .init()) async throws -> TrackAudioMetrics {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async {
+                do {
+                    try cancellation.check()
+                    let scan = try LevelScan(url: url, profile: profile, cancellation: cancellation, continuation: continuation)
+                    self.stepLevels(scan)
+                } catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+    private func stepLevels(_ scan: LevelScan) {
+        do {
+            if let result = try scan.read() { scan.finish(.success(result)) }
+            else { queue.async { self.stepLevels(scan) } }
+        } catch { scan.finish(.failure(error)) }
+    }
 
     public func prepare(_ url: URL, cancellation: PreparationCancellation = .init(),
                         seconds: Double = 2, byteLimit: Int = 32 * 1024 * 1024) async throws -> PreparedAudio {
@@ -113,8 +133,19 @@ private final class PeakScan: @unchecked Sendable {
             return TrackPeak(source: source, samplePeak: peak, frameCount: frames,
                              sampleRate: buffer.format.sampleRate, channelCount: buffer.format.channelCount)
         }
-        // Use native numeric samples when available, avoiding converter rounding of Int32.
-        // Packed PCM (.otherFormat) uses a measurement-only floating conversion.
+        peak = max(peak, try NativeSamplePeak.read(buffer, analysisBuffer: analysisBuffer, converter: converter))
+        frames += Int64(buffer.frameLength)
+        return nil
+    }
+    func finish(_ result: Result<TrackPeak, any Error>) {
+        try? decoder.close(); continuation.resume(with: result)
+    }
+}
+
+/// Shared exact native sample reading; normalization also retains the legacy source peak.
+enum NativeSamplePeak {
+    static func read(_ buffer: AVAudioPCMBuffer, analysisBuffer: AVAudioPCMBuffer, converter: AVAudioConverter) throws -> Double {
+        var peak = 0.0
         let numeric: AVAudioPCMBuffer
         let input = buffer.format.streamDescription.pointee
         let nativeInteger = input.mFormatFlags & kAudioFormatFlagIsSignedInteger != 0
@@ -163,10 +194,6 @@ private final class PeakScan: @unchecked Sendable {
                 peak = max(peak, abs(value))
             }
         }
-        frames += Int64(buffer.frameLength)
-        return nil
-    }
-    func finish(_ result: Result<TrackPeak, any Error>) {
-        try? decoder.close(); continuation.resume(with: result)
+        return peak
     }
 }

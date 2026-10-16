@@ -30,8 +30,10 @@ import PlaybackCore
 final class ScopeCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0
+    private var highWater = 0
     var active: Int { lock.withLock { count } }
-    func acquire() { lock.withLock { count += 1 } }
+    var maximum: Int { lock.withLock { highWater } }
+    func acquire() { lock.withLock { count += 1; highWater = max(highWater, count) } }
     func release() { lock.withLock { count -= 1 } }
 }
 @MainActor final class CountingRealReferences: FileReferenceProvider {

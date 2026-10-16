@@ -37,7 +37,7 @@ import PlaybackCore
             .write(to: URL(fileURLWithPath: directory).appendingPathComponent("output-startup.json"))
     }
 
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_PREPROCESS_SOAK"] == "1"))
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_PREPROCESS_SOAK"] == "1" || ProcessInfo.processInfo.environment["LCMP_NORMALIZATION_SOAK"] == "1"))
     func tenMinutePlaybackPreparationAndMeasurementRemainBounded() async throws {
         let directory = try #require(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_FIXTURES"])
         let suite = "lcmp-soak-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
@@ -53,6 +53,8 @@ import PlaybackCore
         let second = URL(fileURLWithPath: directory).appendingPathComponent("tone.flac")
         await model.importFiles([source, second], into: list)
         model.setMeasuresMaximumVolume(true)
+        let normalization = ProcessInfo.processInfo.environment["LCMP_NORMALIZATION_SOAK"] == "1"
+        if normalization { model.setNormalizesVolume(true) }
         model.playPlaylist(list)
         let duration = Double(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_SOAK_SECONDS"] ?? "600") ?? 600
         let started = now(), cpuStart = cpu()
@@ -76,6 +78,7 @@ import PlaybackCore
             #expect(playback.error == nil && model.error == nil)
             if now() >= nextSwitch {
                 #expect(playback.state == .playing && model.currentTrackPeak != nil)
+                if normalization { #expect(playback.normalizationPlan != nil && model.currentTrackMetrics != nil) }
                 if model.canNext { model.next() } else { model.playPlaylist(list) }
                 observedPeak = false; transitions += 1; nextSwitch += 6
             }
@@ -94,11 +97,40 @@ import PlaybackCore
         #expect(maxDropped == 0)
         let warmed = samples.filter { $0["seconds", default: 0] >= 60 }.compactMap { $0["rssMiB"] }
         if duration >= 600 { #expect((warmed.max() ?? 0) - (warmed.min() ?? 0) < 10) }
-        let report: [String: Any] = ["seconds": now() - started, "cpuPercentOfOneCore": (cpu() - cpuStart) / (now() - started) * 100,
+        let report: [String: Any] = ["normalization": normalization, "seconds": now() - started, "cpuPercentOfOneCore": (cpu() - cpuStart) / (now() - started) * 100,
             "maxScopes": maximumScopes, "maxPreparedBytes": maximumBytes, "transitions": transitions, "measuredTracks": measured,
             "analysisFrames": analysisFrames, "droppedBuffers": maxDropped, "postStopScopes": refs.scopes.active, "samples": samples]
         try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
-            .write(to: URL(fileURLWithPath: directory).appendingPathComponent("soak.json"))
+            .write(to: URL(fileURLWithPath: directory).appendingPathComponent(normalization ? "normalization-soak.json" : "soak.json"))
+    }
+
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_NORMALIZATION_PROFILE"] == "1"))
+    func comparesSteadyPlaybackWithAndWithoutNormalization() async throws {
+        let directory = try #require(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_FIXTURES"])
+        var rows: [[String: Any]] = []
+        for enabled in [false, true] {
+            let suite = "lcmp-level-profile-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let playback = PlaybackController(); playback.setVolume(0)
+            let model = LibraryController(playback: playback, store: MemoryStore(), references: TestReferences(),
+                                          preprocessingEnabled: true, preferences: defaults)
+            defer { model.shutdown() }
+            let list = try #require(model.document.currentPlaylistID)
+            await model.importFiles([URL(fileURLWithPath: directory).appendingPathComponent("tone.wav")], into: list)
+            model.setNormalizesVolume(enabled)
+            let requested = now(); model.playPlaylist(list)
+            while playback.state != .playing, now()-requested < 10 { try await Task.sleep(for: .milliseconds(5)) }
+            #expect(playback.state == .playing && model.error == nil)
+            let startup = now()-requested
+            let begin = now(), cpuBegin = cpu()
+            try await Task.sleep(for: .seconds(10))
+            let percent = (cpu()-cpuBegin)/(now()-begin)*100
+            rows.append(["normalization":enabled,"startupSeconds":startup,"cpuPercentOfOneCore":percent,"rssMiB":rss()])
+            #expect(percent < 30 && playback.state == .playing)
+            model.stop()
+        }
+        try JSONSerialization.data(withJSONObject: rows, options: [.prettyPrinted,.sortedKeys])
+            .write(to: URL(fileURLWithPath: directory).appendingPathComponent("normalization-profile.json"))
     }
 }
 private func now() -> Double { AVAudioTime.seconds(forHostTime: mach_absolute_time()) }

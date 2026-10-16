@@ -1,5 +1,6 @@
 import Foundation
 import AnalysisCore
+import AudioProcessingCore
 
 public enum PlaybackEvent: Sendable {
     case finished
@@ -15,6 +16,8 @@ public protocol PlaybackBackend: AnyObject {
     var currentTime: TimeInterval { get }
     var volume: Float { get set }
     var onEvent: (@MainActor (PlaybackEvent) -> Void)? { get set }
+    var normalizationPlan: NormalizationPlan? { get }
+    func clearNormalization()
     func play() throws
     func pause() throws
     func resume() throws
@@ -25,6 +28,8 @@ public protocol PlaybackBackend: AnyObject {
 }
 
 public extension PlaybackBackend {
+    var normalizationPlan: NormalizationPlan? { nil }
+    func clearNormalization() {}
     func configureAnalysis(_ configuration: AnalysisConfiguration?,
                            receive: (@MainActor (AnalysisFrame) -> Void)?) {}
 }
