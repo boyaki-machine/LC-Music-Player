@@ -96,7 +96,12 @@ struct AudioOutputTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(abs(controller.currentTime - 0.7) < 0.001)
         controller.togglePlayPause()
-        try await Task.sleep(for: .milliseconds(100))
+        // Resuming a paused seek starts a new output run. Wait for observed
+        // progress rather than assuming every device starts rendering in 100ms.
+        let resumeDeadline = ContinuousClock.now + .seconds(2)
+        while controller.currentTime <= 0.7, controller.state == .playing, ContinuousClock.now < resumeDeadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(controller.currentTime > 0.7)
         controller.toggleMute()
         #expect(controller.volume == 0)

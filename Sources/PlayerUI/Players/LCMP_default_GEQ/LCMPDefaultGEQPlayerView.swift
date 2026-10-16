@@ -99,14 +99,18 @@ struct LCMPDefaultGEQPlayerView: View {
         .background(VolumeClickRegion(handler: seekOutsideClick, isPopup: true, dismiss: presentation.scheduleSeekHide))
     }
     private var volumePopup: some View {
-        VStack(spacing: 3) {
-            Text("\(Int(playback.volume * 100))%").font(.system(size: 10, design: .monospaced))
-            NativeSlider(value: Binding(get: { Double(playback.volume) }, set: { playback.setVolume(Float($0)) }),
-                         range: 0...1, vertical: true, label: "アプリ内音量", cancel: { presentation.closeOverlays() }).frame(width: 28, height: 64)
-            LEDButton(symbol: "speaker.slash.fill", label: playback.isMuted ? "ミュート解除" : "ミュート",
-                      activeColor: playback.isMuted ? .green : nil, action: playback.toggleMute)
-        }.padding(4).background(Color(white: 0.1).opacity(0.96), in: RoundedRectangle(cornerRadius: 6))
+        VolumeFocusScope(content: volumeContents, dismiss: { presentation.volumeVisible = false })
             .background(VolumeClickRegion(handler: volumeOutsideClick, isPopup: true, dismiss: { presentation.volumeVisible = false }))
+    }
+    private var volumeContents: some View {
+        VStack(spacing: 3) {
+            Text("\(Int((Double(playback.volume) * 100).rounded()))%").font(.system(size: 10, design: .monospaced))
+            NativeSlider(value: Binding(get: { Double(playback.volume) }, set: { playback.setVolume(Float($0)); presentation.volumeInteraction() }),
+                         range: 0...1, vertical: true, label: "アプリ内音量", cancel: { presentation.closeOverlays() },
+                         volumeCurve: true, trackingChanged: presentation.trackVolume).frame(width: 28, height: 64)
+            LEDButton(symbol: "speaker.slash.fill", label: playback.isMuted ? "ミュート解除" : "ミュート",
+                      activeColor: playback.isMuted ? .green : nil) { playback.toggleMute(); presentation.volumeInteraction() }
+        }.padding(4).background(Color(white: 0.1).opacity(0.96), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -129,12 +133,16 @@ private struct LEDButton: View {
                 if pulseID == id { flash = false }
             }
         } label: {
-            VStack(spacing: 3) {
-                Image(systemName: symbol).font(.system(size: 17))
-                    .foregroundStyle(activeColor ?? (flash ? pulseColor : Color.white.opacity(enabled ? 0.65 : 0.2)))
-                    .shadow(color: activeColor ?? (flash ? pulseColor : .clear), radius: 5)
-                if let status { Text(status).font(.system(size: 7, design: .monospaced)).foregroundStyle(.white.opacity(0.5)) }
-            }.frame(width: 44, height: 44).contentShape(Rectangle())
+            Image(systemName: symbol).font(.system(size: 17))
+                .foregroundStyle(activeColor ?? (flash ? pulseColor : Color.white.opacity(enabled ? 0.65 : 0.2)))
+                .shadow(color: activeColor ?? (flash ? pulseColor : .clear), radius: 5)
+                .frame(width: 44, height: 44)
+                .overlay(alignment: .top) {
+                    if let status {
+                        Text(status).font(.system(size: 7, design: .monospaced))
+                            .foregroundStyle(.white.opacity(0.5)).offset(y: 34)
+                    }
+                }.contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(!enabled).help(label).accessibilityLabel(label)
             .accessibilityValue(status ?? "")
             .onDisappear { pulseID = UUID(); flash = false }

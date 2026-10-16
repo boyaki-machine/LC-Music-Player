@@ -13,7 +13,15 @@ public final class PlayerPresentation {
     }
     @ObservationIgnored private var seekHideTask: Task<Void, Never>?
     private let seekHideDelay: Duration
-    public var volumeVisible = false
+    public var volumeVisible = false {
+        didSet {
+            if volumeVisible { scheduleVolumeHide() }
+            else { volumeTracking = false; cancelVolumeHide() }
+        }
+    }
+    @ObservationIgnored private var volumeHideTask: Task<Void, Never>?
+    private let volumeHideDelay: Duration
+    @ObservationIgnored private var volumeTracking = false
     public private(set) var extensionVisible = false
     public var section: ExtensionSection = .playlist
     public var selectingFile = false
@@ -24,7 +32,25 @@ public final class PlayerPresentation {
             if !visualizationVisible { visualizationDriver.synchronize(activity: .inactive, visible: false) }
         }
     }
-    public init(seekHideDelay: Duration = .seconds(2)) { self.seekHideDelay = seekHideDelay }
+    public init(seekHideDelay: Duration = .seconds(2), volumeHideDelay: Duration = .seconds(15)) {
+        self.seekHideDelay = seekHideDelay; self.volumeHideDelay = volumeHideDelay
+    }
+    private func cancelVolumeHide() { volumeHideTask?.cancel(); volumeHideTask = nil }
+    public func volumeInteraction() { scheduleVolumeHide() }
+    public func trackVolume(_ tracking: Bool) {
+        volumeTracking = tracking
+        if tracking { cancelVolumeHide() } else { scheduleVolumeHide() }
+    }
+    private func scheduleVolumeHide() {
+        cancelVolumeHide()
+        guard volumeVisible, !volumeTracking else { return }
+        let delay = volumeHideDelay
+        volumeHideTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: delay) } catch { return }
+            guard !Task.isCancelled else { return }
+            self?.volumeVisible = false
+        }
+    }
     public func cancelSeekHide() { seekHideTask?.cancel(); seekHideTask = nil }
     public func scheduleSeekHide() {
         cancelSeekHide()

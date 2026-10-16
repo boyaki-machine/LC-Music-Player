@@ -119,6 +119,55 @@ private actor HeldPreprocessor: AudioPreprocessing {
         #expect(refs.scopes.maximum <= 2 && model.preparedNextEntryID == nil)
     }
 
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_TEST_AUDIO_OUTPUT"] == "1"),
+          arguments: [false, true], ["play", "stop", "saveFailure", "removed", "settings", "repair"])
+    func doubleClickUpgradesPendingSelectionWithoutAnotherPrefix(normalize: Bool, action: String) async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("PlaybackCoreTests/Fixtures/tone.wav")
+        let url = fixture.root.appendingPathComponent("a.wav")
+        try FileManager.default.copyItem(at: source, to: url)
+        let suite = "lcmp-row-click-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let worker = HeldPreprocessor(url, prefix: true)
+        let playback = PlaybackController(); playback.setVolume(0)
+        let store = MemoryStore(), refs = TestReferences()
+        let model = LibraryController(playback: playback, store: store, references: refs,
+            preprocessingEnabled: true, preferences: defaults, preprocessor: worker)
+        defer { model.shutdown() }
+        let list = try #require(model.document.currentPlaylistID)
+        await model.importFiles([url], into: list)
+        model.setNormalizesVolume(normalize)
+        let entry = try #require(model.playlist(list)?.entries.first)
+        model.clickEntry(entry.id, in: list, clickCount: 1)
+        try await waitAsync { await worker.waiting }
+        model.clickEntry(entry.id, in: list, clickCount: 2)
+        #expect(model.isPreparing && playback.state != .playing)
+        #expect(await worker.prefixCalls[url] == 1)
+        if action == "stop" { model.stop() }
+        if action == "saveFailure" { store.fail = true }
+        if action == "removed" { model.removeEntry(entry.id, from: list) }
+        if action == "settings" { model.setNormalizationTarget(-18) }
+        if action == "repair" {
+            let replacement = fixture.root.appendingPathComponent("replacement.wav")
+            try FileManager.default.copyItem(at: source, to: replacement)
+            model.repairTrack(entry.trackID, using: replacement)
+        }
+        await worker.release()
+        try await wait { !model.isPreparing }
+        if action == "play" {
+            #expect(playback.state == .playing && model.currentEntry?.id == entry.id)
+            #expect((playback.normalizationPlan != nil) == normalize)
+            #expect(await worker.levelCalls[url, default: 0] == (normalize ? 1 : 0))
+            #expect(await worker.prefixCalls[url] == 1)
+        } else {
+            #expect(playback.state != .playing)
+            if action == "saveFailure" { #expect(model.error != nil) }
+        }
+        model.stop(); try await wait { refs.scopes.active == 0 }
+        #expect(refs.scopes.maximum <= 2)
+    }
+
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_NEXT_PROMOTION_PROFILE"] == "1"))
     func largeFLACScanContinuesAcrossManualAndNaturalAdvance() async throws {
         let root = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_FIXTURES"]))

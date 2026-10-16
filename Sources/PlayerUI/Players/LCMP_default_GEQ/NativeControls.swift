@@ -70,18 +70,22 @@ struct NativeSlider: NSViewRepresentable {
     var commit: (() -> Void)? = nil
     var cancel: (() -> Void)? = nil
     var focusChanged: ((Bool) -> Void)? = nil
+    var volumeCurve = false
+    var trackingChanged: ((Bool) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSSlider {
         let slider = CommitSlider(frame: .zero)
         slider.cell = ThinSliderCell()
-        slider.minValue = range.lowerBound; slider.maxValue = range.upperBound; slider.doubleValue = value
+        slider.minValue = range.lowerBound; slider.maxValue = range.upperBound
+        slider.volumeCurve = volumeCurve; slider.doubleValue = volumeCurve ? VolumeCurve.position(for: value) : value
         slider.target = context.coordinator; slider.action = #selector(Coordinator.changed(_:))
         slider.isVertical = vertical
         slider.focusOnAttach = vertical
         slider.isEnabled = context.environment.isEnabled
         slider.isContinuous = true
         slider.controlSize = .small
+        slider.onTrackingChanged = { context.coordinator.parent.trackingChanged?($0) }
         slider.onCommit = { context.coordinator.parent.commit?() }
         slider.onCancel = { context.coordinator.parent.cancel?() }
         slider.onFocusChanged = { context.coordinator.parent.focusChanged?($0) }
@@ -92,16 +96,19 @@ struct NativeSlider: NSViewRepresentable {
         context.coordinator.parent = self
         slider.minValue = range.lowerBound
         slider.maxValue = range.upperBound
-        slider.doubleValue = value
+        if let slider = slider as? CommitSlider { slider.volumeCurve = volumeCurve }
+        slider.doubleValue = volumeCurve ? VolumeCurve.position(for: value) : value
         slider.isEnabled = context.environment.isEnabled
         if !slider.isEnabled, slider.window?.firstResponder === slider { slider.window?.makeFirstResponder(nil) }
     }
     @MainActor final class Coordinator: NSObject {
         var parent: NativeSlider
         init(_ parent: NativeSlider) { self.parent = parent }
-        @objc func changed(_ sender: NSSlider) { parent.value = sender.doubleValue }
+        @objc func changed(_ sender: NSSlider) { parent.value = parent.volumeCurve ? VolumeCurve.gain(at: sender.doubleValue) : sender.doubleValue }
     }
     final class CommitSlider: NSSlider {
+        var volumeCurve = false
+        var onTrackingChanged: ((Bool) -> Void)?
         var onCommit: (() -> Void)?
         var focusOnAttach = false
         var onCancel: (() -> Void)?
@@ -119,7 +126,12 @@ struct NativeSlider: NSViewRepresentable {
             super.viewDidMoveToWindow()
             if focusOnAttach { window?.makeFirstResponder(self) }
         }
-        override func mouseDown(with event: NSEvent) { super.mouseDown(with: event); onCommit?() }
+        override func mouseDown(with event: NSEvent) {
+            guard isEnabled else { return }
+            onTrackingChanged?(true)
+            defer { onTrackingChanged?(false) }
+            super.mouseDown(with: event); onCommit?()
+        }
         override func keyDown(with event: NSEvent) {
             if event.keyCode == 53 { onCancel?(); return }
             guard isEnabled else { return }
@@ -132,11 +144,14 @@ struct NativeSlider: NSViewRepresentable {
                 onCommit?()
             } else { super.keyDown(with: event) }
         }
-        override func accessibilityValue() -> Any? { NSNumber(value: doubleValue) }
+        override func accessibilityValue() -> Any? { NSNumber(value: volumeCurve ? VolumeCurve.gain(at: doubleValue) : doubleValue) }
+        override func accessibilityValueDescription() -> String? {
+            volumeCurve ? "\(Int((VolumeCurve.gain(at: doubleValue) * 100).rounded()))%" : super.accessibilityValueDescription()
+        }
         override func setAccessibilityValue(_ value: Any?) {
             let number = (value as? NSNumber)?.doubleValue ?? (value as? String).flatMap(Double.init)
             guard isEnabled, let number, number.isFinite else { return }
-            doubleValue = min(maxValue, max(minValue, number))
+            doubleValue = volumeCurve ? VolumeCurve.position(for: number) : min(maxValue, max(minValue, number))
             if let action { sendAction(action, to: target) }
             onCommit?()
         }
@@ -145,7 +160,9 @@ struct NativeSlider: NSViewRepresentable {
         private func adjustAccessibility(_ direction: Double) -> Bool {
             guard isEnabled else { return false }
             let step = isVertical ? (maxValue - minValue) / 20 : min(5, (maxValue - minValue) / 20)
-            setAccessibilityValue(doubleValue + step * direction)
+            doubleValue = min(maxValue, max(minValue, doubleValue + step * direction))
+            if let action { sendAction(action, to: target) }
+            onCommit?()
             return true
         }
     }

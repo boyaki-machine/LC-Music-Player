@@ -262,3 +262,97 @@ struct NativeViewTests {
         window.orderOut(nil); window.contentView = nil; playback.close()
     }
 }
+
+extension LibraryNativeViewTests {
+    @Test func hostedRowMouseClicksReachPlaybackAndMissingSourceDetail() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-row-ui-\(UUID())")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        var doc = LibraryDocument()
+        for index in 0..<3 {
+            let url = root.appendingPathComponent("sample-\(index).wav"); try Data([1]).write(to: url)
+            let track = LibraryTrack(name: "クリック検証 \(index)", reference: TrackReference(bookmark: index == 2 ? nil : Data([1]), lastKnownURL: url))
+            doc.tracks.append(track); doc.playlists[0].entries.append(PlaylistEntry(trackID: track.id))
+        }
+        let playback = PlaybackController(makeBackend: { _ in UIBackend() })
+        let library = LibraryController(playback: playback, store: UIStore(doc), references: UIReferences())
+        defer { library.shutdown() }
+        library.refreshAvailability()
+        let presentation = PlayerPresentation(); presentation.toggleExtension()
+        let actions = LibraryActions(files: { _ in }, folder: {}, repair: { _ in }, importPlaylist: {}, exportPlaylist: { _ in })
+        let host = NSHostingView(rootView: ExtensionView(playback: playback, presentation: presentation, library: library, actions: actions))
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 300)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host; window.setFrameOrigin(NSPoint(x: -10000, y: -10000)); window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        func click(_ index: Int, count: Int) async throws {
+            host.layoutSubtreeIfNeeded()
+            let id = doc.playlists[0].entries[index].id.uuidString
+            let surface = try #require(allViews(host).compactMap { $0 as? PlaylistClickSurface.ClickView }.first { $0.identifier?.rawValue == id })
+            let local = NSPoint(x: surface.bounds.midX, y: surface.bounds.midY)
+            let location = surface.convert(local, to: nil)
+            func event(_ type: NSEvent.EventType) throws -> NSEvent {
+                try #require(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: count, pressure: 1))
+            }
+            window.sendEvent(try event(.leftMouseDown)); window.sendEvent(try event(.leftMouseUp))
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100))
+        try await click(0, count: 1); #expect(playback.state == .ready)
+        try await click(0, count: 2); #expect(playback.state == .playing)
+        try await Task.sleep(for: .milliseconds(40))
+        try await click(1, count: 1); #expect(library.currentIndex == 1 && playback.state == .playing)
+        try await Task.sleep(for: .milliseconds(40))
+        try await click(2, count: 1); #expect(presentation.section == .source && playback.state == .playing)
+    }
+}
+
+extension LibraryNativeViewTests {
+    @Test func mainVolumeReopensWithoutChangingGainAndClosesOnExternalFocus() async throws {
+        let rootURL = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-volume-ui-\(UUID()).wav")
+        try Data([1]).write(to: rootURL); defer { try? FileManager.default.removeItem(at: rootURL) }
+        let playback = PlaybackController(makeBackend: { _ in UIBackend() })
+        #expect(playback.select(rootURL)); defer { playback.close() }
+        let model = PlayerPresentation()
+        let host = NSHostingView(rootView: PlayerView(playback: playback, presentation: model, chooseFile: {}, toggleExtension: {}))
+        host.frame = CGRect(x: 0, y: 0, width: 360, height: 210)
+        let container = NSView(frame: CGRect(x: 0, y: 0, width: 460, height: 210))
+        let outside = NSTextField(frame: CGRect(x: 370, y: 20, width: 80, height: 30))
+        container.addSubview(host); container.addSubview(outside)
+        let window = NSWindow(contentRect: container.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = container; window.setFrameOrigin(NSPoint(x: -10000, y: -10000)); window.orderFront(nil)
+        defer { model.closeOverlays(); window.orderOut(nil); window.contentView = nil }
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        func settle() async throws {
+            host.layoutSubtreeIfNeeded(); window.update()
+            try await Task.sleep(for: .milliseconds(60))
+        }
+        for gain: Float in [0.25, 0.036, 0.75] {
+            model.volumeVisible = false; playback.setVolume(gain)
+            try await settle()
+            model.volumeVisible = true; try await settle()
+            let slider = try #require(allViews(host).compactMap { $0 as? NativeSlider.CommitSlider }.first { $0.volumeCurve })
+            #expect(window.firstResponder === slider)
+            #expect(abs(VolumeCurve.gain(at: slider.doubleValue) - Double(gain)) < 1e-10)
+            #expect(playback.volume == gain && model.volumeVisible)
+            slider.setAccessibilityValue(0.1875); try await settle()
+            #expect(abs(playback.volume - 0.1875) < 1e-6 && model.volumeVisible)
+            #expect(window.makeFirstResponder(outside))
+            try await settle()
+            #expect(!model.volumeVisible)
+        }
+        for state in ["STOP", "PLAY", "PAUSE"] {
+            if state != "STOP" { playback.togglePlayPause() }
+            try await settle()
+            if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
+                try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try #require(rep.representation(using: .png, properties: [:]))
+                    .write(to: URL(fileURLWithPath: directory).appendingPathComponent("main-\(state).png"))
+            }
+        }
+    }
+}

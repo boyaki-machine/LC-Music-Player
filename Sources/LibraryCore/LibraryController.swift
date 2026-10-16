@@ -29,6 +29,7 @@ import AudioProcessingCore
     @ObservationIgnored private let preferences: UserDefaults
     @ObservationIgnored private let preprocessor: any AudioPreprocessing
     @ObservationIgnored private var cacheAuditTask: Task<Void, Never>?
+    @ObservationIgnored private var selectionIntent: SelectionIntent?
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
     @ObservationIgnored private var selectionCancellation: PreparationCancellation?
     @ObservationIgnored private var preparationID = UUID()
@@ -195,6 +196,23 @@ import AudioProcessingCore
             self.error = error.localizedDescription; return false
         }
     }
+    /// A second click upgrades the pending selection instead of opening another decoder.
+    public func clickEntry(_ entryID: UUID, in playlistID: UUID, clickCount: Int) {
+        guard canEdit, !shuttingDown, clickCount == 1 || clickCount == 2,
+              let reference = currentReference(entryID, in: playlistID) else { return }
+        let play = playback.state == .playing || clickCount == 2
+        if let intent = selectionIntent, intent.entry == entryID, intent.playlist == playlistID,
+           intent.reference == reference {
+            if play { intent.autoPlay = true }
+            return
+        }
+        if document.currentPlaylistID == playlistID, document.currentEntryID == entryID {
+            if clickCount == 2, playback.state != .playing { togglePlayPause() }
+            return
+        }
+        selectEntry(entryID, in: playlistID, autoPlay: play)
+    }
+
     public func playPlaylist(_ id: UUID) {
         if let entry = playlist(id)?.entries.first { selectEntry(entry.id, in: id, autoPlay: true) }
     }
@@ -395,7 +413,7 @@ extension LibraryController {
             }
         }
         selectionCancellation?.cancel(); selectionCancellation = nil
-        selectionTask?.cancel(); selectionTask = nil; preparationID = UUID(); isPreparing = false
+        selectionTask?.cancel(); selectionTask = nil; selectionIntent = nil; preparationID = UUID(); isPreparing = false
         cancelNext(); cancelMeasurement()
         measuredTrack = nil; peakMeasurement = measuresMaximumVolume ? .pending : .disabled
         measuredLevels = nil; levelMeasurement = normalizesVolume ? .pending : .disabled; preparationStage = nil
@@ -403,6 +421,8 @@ extension LibraryController {
     private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double = 0) {
         guard !shuttingDown else { return }
         let requestedReference = currentReference(entryID, in: playlistID)
+        let intent = SelectionIntent(entry: entryID, playlist: playlistID, reference: requestedReference, autoPlay: autoPlay)
+        selectionIntent = intent
         let candidate = nextPrepared.flatMap { request in
             request.entry == entryID && request.reference == requestedReference ? request : nil
         }
@@ -427,7 +447,7 @@ extension LibraryController {
         selectionTask = Task { [weak self] in
             defer {
                 if let self, self.preparationID == id {
-                    self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil
+                    self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
                 }
             }
             do {
@@ -455,7 +475,7 @@ extension LibraryController {
                     prepared = try await self.preprocessor.prepare(resolved.url, cancellation: cancellation, seconds: 2, byteLimit: 32 * 1024 * 1024)
                 }
                 var levels: TrackAudioMetrics?
-                if autoPlay, self.normalizesVolume {
+                if intent.autoPlay, self.normalizesVolume {
                     let profile = try SFBAudioBackend.measurementProfile()
                     let candidate = cached?.levels ?? previousLevels
                     if let candidate, candidate.source == prepared.source, candidate.profile == profile,
@@ -473,7 +493,7 @@ extension LibraryController {
                 var next = self.document
                 next.currentPlaylistID = playlistID; next.currentEntryID = entryID
                 if let i = next.tracks.firstIndex(where: { $0.id == track.id }) { next.tracks[i].reference = resolved.reference }
-                if autoPlay {
+                if intent.autoPlay {
                     guard self.playback.selectPrepared(prepared, using: resolved.lease, metrics: levels,
                         settings: self.normalizationSettings, committing: {
                         if next != self.document { try self.store.save(next) }
@@ -486,7 +506,7 @@ extension LibraryController {
                         }) else { throw self.playback.error ?? PlaybackError.inaccessibleFile }
                 }
                 self.document = next; self.unavailable[track.id] = nil; self.error = nil; self.message = nil
-                self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil
+                self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
                 self.preparationStage = nil
                 if position > 0 { self.playback.seek(to: position) }
                 self.measuredLevels = levels
@@ -495,10 +515,10 @@ extension LibraryController {
                 if let peak = cached?.peak, peak.source == prepared.source {
                     self.measuredTrack = track.id; self.peakMeasurement = .complete(peak)
                 }
-                if autoPlay { self.playback.togglePlayPause(using: resolved.lease) }
+                if intent.autoPlay { self.playback.togglePlayPause(using: resolved.lease) }
             } catch {
                 guard let self, self.preparationID == id else { return }
-                self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil
+                self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
                 self.preparationStage = nil
                 if !(error is CancellationError) {
                     self.error = "再生を準備できませんでした。\(error.localizedDescription)"
@@ -610,4 +630,15 @@ extension LibraryController {
     var levels: TrackAudioMetrics?
     var failure: (any Error)?
     init(entry: UUID, reference: TrackReference) { self.entry = entry; self.reference = reference }
+}
+
+/// MainActor-owned intent; only the current selection can be upgraded by a row click.
+@MainActor private final class SelectionIntent {
+    let entry: UUID
+    let playlist: UUID
+    let reference: TrackReference?
+    var autoPlay: Bool
+    init(entry: UUID, playlist: UUID, reference: TrackReference?, autoPlay: Bool) {
+        self.entry = entry; self.playlist = playlist; self.reference = reference; self.autoPlay = autoPlay
+    }
 }
