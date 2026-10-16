@@ -76,3 +76,9 @@ PlayerPresentationは2秒の取消可能な非表示タイマーを持つ。シ�
 Player UIは再生の開始・前後曲・停止をLibraryControllerへ渡し、停止は準備中にも有効にする。拡張画面は`isPreparing`を表示する。設定タブはScrollView内に最大音量測定のToggle、説明、測定状態・dBFSまたは無音を表示し、`setMeasuresMaximumVolume(_:)`で変更する。最小240ptでも説明を折り返し、残りはスクロールで読める構成にする。デコード・測定・キャッシュはViewが所有しない。仕様は[再生前処理](04_preprocessing-implementation.md)を参照する。
 
 設定には音量自動調整のToggleと目標LUFSのPickerも置く。`setNormalizesVolume`／`setNormalizationTarget`へ操作を渡し、`levelMeasurement`に基づくLUFS/true peak、`playback.normalizationPlan`の補正dBと制限理由を表示する。`preparationStage`で全曲測定中を案内する。自動調整設定変更による一時停止と、再生を継続する手動音量操作を区別する。測定・補正の契約は[音量自動調整](06_audio-processing-design.md)を参照する。
+
+## 謝辞ウィンドウとの接続
+
+ExtensionViewの`showAcknowledgements`コールバックを設定ボタンから呼びます。AppDelegateは`AcknowledgementsWindowController`を一つ所有し、メイン/拡張のdelegateを情報ウィンドウへ設定しません。760×520ptで開き、最小560×360ptのリサイズと閉じる操作に対応します。情報ウィンドウがkeyのときの⌘Wはそのウィンドウを閉じます。原文のコピー・全選択は標準の編集メニューとNSTextViewのresponderへ渡します。表示モデルとViewは`Sources/PlayerUI/Acknowledgements/`に置き、再生制御・ライブラリへのコールバックを持ちません。
+
+謝辞画面は`PlayerGlassBackground`を再利用し、darkAquaの不透明なタイトルバー（`titleVisibility = .visible`、`titlebarAppearsTransparent = false`）・文書選択欄と暗い一覧を組み合わせます。本文のNSScrollView/NSTextViewは背景を透過し、白85%の文字と低彩度の緑の選択範囲を使います。透明度を下げるOS設定は共通背景の不透明色へ反映されます。

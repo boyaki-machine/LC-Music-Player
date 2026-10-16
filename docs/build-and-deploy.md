@@ -4,7 +4,7 @@
 
 ## 必要な環境
 
-macOS 14以降、Swift 6.2以降を扱えるXcodeまたはCommand Line Tools、Python 3、makeを使用します。`xcode-select -p`、`swift --version`、`python3 --version`、`make --version`で環境を確認できます。`codesign`、`otool`、`install_name_tool`、`ditto`はmacOSの開発ツールを使用します。iPhone向けの成果物は作成しません。
+macOS 14以降、Swift 6.2以降を扱えるXcodeまたはCommand Line Tools、Python 3.9以降、makeを使用します。`xcode-select -p`、`swift --version`、`python3 --version`、`make --version`で環境を確認できます。`codesign`、`otool`、`install_name_tool`、`ditto`はmacOSの開発ツールを使用します。iPhone向けの成果物は作成しません。
 
 以下はリポジトリ直下で実行します。初回はネットワーク接続が必要で、SwiftPMが`Package.resolved`に基づく公開依存を取得します。`scripts/swift.sh`はコマンド内だけキーチェーン・netrc・Gitの認証ヘルパー参照を無効にし、保存済み認証やグローバル設定は変更しません。
 
@@ -88,3 +88,11 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 - 署名・同梱に失敗した場合はビルドを成功扱いにせず、最初の非0終了を確認します。検証済みの別アプリを上書きせず、新しい出力先で再試行できます。
 - ビルド中のアプリ置換を避けるには、使用中のアプリを終了するか`RELEASE_OUTPUT`／`DEBUG_OUTPUT`を変更します。
 - Debugで全曲測定が遅い場合はReleaseでも比較します。測定待ちと先頭PCMの準備は別の処理で、詳細は[前処理](./design/04_preprocessing-implementation.md)を参照してください。
+
+## 謝辞情報の更新
+
+各ビルドは現在の解決済み依存から`Contents/Resources/ThirdPartyLicenses/index.json`と原文を再生成します。make経由とbuild-app.pyの直接実行で共通です。設定→「このアプリについて」→「謝辞とライセンス…」で確認できます。依存バージョンを勝手に更新せず、Package.resolvedに反映された追加・削除・版変更を次のビルドで取り込みます。
+
+`make test`には生成器のPythonテストも含まれます。依存グラフの不一致や原文不足で生成に失敗した場合はビルドを成功扱いにせず、解決済みcheckoutと上流のnotice収録状況を確認してください。原文を省略する・ダミー文書で埋める手順はありません。
+
+ZIPを展開した後は署名とともに、`ThirdPartyLicenses/index.json`の依存が`Package.resolved`と一致し、各文書が索引の相対パスに存在することを確認します。ビルド機のcheckoutへアクセスせず、展開したアプリ内だけで読めることも確認します。

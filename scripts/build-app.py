@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Build a local macOS .app with dynamically linked audio frameworks and notices."""
 import argparse
+import json
+from acknowledgements import generate
 from pathlib import Path
 import plistlib
 import re
@@ -37,17 +39,12 @@ def main():
         shutil.copytree(framework, destination, symlinks=True)
         subprocess.run(["codesign", "--force", "--sign", "-", str(destination)], check=True)
 
-    # Preserve exact notices from the pinned dependency checkouts.
+    # Regenerate from the currently resolved graph, not every cached checkout.
+    graph = json.loads(subprocess.check_output(
+        [str(ROOT / "scripts/swift.sh"), "package", "show-dependencies", "--format", "json"],
+        text=True, cwd=ROOT))
     notices = contents / "Resources/ThirdPartyLicenses"
-    for checkout in sorted((ROOT / ".build/checkouts").iterdir()):
-        for item in checkout.rglob("*"):
-            if ".git" in item.relative_to(checkout).parts:
-                continue
-            if item.is_file() and (item.name.upper().startswith(("LICENSE", "COPYING", "COPYRIGHT"))
-                                   or item.name == "ACKNOWLEDGMENTS.md"):
-                target = notices / checkout.name / item.relative_to(checkout).parent
-                target.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(item, target / item.name)
+    generate(ROOT / "Package.resolved", graph, ROOT / ".build/artifacts", notices)
     shutil.copy2(ROOT / "Package.resolved", notices / "Package.resolved")
     shutil.copy2(ROOT / "docs/design/11_third-party-dependencies.md", notices / "dependency-notes.md")
     with (contents / "Info.plist").open("wb") as file:

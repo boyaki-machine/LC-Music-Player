@@ -20,6 +20,7 @@ public struct ExtensionView: View {
     let library: LibraryController
     @Bindable var presentation: PlayerPresentation
     let actions: LibraryActions
+    let showAcknowledgements: () -> Void
     let resizeExtension: (CGFloat) -> Void
     @State private var screen: Screen = .list
     @State private var browsingID: UUID?
@@ -32,9 +33,10 @@ public struct ExtensionView: View {
     @State private var reveal = UUID()
     private enum Screen { case list, chooser, manage, create, rename, add }
     public init(playback: PlaybackController, presentation: PlayerPresentation, library: LibraryController, actions: LibraryActions,
-                resizeExtension: @escaping (CGFloat) -> Void = { _ in }) {
+                resizeExtension: @escaping (CGFloat) -> Void = { _ in }, showAcknowledgements: @escaping () -> Void = {}) {
         self.playback = playback; self.presentation = presentation; self.library = library; self.actions = actions
         self.resizeExtension = resizeExtension
+        self.showAcknowledgements = showAcknowledgements
     }
     private var viewed: MusicPlaylist? { library.playlist(browsingID) ?? library.currentPlaylist ?? library.document.playlists.first }
     private var indicator: Color {
@@ -115,6 +117,11 @@ public struct ExtensionView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                             Text("⌘O 音源登録 · Space 再生／一時停止\n⌘M 最小化 · ⌘W 閉じる · ⌘Q 終了")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Divider()
+                            Text("このアプリについて")
+                            AcknowledgementsButton(action: showAcknowledgements)
+                                .frame(height: 24)
+
                         }.frame(maxWidth: .infinity, alignment: .leading)
                     }
 

@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private let presentation = PlayerPresentation()
     private var mainWindow: NSWindow!
     private var extensionWindow: NSWindow!
+    private let acknowledgements = AcknowledgementsWindowController()
     private var arranging = false
     private var activePanel: NSSavePanel?
     private let shutdownLog = Logger(subsystem: "local.lcmp.player", category: "shutdown")
@@ -42,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         extensionWindow = makeWindow(size: WindowLayout.extensionSize, title: "LCMP 拡張")
         mainWindow.contentView = NSHostingView(rootView: PlayerView(playback: playback, presentation: presentation, library: library,
                                             chooseFile: chooseFile, toggleExtension: toggleExtension))
-        extensionWindow.contentView = NSHostingView(rootView: ExtensionView(playback: playback, presentation: presentation, library: library, actions: LibraryActions(files: { [weak self] id in self?.selectSources(folder: false, target: id) }, folder: { [weak self] in self?.selectSources(folder: true) }, repair: { [weak self] id in self?.repairSource(id) }, importPlaylist: importPlaylist, exportPlaylist: exportPlaylist), resizeExtension: { [weak self] height in self?.resizeExtension(to: height) }))
+        extensionWindow.contentView = NSHostingView(rootView: ExtensionView(playback: playback, presentation: presentation, library: library, actions: LibraryActions(files: { [weak self] id in self?.selectSources(folder: false, target: id) }, folder: { [weak self] in self?.selectSources(folder: true) }, repair: { [weak self] id in self?.repairSource(id) }, importPlaylist: importPlaylist, exportPlaylist: exportPlaylist), resizeExtension: { [weak self] height in self?.resizeExtension(to: height) }, showAcknowledgements: { [weak self] in self?.acknowledgements.show() }))
         mainWindow.delegate = self
         extensionWindow.delegate = self
         mainWindow.center()
@@ -195,7 +196,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func stopPlayback() { library.stop() }
     @objc private func toggleSeek() { mainWindow.makeKeyAndOrderFront(nil); presentation.seekVisible.toggle() }
     @objc private func toggleVolume() { mainWindow.makeKeyAndOrderFront(nil); presentation.volumeVisible.toggle() }
-    @objc private func closePlayer() { mainWindow.performClose(nil) }
+    @objc private func closePlayer() {
+        if NSApp.keyWindow === acknowledgements.window { acknowledgements.window?.performClose(nil) }
+        else { mainWindow.performClose(nil) }
+    }
     @objc private func minimizePlayer() { mainWindow.miniaturize(nil) }
     @objc private func revealPlayer() { showPlayer() }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
@@ -220,6 +224,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
         menu("LCMP", items: [("LCMPを終了", #selector(quitPlayer), "q")])
         menu("ファイル", items: [("音楽ファイルを登録…", #selector(chooseFile), "o"), ("M3U8を読み込む…", #selector(importPlaylist), "i"), ("閉じる", #selector(closePlayer), "w")])
+        let edit = NSMenuItem(); edit.title = "編集"
+        let editMenu = NSMenu(title: "編集")
+        editMenu.addItem(withTitle: "コピー", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "すべてを選択", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.submenu = editMenu; bar.addItem(edit)
         menu("再生", items: [("再生／一時停止", #selector(playPause), " "), ("停止", #selector(stopPlayback), ".")])
         bar.items.last?.submenu?.items.first?.keyEquivalentModifierMask = []
         menu("表示", items: [("シークバー", #selector(toggleSeek), "s"), ("音量", #selector(toggleVolume), "u"), ("拡張画面", #selector(toggleExtension), "e")])
