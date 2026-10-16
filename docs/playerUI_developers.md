@@ -35,6 +35,7 @@ Sources/
 │   └── Shared/
 │       ├── SpectrumSample.swift       UIに依存しない表示用レベル・時刻の値型
 │       └── VisualizationClock.swift   共通host clock・activity
+├── PreprocessingCore/                 先頭PCM準備・全曲最大音量・共通デコーダ
 ├── PlaybackCore/                      再生制御・音声バックエンド
 ├── LibraryCore/                       ライブラリ・リスト・ファイル参照
 ├── AnalysisCore/                      FFT・帯域パワー・解析時刻
@@ -65,6 +66,8 @@ flowchart LR
     UI --> Library[LibraryCore]
     UI --> Viz[VisualizationKit共通部品]
     UI --> Analysis[AnalysisCore]
+    Library --> Preprocessing[PreprocessingCore]
+    Playback --> Preprocessing
     Playback --> Analysis[AnalysisCore]
     Analysis --> Transport[AnalysisTransport]
     Analysis -. AnalysisFrame .-> Playback
@@ -79,11 +82,13 @@ flowchart LR
 | アプリ → メイン画面 | `PlayerView(playback:presentation:library:chooseFile:toggleExtension:)` | 再生・ライブラリ・画面状態を所有して渡す。ファイル選択とウィンドウ操作はclosureで渡す |
 | アプリ → 拡張画面 | `ExtensionView`、`LibraryActions`、`resizeExtension` closure | ファイル選択・修復・M3U8入出力とAppKitウィンドウ変更を担当する |
 | 画面 → 再生 | `PlaybackController` | `togglePlayPause()`、`stop()`、`seek(to:)`、`setVolume(_:)`、`toggleMute()`等の公開操作を使う |
-| 画面 → ライブラリ | `LibraryController` | リストの前後曲・編集・取り込み等を公開操作へ渡す。Viewから保存ファイルを直接編集しない |
+| 画面 → ライブラリ | `LibraryController` | 再生開始・停止・前後曲・編集・取り込みを公開操作へ渡す。`isPreparing`と`peakMeasurement`を表示し、測定設定は`setMeasuresMaximumVolume(_:)`で変更する |
 | 画面 → 解析購読 | `PlaybackController.configureAnalysis(_:)` | 表示するデザインの`AnalysisConfiguration`を設定し、非表示時はnilで解除する |
 | 再生 → 画面 | `analysisFrame`、`analysisResetID`、`state` | 最新フレームを渡し、状態・取消ID変更を可視化へ反映する |
 | 画面 → 可視化状態 | `VisualizationDriver.synchronize(activity:visible:)`、`receive(_:)`、`reset()` | MainActorで再生状態・表示可否・解析結果・シーク等のリセットを渡す |
 | 状態 → 描画 | `LCMPDefaultGEQView(driver:)` | `snapshot`と`drawTime`を描く。描画内から再生や解析を開始しない |
+
+背景選択は非同期で確定する。前処理のバッファや全曲測定をUIへ持ち込まず、音声処理へ測定値を渡す場合は検証済みの`currentTrackPeak`を使う。詳細は[再生前処理の実装設計](./preprocessing-implementation.md)を参照する。
 
 公開入口の実装は[PlayerView.swift](../Sources/PlayerUI/PlayerView.swift)、実際の橋渡しは[PlaybackVisualization.swift](../Sources/PlayerUI/Players/LCMP_default_GEQ/Visualization/PlaybackVisualization.swift)にある。後者は約30Hzの解析結果の観測を局所化し、操作部全体の再評価を抑える。
 

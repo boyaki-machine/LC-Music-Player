@@ -25,7 +25,10 @@ uint64_t lcmp_pcm_dropped(LCMPPCMQueue *queue);
 uint32_t lcmp_pcm_high_water(LCMPPCMQueue *queue);
 // Worker-side finite sanitization, before vector operations; not a render effect.
 void lcmp_copy_finite(const float *input, float *output, uint32_t count);
-// Owner must unregister before destroying queue or AudioUnit. One producer only.
-OSStatus lcmp_pcm_attach(LCMPPCMQueue *queue, AudioUnit unit, double sample_rate, double output_latency);
-OSStatus lcmp_pcm_detach(LCMPPCMQueue *queue, AudioUnit unit);
+// Stable render context: retain until the owning engine is stopped.
+typedef struct LCMPRenderSource LCMPRenderSource;
+LCMPRenderSource *lcmp_render_source_create(AudioUnit unit);
+OSStatus lcmp_render_source_bind(LCMPRenderSource *source, LCMPPCMQueue *queue, double sample_rate, double output_latency);
+void lcmp_render_source_clear(LCMPRenderSource *source, LCMPPCMQueue *queue);
+void lcmp_render_source_destroy(LCMPRenderSource *source);
 #endif

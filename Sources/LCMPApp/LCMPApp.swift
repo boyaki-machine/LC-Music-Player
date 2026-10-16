@@ -27,7 +27,7 @@ final class PlayerWindow: NSWindow {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     private let playback = PlaybackController()
-    private lazy var library = LibraryController(playback: playback)
+    private lazy var library = LibraryController(playback: playback, preprocessingEnabled: true)
     private let presentation = PlayerPresentation()
     private var mainWindow: NSWindow!
     private var extensionWindow: NSWindow!
@@ -192,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         }
     }
     @objc private func playPause() { library.togglePlayPause() }
-    @objc private func stopPlayback() { playback.stop() }
+    @objc private func stopPlayback() { library.stop() }
     @objc private func toggleSeek() { mainWindow.makeKeyAndOrderFront(nil); presentation.seekVisible.toggle() }
     @objc private func toggleVolume() { mainWindow.makeKeyAndOrderFront(nil); presentation.volumeVisible.toggle() }
     @objc private func closePlayer() { mainWindow.performClose(nil) }
@@ -202,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         switch menuItem.action {
         case #selector(chooseFile), #selector(importPlaylist): return !presentation.selectingFile && library.canEdit
         case #selector(playPause): return playback.canPlay
-        case #selector(stopPlayback): return playback.canStop
+        case #selector(stopPlayback): return playback.canStop || library.isPreparing
         default: return true
         }
     }

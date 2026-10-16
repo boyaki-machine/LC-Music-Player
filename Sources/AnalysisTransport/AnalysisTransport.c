@@ -4,6 +4,7 @@
 #include <string.h>
 #include <mach/mach_time.h>
 #include <math.h>
+#include <sched.h>
 struct LCMPPCMQueue {
     uint32_t capacity, max_frames;
     _Atomic uint64_t read_index, write_index, dropped;
@@ -72,19 +73,28 @@ void lcmp_copy_finite(const float *input, float *output, uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) output[i] = isfinite(input[i]) ? input[i] : 0;
 }
 
+struct LCMPRenderSource {
+    AudioUnit unit;
+    _Atomic(LCMPPCMQueue *) queue;
+    _Atomic uint32_t readers;
+};
 static OSStatus capture(void *context, AudioUnitRenderActionFlags *flags,
                         const AudioTimeStamp *time, UInt32 bus, UInt32 frames, AudioBufferList *data) {
     (void)bus;
     if (!(*flags & kAudioUnitRenderAction_PostRender) || (*flags & kAudioUnitRenderAction_PostRenderError)) return noErr;
-    LCMPPCMQueue *q = context;
+    LCMPRenderSource *source = context;
+    // The context outlives the engine. Count before loading the replaceable queue.
+    atomic_fetch_add_explicit(&source->readers, 1, memory_order_seq_cst);
+    LCMPPCMQueue *q = atomic_load_explicit(&source->queue, memory_order_seq_cst);
+    if (!q) { atomic_fetch_sub_explicit(&source->readers, 1, memory_order_seq_cst); return noErr; }
     q->render_sequence++;
     if (!data || !data->mNumberBuffers || data->mBuffers[0].mNumberChannels != 1 ||
         data->mBuffers[0].mDataByteSize < frames * sizeof(float)) {
-        atomic_fetch_add_explicit(&q->dropped, 1, memory_order_relaxed); return noErr;
+        atomic_fetch_add_explicit(&q->dropped, 1, memory_order_relaxed); goto done;
     }
     const float *right = NULL;
     if (data->mNumberBuffers > 1) {
-        if (data->mBuffers[1].mNumberChannels != 1 || data->mBuffers[1].mDataByteSize < frames * sizeof(float)) return noErr;
+        if (data->mBuffers[1].mNumberChannels != 1 || data->mBuffers[1].mDataByteSize < frames * sizeof(float)) goto done;
         right = data->mBuffers[1].mData;
     }
     LCMPPCMStamp stamp = {0};
@@ -98,9 +108,12 @@ static OSStatus capture(void *context, AudioUnitRenderActionFlags *flags,
     stamp.output_latency = q->output_latency;
     stamp.latency_valid = isfinite(q->output_latency) && q->output_latency >= 0;
     lcmp_pcm_push(q, data->mBuffers[0].mData, right, stamp);
+done:
+    atomic_fetch_sub_explicit(&source->readers, 1, memory_order_seq_cst);
     return noErr;
 }
-OSStatus lcmp_pcm_attach(LCMPPCMQueue *q, AudioUnit unit, double rate, double latency) {
+OSStatus lcmp_render_source_bind(LCMPRenderSource *source, LCMPPCMQueue *q, double rate, double latency) {
+    AudioUnit unit = source->unit;
     AudioStreamBasicDescription format = {0};
     UInt32 size = sizeof(format);
     OSStatus status = AudioUnitGetProperty(unit, kAudioUnitProperty_StreamFormat,
@@ -114,8 +127,29 @@ OSStatus lcmp_pcm_attach(LCMPPCMQueue *q, AudioUnit unit, double rate, double la
     q->tick_seconds = (double)info.numer / info.denom / 1e9;
     q->render_rate = rate;
     q->output_latency = latency;
-    return AudioUnitAddRenderNotify(unit, capture, q);
+    LCMPPCMQueue *expected = NULL;
+    return atomic_compare_exchange_strong_explicit(&source->queue, &expected, q, memory_order_seq_cst, memory_order_seq_cst) ? noErr : kAudio_ParamError;
 }
-OSStatus lcmp_pcm_detach(LCMPPCMQueue *q, AudioUnit unit) {
-    return AudioUnitRemoveRenderNotify(unit, capture, q);
+LCMPRenderSource *lcmp_render_source_create(AudioUnit unit) {
+    LCMPRenderSource *source = calloc(1, sizeof(*source));
+    if (!source) return NULL;
+    source->unit = unit;
+    atomic_init(&source->queue, NULL); atomic_init(&source->readers, 0);
+    if (!atomic_is_lock_free(&source->queue) || !atomic_is_lock_free(&source->readers) ||
+        AudioUnitAddRenderNotify(unit, capture, source) != noErr) { free(source); return NULL; }
+    return source;
+}
+void lcmp_render_source_clear(LCMPRenderSource *source, LCMPPCMQueue *queue) {
+    LCMPPCMQueue *expected = queue;
+    if (!atomic_compare_exchange_strong_explicit(&source->queue, &expected, NULL, memory_order_seq_cst, memory_order_seq_cst)) return;
+    // Control thread only: render never waits or locks. New callbacks see NULL.
+    while (atomic_load_explicit(&source->readers, memory_order_seq_cst) != 0) sched_yield();
+}
+void lcmp_render_source_destroy(LCMPRenderSource *source) {
+    if (!source) return;
+    // The owner must stop the engine before releasing its stable context.
+    AudioUnitRemoveRenderNotify(source->unit, capture, source);
+    LCMPPCMQueue *queue = atomic_load_explicit(&source->queue, memory_order_seq_cst);
+    if (queue) lcmp_render_source_clear(source, queue);
+    free(source);
 }

@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 
 let package = Package(
@@ -14,11 +14,13 @@ let package = Package(
     targets: [
         .target(name: "AnalysisTransport"),
         .target(name: "AnalysisCore", dependencies: ["AnalysisTransport"]),
-        .target(name: "PlaybackCore", dependencies: ["SFBAudioEngine", "AnalysisCore"]),
-        .target(name: "LibraryCore", dependencies: ["PlaybackCore"]),
+        .target(name: "PreprocessingCore", dependencies: ["SFBAudioEngine"]),
+        .target(name: "PlaybackCore", dependencies: ["SFBAudioEngine", "AnalysisCore", "PreprocessingCore"]),
+        .target(name: "LibraryCore", dependencies: ["PlaybackCore", "PreprocessingCore"]),
         .target(name: "VisualizationKit"),
         .target(name: "PlayerUI", dependencies: ["PlaybackCore", "LibraryCore", "VisualizationKit", "AnalysisCore"]),
         .executableTarget(name: "LCMPApp", dependencies: ["PlaybackCore", "LibraryCore", "PlayerUI"]),
+        .testTarget(name: "PreprocessingCoreTests", dependencies: ["PreprocessingCore", "SFBAudioEngine"]),
         .testTarget(name: "LibraryCoreTests", dependencies: ["LibraryCore", "PlaybackCore"]),
         .testTarget(name: "AnalysisCoreTests", dependencies: ["AnalysisCore", "AnalysisTransport"]),
         .testTarget(name: "PlayerUITests", dependencies: ["PlayerUI", "VisualizationKit", "PlaybackCore", "AnalysisCore"]),

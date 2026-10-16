@@ -9,6 +9,7 @@ public final class AnalysisSession: @unchecked Sendable {
     public let generation = UUID()
     public let frames: AsyncStream<AnalysisFrame>
     private let continuation: AsyncStream<AnalysisFrame>.Continuation
+    private var renderSource: AnalysisRenderSource?
     private let transport: OpaquePointer
     private let worker = DispatchQueue(label: "local.lcmp.analysis", qos: .userInitiated)
     private let timer: DispatchSourceTimer
@@ -49,6 +50,7 @@ public final class AnalysisSession: @unchecked Sendable {
     deinit {
         timer.cancel()
         continuation.finish()
+        renderSource?.clear(transport)
         lcmp_pcm_destroy(transport)
     }
 
@@ -85,12 +87,16 @@ public final class AnalysisSession: @unchecked Sendable {
     public var droppedBuffers: UInt64 { lcmp_pcm_dropped(transport) }
 
     /// Production producer: C render notification copies PCM without entering Swift.
-    public func attach(to unit: AudioUnit, sampleRate: Double, outputLatency: Double) -> OSStatus {
-        lcmp_pcm_attach(transport, unit, sampleRate, outputLatency)
+    public func attach(to source: AnalysisRenderSource, sampleRate: Double, outputLatency: Double) -> OSStatus {
+        guard renderSource == nil else { return kAudio_ParamError }
+        let status = source.bind(transport, rate: sampleRate, latency: outputLatency)
+        if status == noErr { renderSource = source }
+        return status
     }
 
-    public func detach(from unit: AudioUnit) -> OSStatus {
-        lcmp_pcm_detach(transport, unit)
+    public func detach() {
+        renderSource?.clear(transport)
+        renderSource = nil
     }
 
     private func isEnded() -> Bool {
@@ -182,4 +188,18 @@ public final class AnalysisSession: @unchecked Sendable {
         }
         stateLock.unlock()
     }
+}
+
+/// One stable context per observation AU. The owner stops its engine before releasing this source.
+public final class AnalysisRenderSource: @unchecked Sendable {
+    private let context: OpaquePointer
+    public init(unit: AudioUnit) throws {
+        guard let source = lcmp_render_source_create(unit) else { throw AnalysisError.allocationFailed }
+        context = source
+    }
+    fileprivate func bind(_ queue: OpaquePointer, rate: Double, latency: Double) -> OSStatus {
+        lcmp_render_source_bind(context, queue, rate, latency)
+    }
+    fileprivate func clear(_ queue: OpaquePointer) { lcmp_render_source_clear(context, queue) }
+    deinit { lcmp_render_source_destroy(context) }
 }

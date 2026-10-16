@@ -5,6 +5,8 @@ import AnalysisCore
 
 @MainActor
 public final class SFBAudioBackend: PlaybackBackend {
+    isolated deinit { stop() }
+
     public let duration: TimeInterval
     public let supportsSeeking: Bool
     public var currentTime: TimeInterval { player?.currentTime ?? pendingTime }
@@ -14,6 +16,7 @@ public final class SFBAudioBackend: PlaybackBackend {
     }
 
     private let url: URL
+    private var preparedDecoder: (any PCMDecoding)?
     private var player: AudioPlayer?
     private var delegate: PlayerDelegate?
     private var runID: UUID?
@@ -25,7 +28,7 @@ public final class SFBAudioBackend: PlaybackBackend {
     private var analysisTask: Task<Void, Never>?
     private var analysisGeneration: UUID?
     private var analysisNode: AVAudioUnitEQ?
-    private var analysisUnit: AudioUnit?
+    private var analysisSource: AnalysisRenderSource?
 
     public func configureAnalysis(_ configuration: AnalysisConfiguration?,
                                   receive: (@MainActor (AnalysisFrame) -> Void)?) {
@@ -39,11 +42,11 @@ public final class SFBAudioBackend: PlaybackBackend {
         guard player != nil, let node = analysisNode,
               let analysisConfiguration, receiveAnalysis != nil,
               let session = try? AnalysisSession(configuration: analysisConfiguration) else { return }
-        let unit = node.audioUnit
-        let status = session.attach(to: unit, sampleRate: node.outputFormat(forBus: 0).sampleRate,
+        if analysisSource == nil { analysisSource = try? AnalysisRenderSource(unit: node.audioUnit) }
+        guard let source = analysisSource else { session.finish(); return }
+        let status = session.attach(to: source, sampleRate: node.outputFormat(forBus: 0).sampleRate,
                                     outputLatency: node.outputPresentationLatency)
         guard status == noErr else { session.finish(); return }
-        analysisUnit = unit
         analysis = session
         analysisGeneration = session.generation
         analysisTask = Task { [weak self, frames = session.frames, id = session.generation] in
@@ -58,12 +61,21 @@ public final class SFBAudioBackend: PlaybackBackend {
         analysisGeneration = nil
         analysisTask?.cancel()
         analysisTask = nil
-        if let analysis, let analysisUnit {
-            _ = analysis.detach(from: analysisUnit)
-        }
-        analysisUnit = nil
+        analysis?.detach()
         analysis?.finish()
         analysis = nil
+    }
+
+    init(url: URL, duration: Double, supportsSeeking: Bool) {
+        self.url = url; self.duration = duration; self.supportsSeeking = supportsSeeking
+    }
+
+    public init(prepared: PreparedAudio) throws {
+        url = prepared.source.url
+        duration = prepared.duration
+        let decoder = try prepared.takeDecoder()
+        supportsSeeking = decoder.supportsSeeking
+        preparedDecoder = decoder
     }
 
     public init(url: URL) throws {
@@ -88,7 +100,11 @@ public final class SFBAudioBackend: PlaybackBackend {
 
     private func start(at seconds: TimeInterval) throws {
         do {
-            let decoder = try AudioDecoderFactory.open(url)
+            let decoder: any PCMDecoding
+            if let preparedDecoder {
+                decoder = preparedDecoder
+                self.preparedDecoder = nil
+            } else { decoder = try AudioDecoderFactory.open(url) }
             if seconds > 0 {
                 let frame = AVAudioFramePosition(seconds * decoder.processingFormat.sampleRate)
                 do { try decoder.seek(to: min(frame, decoder.length - 1)) }
@@ -146,7 +162,10 @@ public final class SFBAudioBackend: PlaybackBackend {
             try start(at: seconds)
         } else {
             let wasPaused = paused
+            let prepared = preparedDecoder
+            preparedDecoder = nil
             stop()
+            preparedDecoder = prepared
             pendingTime = seconds
             paused = wasPaused
         }
@@ -170,6 +189,8 @@ public final class SFBAudioBackend: PlaybackBackend {
     }
 
     public func stop() {
+        try? preparedDecoder?.close()
+        preparedDecoder = nil
         endAnalysis()
         pendingTime = 0
         paused = false
@@ -177,6 +198,7 @@ public final class SFBAudioBackend: PlaybackBackend {
         player?.delegate = nil
         player?.stop()
         player = nil
+        analysisSource = nil
         analysisNode = nil
         delegate = nil
     }

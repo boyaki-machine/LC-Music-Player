@@ -15,13 +15,13 @@ macOS上のネイティブアプリとし、iPhone版にも共用できるよう
 - 可視化のための解析と、音声に効果を加える処理を分離します。
 - 出力デバイスごとにアプリ内の再生音量を記憶し、再接続時に復元します。初めて使うデバイスでは現在のアプリ内音量を使用します。
 
-単曲再生の対応形式はMP3、M4A（AAC・ALAC）、WAV、AIFF、FLACです。
+単曲再生の対応形式はMP3、M4A（AAC・ALAC）、WAV、AIFF、FLACです。次曲の先頭PCMを背景で準備します。設定の「最大音量を測定」をONにすると全曲のsample peakを測定します。初期状態はOFFで、測定しても再生音量は変更しません。詳細は[再生前処理の実装設計](docs/preprocessing-implementation.md)を参照してください。
 
 再生中の周波数レベルは`LCMP_default_GEQ`の16列蛍光管LEDで、−80〜0dBFSの範囲に表示します。緑・黄・赤のセルを点灯し、消灯には短い残光を添えます。ミュート中も音源のレベルに反応します。表示と時刻処理は[可視化の実装設計](docs/visualization-implementation.md)、実装フォルダとモジュールI/F・追加方法は[Player UI・可視化の開発ガイド](docs/playerUI_developers.md)を参照してください。
 
 ## ローカルで起動する
 
-macOS 14以降、Swift 6対応のXcode／Command Line Tools、Python 3を使用します。
+macOS 14以降、Swift 6.2以降に対応するXcode／Command Line Tools、Python 3を使用します。
 
 ```sh
 python3 scripts/build-app.py
