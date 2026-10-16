@@ -17,7 +17,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 `PreprocessingCore`はFoundation、AVFAudio、固定版SFBAudioEngineに依存し、LibraryCore、PlaybackCore、UIには依存しない。`AudioDecoderFactory`はここで共有し、PlaybackCoreからも参照できる。特定の短いM4Aでopen時にeofErrが生じる場合のAVAudioFile互換デコーダを維持し、既知の末尾位置では長さ0の正常な読み取りを返す。
 
-アプリは`LibraryController(preprocessingEnabled: true)`を使用する。`false`は同期操作の互換経路であり、注入した再生バックエンドの単体検証等に使う。単曲再生の同期APIは残すが、アプリのリスト選択・再生開始は背景準備を経由する。
+`AudioPreprocessing`は先頭準備・測定・Auditの非同期境界で、取消を確認して戻るまで呼出側がファイルアクセスを保持する。アプリは永続キャッシュを設定したAudioPreprocessorを`LibraryController(preprocessingEnabled: true, preprocessor: ...)`へ注入する。`false`は同期操作の互換経路であり、注入した再生バックエンドの単体検証等に使う。単曲再生の同期APIは残すが、アプリのリスト選択・再生開始は背景準備を経由する。
 
 ## 先頭バッファと再生への移譲
 
@@ -26,10 +26,11 @@ LibraryCore（参照解決・再生順序・設定・取消）
 - `PreparedAudio`はファイル識別情報、時間、シーク可否、確保量と、一度だけ取得できるデコーダを持つ。ロックは所有権の移譲に使い、同じデコーダを複数スレッドで操作する許可にはしない。
 - `PrefixDecoder`は外向きのpositionを0から開始する。キャッシュ済みPCMを返し、その直後から同じデコーダの読み取りを続ける。再openと再走査を挟まない。
 - SFBAudioEngineは要求より短い読み取りをEOFと解釈する。キャッシュ境界では同じ呼び出しのバッファをファイル本体のPCMで満たし、境界を途中の短い読み取りとして返さない。波形・順番・フレーム数は変更しない。
-- 次曲の準備が未完了なら、その結果を待つことを必須にせず、選択対象を背景で新たに準備する。自動調整OFFでは全曲測定の完了は再生開始を妨げない。ONでは有効なLUFS/true peak測定と補正計画の完了を待つ。
+- 自動調整ONで、再生要求のエントリと音源参照が次曲準備と同じなら、MainActor上の`NextPreparation`、実行中Task、取消token、先頭PCMと同じleaseを選択要求へ移す。先頭準備または全曲測定が未完了でも、その要求を取り消して測り直さない。測定結果のsource/profileと出力profileを再確認し、有効な完了値から補正を確定する。
+- 異なるエントリ・参照では取消後の終了を待つ。自動調整OFFと未再生の選択は全曲測定を待たず、準備済み先頭PCMだけを引き継ぐ。先頭準備も未完了なら取消・終了後に背景で新たに準備する。変更済みsourceの古い先頭PCMとleaseは、新しい参照を開く前に解放する。
 - 未再生の曲選択では、背景で読み込み確認した後にURL・時間・シーク可否だけを保持する。アイドル中はデコーダとファイルアクセスを残さず、再生時に取り直す。
 - `selectPrepared`は再生へ移譲するまで渡されたleaseを保持し、停止でも解放する。通常の未再生選択は`selectMetadata`を使い、アイドル中に先頭バッファを残さない。
-- `selectPrepared`／`selectMetadata`は、ライブラリの保存が成功してから現在の再生を差し替える。準備や保存に失敗した場合は、現在の選択と再生を維持する。準備中は拡張画面に状態を示し、停止ボタンで取り消せる。
+- `selectPrepared`／`selectMetadata`は、ライブラリの保存が成功してから現在の再生を差し替える。準備や保存に失敗した場合は、現在の選択と再生を維持する。準備中は拡張画面に短い状態文だけを示し、停止ボタンで取り消せる。測定進捗バー・スピナー・割合・残り時間は表示しない。
 
 ## 全曲最大音量
 
@@ -39,7 +40,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 `AudioPreprocessor.measure`は再生と独立したデコーダを使い、8192フレームずつ読む。通常の浮動小数・整数PCMを直接測定し、整数値はビット深度で正規化する。packed signed PCMのバイト順と上位配置も扱う。その他の形式で必要な浮動小数変換は測定用コピーだけに適用する。非有限サンプル、読取エラー、取消、既知フレーム長に達しないEOFは完了値にしない。
 
-`TrackPeak`は音源のfingerprint、線形sample peak、dBFS、読んだフレーム数、サンプルレート、チャンネル数、解析版1を持つ。結果は現在曲／次曲のメモリ内だけに保持し、ライブラリJSONへ追加しない。
+`TrackPeak`は音源のfingerprint、線形sample peak、dBFS、読んだフレーム数、サンプルレート、チャンネル数、解析版1を持つ。結果は現在曲／次曲のメモリに加えて、専用SQLiteキャッシュへ保存する。ライブラリJSONへは追加しない。識別・復元・Audit・容量は[永続キャッシュ](./measurement-cache-implementation.md)を参照する。
 
 `LibraryController.peakMeasurement`はdisabled／pending／complete／failedをUIへ提供する。音声処理側は`currentTrackPeak`を使用する。このプロパティは設定がONで現在再生のURLと一致し、ファイル識別情報・サイズ・更新日時が一致する完了値だけを返す。未完了・変更済みの値ではnilとなる。音声処理でのゲイン適用は別責務とし、前処理から音量を操作しない。`currentTrackPeak`はMainActor上で設定用の値を取得するAPIであり、ファイル属性を確認するためrender callbackから呼ばない。
 
@@ -51,7 +52,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 将来のEQ併用時は、補正用測定でも形式変換と同じ設定のEQを適用し、レベル自動調整段へ入る音声を測る。EQの有効状態・設定・実装版をprofileへ含め、変更時は再測定する。手動音量・ミュートと純粋な同期用ディレイは測定後の処理であり、その変更では全曲測定を取り直さない。これらの加工段は[後処理の構成と順序](./audio-processing-design.md)に従う。
 
-自動調整ONでは測定完了を再生開始条件とし、OFFでは従来の測定待ちなし経路を維持する。現在曲と直後1曲だけを対象にし、同じ結果を複数の全曲scanで作り直さない。mono/stereo変換、短い曲、gating対象なし、true-peak補間の末尾、資源上限と再生要求の優先順位は[拡張設計](./audio-processing-design.md)に従う。
+自動調整ONでは測定完了を再生開始条件とし、OFFでは従来の測定待ちなし経路を維持する。現在曲と直後1曲だけを対象にし、同じsource/profileの要求は合流し、条件が一致した永続結果があれば全曲scanを省く。mono/stereo変換、短い曲、gating対象なし、true-peak補間の末尾、資源上限と再生要求の優先順位は[拡張設計](./audio-processing-design.md)に従う。
 
 ## キュー、取消とファイルアクセス
 
@@ -61,13 +62,13 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 - 曲順・次曲対象・参照の変更では次曲準備を破棄して作り直す。現在曲の変更では測定結果も破棄する。
 - 一時停止では次曲準備と測定を取り消し、再開で必要な処理を作り直す。音声は通常の一時停止位置を保持する。
-- 停止・末尾終了・失敗・出力変更・終了では背景処理とキャッシュを破棄する。自動調整の完了結果はpause中に保持し、同じ音源/出力profileのresume・seekでは再測定しない。自然終了から次曲へ進む際は準備済みデコーダを先に引き継ぐ。明示的な曲選択が準備中なら自然送りで上書きしない。
+- 停止・末尾終了・失敗・出力変更・終了では背景処理と先頭PCM・メモリ保持を破棄する。完了済みの永続測定記録は残す。自動調整の完了結果はpause中に保持し、同じ音源/出力profileのresume・seekでは再測定しない。自然終了から次曲へ進む際は準備済みデコーダを先に引き継ぐ。明示的な曲選択が準備中なら自然送りで上書きしない。
 - 通常は現在再生のlease1つと次曲準備のlease1つを保持する。測定は該当する同じleaseを共有する。取消中の基盤I/Oと非同期後処理が完了してから最後の参照が解放される。
 - 先行準備の失敗だけで現在再生を停止したり、未選択の曲を削除したりしない。再生対象として選んだときに参照・読み込みエラーを表示する。
 
 反復曲変更でも解析のキューを安全に解放するため、観測callbackはエンジン単位の`AnalysisRenderSource`を通し、キュー取消時は実行中の読取が終わってからメモリを解放する。[解析の実装設計](./analysis-implementation.md)を参照する。バックエンドのisolated deinitで停止・解除を行うため、ビルドにはSwift 6.2以降を使用する。
 
-再生時の解析と可視化の時計・PCM取得位置・OS音量は、この処理から変更しない。エンジン作成・グラフ接続は引き続きMainActor上のSFBAudioBackendが担当する。先頭準備が冷間の初曲のI/O時間や、デバイス開始の時間をなくす保証にはしない。
+再生時の解析と可視化の時計・PCM取得位置・OS音量は、この処理から変更しない。エンジン作成・グラフ接続は引き続きMainActor上のSFBAudioBackendが担当する。先頭準備が冷間の初曲のI/O時間や、デバイス開始の時間をなくす保証にはしない。SFBのring／供給chunkとPrefixDecoder／ProfileDecoderの有界バッファによる逐次供給を維持し、全曲PCMの保持や別FIFOを追加しない。
 
 ## 検証手順
 
@@ -76,3 +77,5 @@ LibraryCore（参照解決・再生順序・設定・取消）
 3. 同じディレクトリを指定し、`LCMP_PREPROCESS_OUTPUT_PROFILE=1`で`PreprocessingPerformanceTests/engineAndFirstAnalysisTiming`を実行する。順番を交互にし、選択・play呼出・最初の解析受信を分ける。最後の値は物理出音時刻ではない。
 4. `LCMP_PREPROCESS_SOAK=1`と同ディレクトリを指定し、`PreprocessingPerformanceTests/tenMinutePlaybackPreparationAndMeasurementRemainBounded`を実行する。既定600秒、アプリ音量0の実出力で測定ON・FFT・反復曲変更を動かし、CPU、RSS、バッファ量、lease数、停止後解放とPCM欠落を確認する。通常の全回帰では性能測定をskipする。
 5. `LCMP_UI_SNAPSHOTS=<出力先>`で設定のON/OFFを最小240ptの拡張画面へ描き、説明が読めることを確認する。ビルドは`python3 scripts/build-app.py --output build/preprocessing-verified/LCMP.app`等で別出力し、起動中bundleを置換しない。
+
+利用者向け開始時間・CPUの評価はReleaseで行う。`scripts/build-app.py`は既定Release、Debugは`--configuration debug`で明示する。`NextPreparationTests`は非同期workerの返却を制御し、測定未完了／先頭未完了の同じ要求が一度だけ実行されること、手動／自然送り、停止、保存失敗、別エントリ、削除、設定変更とlease最大2を確認する。`LCMP_NEXT_PROMOTION_PROFILE=1 LCMP_PREPROCESS_FIXTURES=<生成したstartup音源ディレクトリ>`で大容量FLACの走査中引き継ぎを実測する。予定初回renderのhost時刻と解析PCM dropを、物理出音や音声ringの供給不足と混同しない。

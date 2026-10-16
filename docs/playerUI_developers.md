@@ -94,7 +94,7 @@ flowchart LR
 | 画面 → 可視化状態 | `VisualizationDriver.synchronize(activity:visible:)`、`receive(_:)`、`reset()` | MainActorで再生状態・表示可否・解析結果・シーク等のリセットを渡す |
 | 状態 → 描画 | `LCMPDefaultGEQView(driver:)` | `snapshot`と`drawTime`を描く。描画内から再生や解析を開始しない |
 
-背景選択は非同期で確定する。前処理のバッファや全曲測定をUIへ持ち込まず、音声処理へ測定値を渡す場合は検証済みの`currentTrackPeak`を使う。詳細は[再生前処理の実装設計](./preprocessing-implementation.md)を参照する。
+背景選択は非同期で確定する。前処理のバッファや全曲測定をUIへ持ち込まず、sample peak専用には検証済みの`currentTrackPeak`、LUFS/true peakには`currentTrackMetrics`を使う。完了値の永続化とAuditは[測定キャッシュ](./measurement-cache-implementation.md)が担当し、Viewは保存を所有しない。詳細は[再生前処理の実装設計](./preprocessing-implementation.md)を参照する。
 
 LUFS/true peakによる自動調整は[音量自動調整の設計](./audio-processing-design.md)を参照する。上記の現行`currentTrackPeak`はsample peak専用であり、自動調整用の完了結果として流用しない。設定は`setNormalizesVolume`／`setNormalizationTarget`、測定結果は`levelMeasurement`／`currentTrackMetrics`を使い、`preparationStage`で全曲測定待ちを表示する。EQ/delayの処理段は将来の拡張として区別する。
 

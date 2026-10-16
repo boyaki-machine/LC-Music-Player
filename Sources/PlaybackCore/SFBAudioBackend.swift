@@ -12,6 +12,9 @@ public final class SFBAudioBackend: PlaybackBackend {
     public let supportsSeeking: Bool
     public var currentTime: TimeInterval { player?.currentTime ?? pendingTime }
     public var onEvent: (@MainActor (PlaybackEvent) -> Void)?
+    /// Optional diagnostics, called on SFB's event queue. The host time is an
+    /// estimated device presentation time, not a physical audibility measurement.
+    public var onRenderScheduled: (@Sendable (UInt64) -> Void)?
     public private(set) var normalizationPlan: NormalizationPlan?
     private var normalizationMetrics: TrackAudioMetrics?
     private var processingChain: AudioProcessingChain?
@@ -147,7 +150,7 @@ public final class SFBAudioBackend: PlaybackBackend {
                 } catch { try? decoder.close(); throw error }
             }
             let id = UUID()
-            let nextDelegate = PlayerDelegate { [weak self] event in
+            let nextDelegate = PlayerDelegate(renderScheduled: onRenderScheduled) { [weak self] event in
                 guard let self, self.runID == id else { return }
                 self.onEvent?(event)
             }
@@ -252,9 +255,16 @@ public final class SFBAudioBackend: PlaybackBackend {
 /// events cross to the main actor; decoders are never accessed after enqueue.
 private final class PlayerDelegate: NSObject, AudioPlayer.Delegate, Sendable {
     let receive: @MainActor @Sendable (PlaybackEvent) -> Void
+    let renderScheduled: (@Sendable (UInt64) -> Void)?
 
-    init(receive: @escaping @MainActor @Sendable (PlaybackEvent) -> Void) {
+    init(renderScheduled: (@Sendable (UInt64) -> Void)? = nil,
+         receive: @escaping @MainActor @Sendable (PlaybackEvent) -> Void) {
         self.receive = receive
+        self.renderScheduled = renderScheduled
+    }
+
+    func audioPlayer(_ audioPlayer: AudioPlayer, renderingWillStart decoder: any PCMDecoding, at hostTime: UInt64) {
+        renderScheduled?(hostTime)
     }
 
     private func send(_ event: PlaybackEvent) {

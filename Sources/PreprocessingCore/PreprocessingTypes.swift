@@ -13,16 +13,18 @@ public final class PreparationCancellation: @unchecked Sendable {
     public func check() throws { if lock.withLock({ cancelled }) { throw CancellationError() } }
 }
 
-public struct SourceFingerprint: Equatable, Sendable {
+public struct SourceFingerprint: Hashable, Sendable {
     public let url: URL
     public let size: Int
     public let modified: Date
     private let identity: String
+    private let persistentRevision: MeasurementSourceIdentity?
     public init(url: URL) throws {
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         guard let size = attributes[.size] as? NSNumber,
               let modified = attributes[.modificationDate] as? Date else { throw PreprocessingFailure.invalidAudio }
         self.url = url.standardizedFileURL
+        persistentRevision = try? LocalMeasurementSourceIdentity().identity(for: url)
         self.size = size.intValue
         self.modified = modified
         identity = "\(attributes[.systemNumber] ?? "")/\(attributes[.systemFileNumber] ?? "")"
