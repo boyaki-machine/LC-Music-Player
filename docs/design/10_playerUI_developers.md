@@ -1,10 +1,10 @@
 # Player UI・可視化の開発ガイド
 
-[設計書一覧](./README.md)に戻る。
+[設計書一覧](../README.md)に戻る。
 
 Player UIは再生操作と画面構成を扱い、可視化は解析結果から表示を作る。現在の実装名・組込IDは`LCMP_default_GEQ`で、16列の蛍光管LEDとコンパクトな操作画面を組み合わせる。この文書は、ソース配置、他モジュールとのI/F、可視化の開発・追加手順をまとめる。
 
-製品仕様は[基本設計](./basic-design.md)と[UI・UX設計](./ui-ux-design.md)、具体的な画面動作は[コンパクト画面](./compact-ui-implementation.md)、提示待ち・残光・描画の詳細は[可視化の実装設計](./visualization-implementation.md)を参照する。
+製品仕様は[基本設計](00_basic-design.md)と[UI・UX設計](01_ui-ux-design.md)、具体的な画面動作は[コンパクト画面](09_compact-ui-implementation.md)、提示待ち・残光・描画の詳細は[可視化の実装設計](08_visualization-implementation.md)を参照する。
 
 ## ソースコードの配置
 
@@ -96,11 +96,11 @@ flowchart LR
 | 画面 → 可視化状態 | `VisualizationDriver.synchronize(activity:visible:)`、`receive(_:)`、`reset()` | MainActorで再生状態・表示可否・解析結果・シーク等のリセットを渡す |
 | 状態 → 描画 | `LCMPDefaultGEQView(driver:)` | `snapshot`と`drawTime`を描く。描画内から再生や解析を開始しない |
 
-背景選択は非同期で確定する。前処理のバッファや全曲測定をUIへ持ち込まず、sample peak専用には検証済みの`currentTrackPeak`、LUFS/true peakには`currentTrackMetrics`を使う。完了値の永続化とAuditは[測定キャッシュ](./measurement-cache-implementation.md)が担当し、Viewは保存を所有しない。詳細は[再生前処理の実装設計](./preprocessing-implementation.md)を参照する。
+背景選択は非同期で確定する。前処理のバッファや全曲測定をUIへ持ち込まず、sample peak専用には検証済みの`currentTrackPeak`、LUFS/true peakには`currentTrackMetrics`を使う。完了値の永続化とAuditは[測定キャッシュ](05_measurement-cache-implementation.md)が担当し、Viewは保存を所有しない。詳細は[再生前処理の実装設計](04_preprocessing-implementation.md)を参照する。
 
-LUFS/true peakによる自動調整は[音量自動調整の設計](./audio-processing-design.md)を参照する。上記の現行`currentTrackPeak`はsample peak専用であり、自動調整用の完了結果として流用しない。設定は`setNormalizesVolume`／`setNormalizationTarget`、測定結果は`levelMeasurement`／`currentTrackMetrics`を使い、`preparationStage`で全曲測定待ちを表示する。EQ/delayの処理段は将来の拡張として区別する。
+LUFS/true peakによる自動調整は[音量自動調整の設計](06_audio-processing-design.md)を参照する。上記の現行`currentTrackPeak`はsample peak専用であり、自動調整用の完了結果として流用しない。設定は`setNormalizesVolume`／`setNormalizationTarget`、測定結果は`levelMeasurement`／`currentTrackMetrics`を使い、`preparationStage`で全曲測定待ちを表示する。EQ/delayの処理段は将来の拡張として区別する。
 
-公開入口の実装は[PlayerView.swift](../Sources/PlayerUI/PlayerView.swift)、実際の橋渡しは[PlaybackVisualization.swift](../Sources/PlayerUI/Players/LCMP_default_GEQ/Visualization/PlaybackVisualization.swift)にある。後者は約30Hzの解析結果の観測を局所化し、操作部全体の再評価を抑える。
+公開入口の実装は[PlayerView.swift](../../Sources/PlayerUI/PlayerView.swift)、実際の橋渡しは[PlaybackVisualization.swift](../../Sources/PlayerUI/Players/LCMP_default_GEQ/Visualization/PlaybackVisualization.swift)にある。後者は約30Hzの解析結果の観測を局所化し、操作部全体の再評価を抑える。
 
 `PlaybackController`と`LibraryController`の操作・UI状態・driverはMainActorで扱う。音声コールバックとFFTワーカーからViewやdriverを直接呼ばない。PCMの取得・バッファ・FFTの寿命は既存の`PlaybackCore`と`AnalysisCore`へ委ねる。
 
@@ -232,7 +232,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 LCMP_UI_SNAPSHOTS=build/player-ui-qa \
 
 表示スケールでは既知のdB値・無音・非数値・上限と、実PCMの振幅を変えたときの段数を検証する。寿命ではpause/resume/seek/stop/自然終了/hide/showを確認する。ネイティブ画像では色・二値セル・残光・上下余白・操作部との非重複を確認する。実行結果は設計書ではなくローカル専用の`DEVELOPMENT_NOTES.md`へ記録する。
 
-負荷・同期を変更した場合の短時間比較と10分連続測定は[可視化の実装設計](./visualization-implementation.md#検証と測定方法)に従う。物理的な出音と画面提示の同期を主張する場合は、オフスクリーン描画の時間とは別に測定する。
+負荷・同期を変更した場合の短時間比較と10分連続測定は[可視化の実装設計](08_visualization-implementation.md#検証と測定方法)に従う。物理的な出音と画面提示の同期を主張する場合は、オフスクリーン描画の時間とは別に測定する。
 
 利用中のアプリとは別に確認用bundleを作るには、次を使う。
 

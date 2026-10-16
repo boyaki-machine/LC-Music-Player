@@ -49,7 +49,7 @@ def main():
                 target.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(item, target / item.name)
     shutil.copy2(ROOT / "Package.resolved", notices / "Package.resolved")
-    shutil.copy2(ROOT / "docs/third-party-dependencies.md", notices / "dependency-notes.md")
+    shutil.copy2(ROOT / "docs/design/11_third-party-dependencies.md", notices / "dependency-notes.md")
     with (contents / "Info.plist").open("wb") as file:
         plistlib.dump({
             "CFBundleExecutable": "LCMP", "CFBundleIdentifier": "local.lcmp.player",

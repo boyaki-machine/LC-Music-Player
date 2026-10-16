@@ -6,7 +6,7 @@ macOS上のネイティブアプリとし、iPhone版にも共用できるよう
 
 ## 仕様と設計
 
-製品で目指す仕様は[基本設計書](docs/basic-design.md)に、単曲再生の構造と動作は[基本再生の実装設計](docs/playback-implementation.md)に記載しています。単曲再生にはSwiftUIとSFBAudioEngineを使用し、ローカルファイルの選択・再生・一時停止・停止・シーク・縦型アプリ内音量とミュートを提供します。画面構造と操作は[コンパクト画面の実装設計](docs/compact-ui-implementation.md)、音源管理・複数リスト・JSON保存とM3U8交換は[ライブラリの実装設計](docs/library-implementation.md)を参照してください。
+製品で目指す仕様は[基本設計書](docs/design/00_basic-design.md)に、単曲再生の構造と動作は[基本再生の実装設計](docs/design/02_playback-implementation.md)に記載しています。単曲再生にはSwiftUIとSFBAudioEngineを使用し、ローカルファイルの選択・再生・一時停止・停止・シーク・縦型アプリ内音量とミュートを提供します。画面構造と操作は[コンパクト画面の実装設計](docs/design/09_compact-ui-implementation.md)、音源管理・複数リスト・JSON保存とM3U8交換は[ライブラリの実装設計](docs/design/03_library-implementation.md)を参照してください。
 
 製品の設計方針：
 
@@ -15,37 +15,37 @@ macOS上のネイティブアプリとし、iPhone版にも共用できるよう
 - 可視化のための解析と、音声に効果を加える処理を分離します。
 - 出力デバイスごとにアプリ内の再生音量を記憶し、再接続時に復元します。初めて使うデバイスでは現在のアプリ内音量を使用します。
 
-単曲再生の対応形式はMP3、M4A（AAC・ALAC）、WAV、AIFF、FLACです。プレイリストへの追加と起動時に各曲の音量を背景で順次測定し、次曲の先頭PCMと同じ枠で準備します。再生要求と前後の曲を優先します。「最大音量を測定」は測定値の表示を切り替える設定で、既定OFFです。事前測定だけで再生音量は変更しません。詳細は[再生前処理の実装設計](docs/preprocessing-implementation.md)を参照してください。
+単曲再生の対応形式はMP3、M4A（AAC・ALAC）、WAV、AIFF、FLACです。プレイリストへの追加と起動時に各曲の音量を背景で順次測定し、次曲の先頭PCMと同じ枠で準備します。再生要求と前後の曲を優先します。「最大音量を測定」は測定値の表示を切り替える設定で、既定OFFです。事前測定だけで再生音量は変更しません。詳細は[再生前処理の実装設計](docs/design/04_preprocessing-implementation.md)を参照してください。
 
-設定の「曲ごとの音量をそろえる」は、全曲のLUFSとtrue peakを測定して固定ゲインを適用します。既定OFFで、ON時は未測定の曲の測定を再生前に待ちます。手動音量・ミュートは独立して使えます。補正方式、対応出力形式、設定変更時の一時停止は[音量自動調整](docs/audio-processing-design.md)を参照してください。
+設定の「曲ごとの音量をそろえる」は、全曲のLUFSとtrue peakを測定して固定ゲインを適用します。既定OFFで、ON時は未測定の曲の測定を再生前に待ちます。手動音量・ミュートは独立して使えます。補正方式、対応出力形式、設定変更時の一時停止は[音量自動調整](docs/design/06_audio-processing-design.md)を参照してください。
 
-再生中の周波数レベルは`LCMP_default_GEQ`の16列蛍光管LEDで、−80〜0dBFSの範囲に表示します。緑・黄・赤のセルを点灯し、消灯には短い残光を添えます。ミュート中も音源のレベルに反応します。表示と時刻処理は[可視化の実装設計](docs/visualization-implementation.md)、実装フォルダとモジュールI/F・追加方法は[Player UI・可視化の開発ガイド](docs/playerUI_developers.md)を参照してください。
+再生中の周波数レベルは`LCMP_default_GEQ`の16列蛍光管LEDで、−80〜0dBFSの範囲に表示します。緑・黄・赤のセルを点灯し、消灯には短い残光を添えます。ミュート中も音源のレベルに反応します。表示と時刻処理は[可視化の実装設計](docs/design/08_visualization-implementation.md)、実装フォルダとモジュールI/F・追加方法は[Player UI・可視化の開発ガイド](docs/design/10_playerUI_developers.md)を参照してください。
 
 ## ローカルで起動する
 
 macOS 14以降、Swift 6.2以降に対応するXcode／Command Line Tools、Python 3を使用します。
 
 ```sh
-python3 scripts/build-app.py
-open build/LCMP.app
+make release
+open build/release/LCMP.app
 ```
 
-既定では全曲測定を最適化するRelease構成で作成します。開発用Debugは`--configuration debug`で指定します。
+全曲測定を最適化するRelease構成で作成します。開発用は`make debug`、ローカル配布用ZIPは`make archive`です。前提環境、出力先の変更、配置・更新、署名と配布の範囲は[ビルド・配置手順](docs/build-and-deploy.md)を参照してください。
 
 起動中のアプリと同じ出力先を置き換えないでください。終了してから再ビルドするか、`python3 scripts/build-app.py --output build/preview/LCMP.app`のように別の出力先を指定します。
 
 メニューの音源タブからファイル／フォルダを登録します（ファイルはCommand＋Oも使用可能）。リストの「曲を追加」で曲を登録し、停止・一時停止中は曲行をダブルクリックするか、単クリックで選んでからメインの再生ボタンを押すと再生します。再生中は別の曲行の単クリックで切り替わります。「このリストを再生」で先頭から開始することもできます。管理からリストの作成・改名・削除とM3U8の読み込み／書き出しを行えます。Spaceで一時停止・再開できます。表示領域のクリックでシーク、ドラッグで移動できます。音量ボタンは小音量を細かく調整できる縦型音量を開きます。音量はフォーカスが外れるか15秒間操作がないと閉じ、メニューは下部の拡張画面を開きます。停止後は先頭から再生し、シークで位置を準備できます。音源自体はコピーせず、ライブラリ・リスト・現在対象はJSONとブックマークで保持します。次の起動時は自動再生せず復元します。
 
-ビルドスクリプトは、公開依存を取得するときのキーチェーン・netrc検索を無効にします。Git設定やキーチェーンは変更しません。起動用アプリには動的frameworkと[依存ライセンス表示](docs/third-party-dependencies.md)を同梱します。
+ビルドスクリプトは、公開依存を取得するときのキーチェーン・netrc検索を無効にします。Git設定やキーチェーンは変更しません。起動用アプリには動的frameworkと[依存ライセンス表示](docs/design/11_third-party-dependencies.md)を同梱します。
 
 ## テスト
 
 ```sh
-./scripts/swift.sh test
+make test
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 ```
 
-2つ目は既定出力先へ小さいテスト音を送る実再生テストです。短い音源の観測が他のテストの処理に妨げられないよう、全体の実出力検証では`--no-parallel`を明示します。通常のテストは音声を出力しません。ファイル選択画面、聴感、デバイス切替の手動確認方法は[実装設計](docs/playback-implementation.md)を参照してください。
+2つ目は既定出力先へ小さいテスト音を送る実再生テストです。短い音源の観測が他のテストの処理に妨げられないよう、全体の実出力検証では`--no-parallel`を明示します。通常のテストは音声を出力しません。ファイル選択画面、聴感、デバイス切替の手動確認方法は[実装設計](docs/design/02_playback-implementation.md)を参照してください。
 
 ## セッションの引き継ぎ
 
@@ -71,7 +71,8 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 
 ## ディレクトリとファイル
 
-- `docs/`：製品および技術の設計書。
+- `docs/`：ビルド・配置手順と文書一覧。番号付きの製品・技術設計書は`docs/design/`。
+- `Makefile`：Release／Debugビルド、ZIP作成、通常テストの入口。
 - `Sources/`：macOS画面と、再生制御・音源アクセス・再生アダプター。
 - `Tests/`：状態遷移・デコード・音声出力の検証と独自のテスト音源。
 - `scripts/`：公開依存の認証検索を抑止するSwift実行、アプリ作成、テスト音源生成。
@@ -79,4 +80,4 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 - `DEVELOPMENT_NOTES.md`：ローカル環境のみで使用する開発経緯・進捗・未決事項・チケット引き継ぎ。Git管理対象外です。
 - `AGENTS.md`：コーディングエージェント向けのリポジトリ固有の作業指示。
 
-前処理の完了測定値は[専用SQLiteキャッシュ](docs/measurement-cache-implementation.md)へ保存し、停止・再起動後も条件が一致すれば再測定を省きます。設定や音源一覧とは別の保存領域で、容量上限と不要記録の回収を行います。
+前処理の完了測定値は[専用SQLiteキャッシュ](docs/design/05_measurement-cache-implementation.md)へ保存し、停止・再起動後も条件が一致すれば再測定を省きます。設定や音源一覧とは別の保存領域で、容量上限と不要記録の回収を行います。

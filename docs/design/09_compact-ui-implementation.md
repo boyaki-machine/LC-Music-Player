@@ -1,10 +1,10 @@
 # コンパクト画面の実装設計
 
-[設計書一覧](./README.md)に戻る。製品の画面方針は[UI・UX設計](./ui-ux-design.md)、再生制御は[基本再生の実装設計](./playback-implementation.md)を参照する。
+[設計書一覧](../README.md)に戻る。製品の画面方針は[UI・UX設計](01_ui-ux-design.md)、再生制御は[基本再生の実装設計](02_playback-implementation.md)を参照する。
 
 ## 構成
 
-現在の実装名は`LCMP_default_GEQ`とし、画面・操作・可視化を`Sources/PlayerUI/Players/LCMP_default_GEQ/`の1つのフォルダ配下へまとめる。可視化は内部の`Visualization/`に置く。`PlayerUI/PlayerView.swift`はアプリ向けの入口として実装Viewを呼び出す。テストは`Tests/PlayerUITests/Players/LCMP_default_GEQ/`へまとめる。全体の配置と追加規約は[Player UI・可視化の開発ガイド](./playerUI_developers.md)を参照する。
+現在の実装名は`LCMP_default_GEQ`とし、画面・操作・可視化を`Sources/PlayerUI/Players/LCMP_default_GEQ/`の1つのフォルダ配下へまとめる。可視化は内部の`Visualization/`に置く。`PlayerUI/PlayerView.swift`はアプリ向けの入口として実装Viewを呼び出す。テストは`Tests/PlayerUITests/Players/LCMP_default_GEQ/`へまとめる。全体の配置と追加規約は[Player UI・可視化の開発ガイド](10_playerUI_developers.md)を参照する。
 
 | 要素 | 責務 |
 | --- | --- |
@@ -22,7 +22,7 @@
 
 三角は常設し、再生中は緑PLAY、一時停止中は琥珀PAUSE、それ以外は消灯に近いSTOPを表示する。記号だけを44×44ptの中心へ配置し、状態文字はその中心計算から分離して下へ重ねる。操作名は再生／一時停止／再開へ追従する。短い入力反応は220msで消灯する。音量とメニューは開いている間点灯する。利用できない前後曲は無効で、発光・曲変更を行わない。
 
-現在リストと音源管理は`LibraryController`へ接続し、前後曲・順次再生・複数リストの編集を扱う。拡張の詳細は[ライブラリ・プレイリストの実装設計](./library-implementation.md)を参照する。表示領域は実解析を16列の蛍光管LEDへ渡す。表示タブは現在のデザインを説明し、単一候補の選択UIを置かない。時刻・残光・欠落・寿命は[可視化の実装設計](./visualization-implementation.md)に記載する。
+現在リストと音源管理は`LibraryController`へ接続し、前後曲・順次再生・複数リストの編集を扱う。拡張の詳細は[ライブラリ・プレイリストの実装設計](03_library-implementation.md)を参照する。表示領域は実解析を16列の蛍光管LEDへ渡す。表示タブは現在のデザインを説明し、単一候補の選択UIを置かない。時刻・残光・欠落・寿命は[可視化の実装設計](08_visualization-implementation.md)に記載する。
 
 ## ウィンドウ操作
 
@@ -73,6 +73,6 @@ PlayerPresentationは2秒の取消可能な非表示タイマーを持つ。シ�
 
 ## 再生前処理への接続
 
-Player UIは再生の開始・前後曲・停止をLibraryControllerへ渡し、停止は準備中にも有効にする。拡張画面は`isPreparing`を表示する。設定タブはScrollView内に最大音量測定のToggle、説明、測定状態・dBFSまたは無音を表示し、`setMeasuresMaximumVolume(_:)`で変更する。最小240ptでも説明を折り返し、残りはスクロールで読める構成にする。デコード・測定・キャッシュはViewが所有しない。仕様は[再生前処理](./preprocessing-implementation.md)を参照する。
+Player UIは再生の開始・前後曲・停止をLibraryControllerへ渡し、停止は準備中にも有効にする。拡張画面は`isPreparing`を表示する。設定タブはScrollView内に最大音量測定のToggle、説明、測定状態・dBFSまたは無音を表示し、`setMeasuresMaximumVolume(_:)`で変更する。最小240ptでも説明を折り返し、残りはスクロールで読める構成にする。デコード・測定・キャッシュはViewが所有しない。仕様は[再生前処理](04_preprocessing-implementation.md)を参照する。
 
-設定には音量自動調整のToggleと目標LUFSのPickerも置く。`setNormalizesVolume`／`setNormalizationTarget`へ操作を渡し、`levelMeasurement`に基づくLUFS/true peak、`playback.normalizationPlan`の補正dBと制限理由を表示する。`preparationStage`で全曲測定中を案内する。自動調整設定変更による一時停止と、再生を継続する手動音量操作を区別する。測定・補正の契約は[音量自動調整](./audio-processing-design.md)を参照する。
+設定には音量自動調整のToggleと目標LUFSのPickerも置く。`setNormalizesVolume`／`setNormalizationTarget`へ操作を渡し、`levelMeasurement`に基づくLUFS/true peak、`playback.normalizationPlan`の補正dBと制限理由を表示する。`preparationStage`で全曲測定中を案内する。自動調整設定変更による一時停止と、再生を継続する手動音量操作を区別する。測定・補正の契約は[音量自動調整](06_audio-processing-design.md)を参照する。

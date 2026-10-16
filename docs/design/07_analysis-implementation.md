@@ -1,10 +1,10 @@
 # 周波数解析の実装設計
 
-[設計書一覧](./README.md)に戻る。
+[設計書一覧](../README.md)に戻る。
 
 ## 責務と音声経路
 
-`AnalysisCore`は表示に依存しないスペクトラム・左右レベルと時刻情報を生成します。`PlaybackCore`のSFBAudioBackendが音声取得と解析セッションの寿命を所有します。`AnalysisTransport`はCの固定容量SPSCキューとAudio Unitのレンダー通知を実装します。可視化の周波数解析は再生経路を観測し、音源を再度開きません。任意の全曲sample peak測定は[再生前処理](./preprocessing-implementation.md)の別処理です。
+`AnalysisCore`は表示に依存しないスペクトラム・左右レベルと時刻情報を生成します。`PlaybackCore`のSFBAudioBackendが音声取得と解析セッションの寿命を所有します。`AnalysisTransport`はCの固定容量SPSCキューとAudio Unitのレンダー通知を実装します。可視化の周波数解析は再生経路を観測し、音源を再度開きません。任意の全曲sample peak測定は[再生前処理](04_preprocessing-implementation.md)の別処理です。
 
 ```text
 SFBAudioEngine source
@@ -15,7 +15,7 @@ SFBAudioEngine source
 
 現在の観測ノードは`AVAudioUnitEQ(numberOfBands: 0)`です。フィルターはなく、globalGainは0dBです。公開AudioUnitへのレンダー通知を使用するために置き、音声イコライザーの利用者向け機能は提供しません。観測側の形式はmainMixerの出力レート・チャンネル数に対応する標準Float32 PCMです。前段のmixerが音源から出力形式へ変換し、後段mainMixerと同じ形式を使って不要な追加レート変換を避けます。SFBの初期source形式は変更せず、デコーダと内部ring bufferの形式変更をSFB自身へ委ねます。SFBAudioEngineの`modifyProcessingGraph`内でsourceとmainMixerの間だけを変更し、engineを直接開始・停止しません。
 
-[音量自動調整](./audio-processing-design.md)では、この観測ノードの後に専用gain段を置く。観測用EQのgainは変更せず、解析の購読解除でも自動補正は継続させる。可視化の解析値と、LUFS/true peakによる出力補正の測定値・状態は別のデータとして扱う。自動調整ONでは、共通の形式変換を行うProfileDecoderの出力を観測する。gain段は購読解除中も維持する。
+[音量自動調整](06_audio-processing-design.md)では、この観測ノードの後に専用gain段を置く。観測用EQのgainは変更せず、解析の購読解除でも自動補正は継続させる。可視化の解析値と、LUFS/true peakによる出力補正の測定値・状態は別のデータとして扱う。自動調整ONでは、共通の形式変換を行うProfileDecoderの出力を観測する。gain段は購読解除中も維持する。
 
 通知はpost-renderかつエラーがない場合だけ処理し、音声データを変更せずコピーします。Float32非interleavedを受け取り、monoは左右へ同じ値、2ch以上は出力形式の先頭2chを解析します。全チャンネルのサラウンド解析ではありません。解析はアプリ音量・ミュートより前なので、音量ゼロでも音源のレベルを返します。
 
@@ -56,7 +56,7 @@ SFBAudioEngine source
 
 host時刻や遅延を取得できない場合はnilとし、0で代用しません。ノードの`outputPresentationLatency`は開始・再開・再設定時に取得し、機器の遅延を別途加えて二重計上しません。将来、下流の遅延段がノード報告値に含まれる場合は、その既知の補償量を報告値から分離してから設定します。
 
-`SynchronizationEstimate.additionalAudioDelay`は、追加量=max(0, 表示までの遅延＋余裕−既存出力遅延)を計算する純粋な補助関数です。音声の時刻・速度・出力機器設定を変更しません。表示を推定提示時刻まで待たせる処理は[可視化側](./visualization-implementation.md)が担当します。実際に音声を遅らせる段は将来の機能です。
+`SynchronizationEstimate.additionalAudioDelay`は、追加量=max(0, 表示までの遅延＋余裕−既存出力遅延)を計算する純粋な補助関数です。音声の時刻・速度・出力機器設定を変更しません。表示を推定提示時刻まで待たせる処理は[可視化側](08_visualization-implementation.md)が担当します。実際に音声を遅らせる段は将来の機能です。
 
 将来の補償器では、次を満たす構成にします。
 

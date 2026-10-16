@@ -1,10 +1,10 @@
 # 再生前処理の実装設計
 
-[設計書一覧](./README.md)に戻る。
+[設計書一覧](../README.md)に戻る。
 
-前処理は、音源参照と[単曲再生](./playback-implementation.md)の間で、再生に使う先頭PCMと全曲の最大サンプル音量を準備する。再生音のゲインや周波数特性は変更しない。[リアルタイム周波数解析](./analysis-implementation.md)は再生経路のPCMを観測する別機能である。
+前処理は、音源参照と[単曲再生](02_playback-implementation.md)の間で、再生に使う先頭PCMと全曲の最大サンプル音量を準備する。再生音のゲインや周波数特性は変更しない。[リアルタイム周波数解析](07_analysis-implementation.md)は再生経路のPCMを観測する別機能である。
 
-本書のAPIと動作は現行実装を記述する。Integrated LUFS・true peakの全曲測定と、自動調整ON時の再生待ちは[音量自動調整と前処理拡張](./audio-processing-design.md)を参照する。sample peak専用APIも互換機能として維持する。
+本書のAPIと動作は現行実装を記述する。Integrated LUFS・true peakの全曲測定と、自動調整ON時の再生待ちは[音量自動調整と前処理拡張](06_audio-processing-design.md)を参照する。sample peak専用APIも互換機能として維持する。
 
 ## 構成と境界
 
@@ -40,7 +40,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 `AudioPreprocessor.measure`は再生と独立したデコーダを使い、8192フレームずつ読む。通常の浮動小数・整数PCMを直接測定し、整数値はビット深度で正規化する。packed signed PCMのバイト順と上位配置も扱う。その他の形式で必要な浮動小数変換は測定用コピーだけに適用する。非有限サンプル、読取エラー、取消、既知フレーム長に達しないEOFは完了値にしない。
 
-`TrackPeak`は音源のfingerprint、線形sample peak、dBFS、読んだフレーム数、サンプルレート、チャンネル数、解析版1を持つ。結果は現在曲／次曲のメモリに加えて、専用SQLiteキャッシュへ保存する。ライブラリJSONへは追加しない。識別・復元・Audit・容量は[永続キャッシュ](./measurement-cache-implementation.md)を参照する。
+`TrackPeak`は音源のfingerprint、線形sample peak、dBFS、読んだフレーム数、サンプルレート、チャンネル数、解析版1を持つ。結果は現在曲／次曲のメモリに加えて、専用SQLiteキャッシュへ保存する。ライブラリJSONへは追加しない。識別・復元・Audit・容量は[永続キャッシュ](05_measurement-cache-implementation.md)を参照する。
 
 `LibraryController.peakMeasurement`はdisabled／pending／complete／failedをUIへ提供する。音声処理側は`currentTrackPeak`を使用する。このプロパティは設定がONで現在再生のURLと一致し、ファイル識別情報・サイズ・更新日時が一致する完了値だけを返す。未完了・変更済みの値ではnilとなる。音声処理でのゲイン適用は別責務とし、前処理から音量を操作しない。`currentTrackPeak`はMainActor上で設定用の値を取得するAPIであり、ファイル属性を確認するためrender callbackから呼ばない。
 
@@ -50,9 +50,9 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 `TrackAudioMetrics`には既存のfingerprintに加えて、出力レート・チャンネル変換と測定版を含むprofileを付ける。`TrackPeak`はsample peak専用として保持し、LUFS/true peakの代用にはしない。補正用には新しい`measureLevels`／`currentTrackMetrics`を使う。これらは全曲測定用の公開APIである。測定と自動調整ONの再生は`ProfileConversion`を共有し、再生側は`ProfileDecoder`で変換する。
 
-将来のEQ併用時は、補正用測定でも形式変換と同じ設定のEQを適用し、レベル自動調整段へ入る音声を測る。EQの有効状態・設定・実装版をprofileへ含め、変更時は再測定する。手動音量・ミュートと純粋な同期用ディレイは測定後の処理であり、その変更では全曲測定を取り直さない。これらの加工段は[後処理の構成と順序](./audio-processing-design.md)に従う。
+将来のEQ併用時は、補正用測定でも形式変換と同じ設定のEQを適用し、レベル自動調整段へ入る音声を測る。EQの有効状態・設定・実装版をprofileへ含め、変更時は再測定する。手動音量・ミュートと純粋な同期用ディレイは測定後の処理であり、その変更では全曲測定を取り直さない。これらの加工段は[後処理の構成と順序](06_audio-processing-design.md)に従う。
 
-自動調整ONでは測定完了を再生開始条件とし、OFFでは従来の測定待ちなし経路を維持する。先頭準備は直後1曲に限定し、全曲測定はプレイリスト所属曲を順次巡回する。同じsource/profileの要求は合流し、条件が一致した永続結果があれば全曲scanを省く。mono/stereo変換、短い曲、gating対象なし、true-peak補間の末尾、資源上限と再生要求の優先順位は[拡張設計](./audio-processing-design.md)に従う。
+自動調整ONでは測定完了を再生開始条件とし、OFFでは従来の測定待ちなし経路を維持する。先頭準備は直後1曲に限定し、全曲測定はプレイリスト所属曲を順次巡回する。同じsource/profileの要求は合流し、条件が一致した永続結果があれば全曲scanを省く。mono/stereo変換、短い曲、gating対象なし、true-peak補間の末尾、資源上限と再生要求の優先順位は[拡張設計](06_audio-processing-design.md)に従う。
 
 ## プレイリストの事前測定
 
@@ -80,7 +80,7 @@ Stop・一時停止・末尾終了・終了は巡回と出力監視も止める�
 - 通常は現在再生のlease1つと次曲準備のlease1つを保持する。測定は該当する同じleaseを共有する。取消中の基盤I/Oと非同期後処理が完了してから最後の参照が解放される。
 - 先行準備の失敗だけで現在再生を停止したり、未選択の曲を削除したりしない。再生対象として選んだときに参照・読み込みエラーを表示する。
 
-反復曲変更でも解析のキューを安全に解放するため、観測callbackはエンジン単位の`AnalysisRenderSource`を通し、キュー取消時は実行中の読取が終わってからメモリを解放する。[解析の実装設計](./analysis-implementation.md)を参照する。バックエンドのisolated deinitで停止・解除を行うため、ビルドにはSwift 6.2以降を使用する。
+反復曲変更でも解析のキューを安全に解放するため、観測callbackはエンジン単位の`AnalysisRenderSource`を通し、キュー取消時は実行中の読取が終わってからメモリを解放する。[解析の実装設計](07_analysis-implementation.md)を参照する。バックエンドのisolated deinitで停止・解除を行うため、ビルドにはSwift 6.2以降を使用する。
 
 再生時の解析と可視化の時計・PCM取得位置・OS音量は、この処理から変更しない。エンジン作成・グラフ接続は引き続きMainActor上のSFBAudioBackendが担当する。先頭準備が冷間の初曲のI/O時間や、デバイス開始の時間をなくす保証にはしない。SFBのring／供給chunkとPrefixDecoder／ProfileDecoderの有界バッファによる逐次供給を維持し、全曲PCMの保持や別FIFOを追加しない。
 
