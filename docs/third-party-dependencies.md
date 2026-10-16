@@ -10,6 +10,8 @@ SFBAudioEngine 0.14.0を使用します。直接・間接の依存バージョ�
 
 各依存チェックアウトのLICENSE／COPYING／COPYRIGHT（内包するソースの表示を含む）と、SFBAudioEngineのACKNOWLEDGMENTSを`Contents/Resources/ThirdPartyLicenses`へコピーします。固定したPackage.resolvedも同梱します。
 
+測定キャッシュはOSが提供するSQLiteへ`CSQLite`からリンクします。ハッシュはApple CryptoKitを使用し、これらのための外部SwiftPMパッケージや独自SQLiteバイナリは追加しません。
+
 ## 配布物の扱い
 
 公開・配布する成果物には、使用する依存ライブラリの著作権表示とソース提供条件を適用します。動的frameworkの差し替えや、ライブラリを修正した場合の差分提供も、対応するライセンスの条件に従います。

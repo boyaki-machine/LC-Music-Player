@@ -49,7 +49,7 @@
 
 アプリは`preprocessingEnabled: true`でLibraryControllerを作り、音源確認と再生開始のデコーダI/Oを背景へ渡す。`selectEntry`の戻り値trueは要求の受理を示し、`isPreparing`がfalseになるまで選択確定を待つ。対象と参照を再確認し、保存成功後に選択を公開する。停止・別の選択・終了は世代を更新して古い要求を取り消す。利用者の明示選択が準備中なら自然送りはその要求を上書きしない。
 
-次曲は現在リストの直後1エントリだけ準備する。曲順・参照・対象の変更で破棄し、未完成なら選択時に通常の背景準備を行う。設定がONなら現在曲と次曲を全域測定し、`peakMeasurement`を表示、`currentTrackPeak`を音声処理向けに公開する。設定はUserDefaultsへ保存し、ピークと先頭PCMはJSONへ保存しない。処理の詳細と検証手順は[再生前処理](./preprocessing-implementation.md)を参照する。
+次曲は現在リストの直後1エントリだけ準備する。曲順・参照・対象の変更で破棄する。音量自動調整ONで同じエントリ・参照へ進む場合は、未完了でも次曲Task・先頭PCM・同じleaseを選択要求へ引き継ぎ、有効な測定完了を待つ。それ以外は取消・終了後に通常の背景準備を行い、OFFで全曲測定を待たせない。設定がONなら現在曲と次曲を全域測定し、`peakMeasurement`を表示、`currentTrackPeak`を音声処理向けに公開する。設定はUserDefaultsへ保存する。ピーク等の完了測定値は専用SQLiteへ保存し、先頭PCMは永続化しない。library.jsonの形式は変えず、正常な読込・編集保存後に音源ID集合で[測定キャッシュのAudit](./measurement-cache-implementation.md)を行う。プレイリストからの削除とlibraryからの除外を区別する。処理の詳細と検証手順は[再生前処理](./preprocessing-implementation.md)を参照する。
 
 ## M3U8交換
 

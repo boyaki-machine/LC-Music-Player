@@ -12,11 +12,12 @@ let package = Package(
         .package(url: "https://github.com/sbooth/SFBAudioEngine.git", exact: "0.14.0"),
     ],
     targets: [
+        .systemLibrary(name: "CSQLite"),
         .target(name: "AnalysisTransport"),
         .target(name: "AnalysisCore", dependencies: ["AnalysisTransport"]),
         .target(name: "LevelDSP", cSettings: [.unsafeFlags(["-O2"])]),
         .target(name: "AudioProcessingCore", dependencies: ["LevelDSP"]),
-        .target(name: "PreprocessingCore", dependencies: ["SFBAudioEngine", "AudioProcessingCore"]),
+        .target(name: "PreprocessingCore", dependencies: ["SFBAudioEngine", "AudioProcessingCore", "CSQLite"]),
         .target(name: "PlaybackCore", dependencies: ["SFBAudioEngine", "AnalysisCore", "PreprocessingCore", "AudioProcessingCore"]),
         .target(name: "LibraryCore", dependencies: ["PlaybackCore", "PreprocessingCore", "AudioProcessingCore"]),
         .target(name: "VisualizationKit"),

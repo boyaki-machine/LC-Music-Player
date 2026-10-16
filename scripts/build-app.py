@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--configuration", choices=["debug", "release"], default="debug")
+    parser.add_argument("--configuration", choices=["debug", "release"], default="release")
     parser.add_argument("--output", type=Path, default=ROOT / "build/LCMP.app",
                         help="Output .app path; use a different path while the current app is running")
     args = parser.parse_args()

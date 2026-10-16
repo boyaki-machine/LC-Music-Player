@@ -27,13 +27,15 @@ final class LevelScan: @unchecked Sendable {
     let nativeConverter: AVAudioConverter
     private var nativePeak = 0.0
     let cancellation: PreparationCancellation
-    let continuation: CheckedContinuation<TrackAudioMetrics, any Error>
     private var readFrames: Int64 = 0
     private var eof = false
-    init(url: URL, profile: MeasurementProfile, cancellation: PreparationCancellation,
-         continuation: CheckedContinuation<TrackAudioMetrics, any Error>) throws {
+    let collectTimings: Bool
+    private(set) var workSeconds = 0.0
+    private(set) var nativePeakSeconds = 0.0
+    init(url: URL, profile: MeasurementProfile, cancellation: PreparationCancellation, collectTimings: Bool = false) throws {
         source = try SourceFingerprint(url: url); self.profile = profile
-        self.cancellation = cancellation; self.continuation = continuation
+        self.cancellation = cancellation
+        self.collectTimings = collectTimings
         decoder = try AudioDecoderFactory.open(url)
         do {
             guard (1...2).contains(decoder.processingFormat.channelCount),
@@ -51,17 +53,21 @@ final class LevelScan: @unchecked Sendable {
             meter = try LoudnessMeter(profile: profile)
         } catch { try? decoder.close(); throw error }
     }
-    func read() throws -> TrackAudioMetrics? {
-        try cancellation.check()
+    func read(checkActive: @escaping () throws -> Void = {}) throws -> TrackAudioMetrics? {
+        let started = collectTimings ? ContinuousClock.now : nil
+        defer { if let started { workSeconds += durationSeconds(started.duration(to: .now)) } }
+        try cancellation.check(); try checkActive()
         var failure: Error?, conversionError: NSError?
         let status = converter.convert(to: output, error: &conversionError) { [self] requested, state in
             do {
-                try cancellation.check()
+                try cancellation.check(); try checkActive()
                 if eof { state.pointee = .endOfStream; return nil }
                 try decoder.decode(into: input, length: min(requested, input.frameCapacity))
                 if input.frameLength == 0 { eof = true; state.pointee = .endOfStream; return nil }
                 readFrames += Int64(input.frameLength)
+                let peakStarted = collectTimings ? ContinuousClock.now : nil
                 nativePeak = max(nativePeak, try NativeSamplePeak.read(input, analysisBuffer: nativeAnalysis, converter: nativeConverter))
+                if let peakStarted { nativePeakSeconds += durationSeconds(peakStarted.duration(to: .now)) }
                 state.pointee = .haveData; return input
             } catch { failure = error; state.pointee = .endOfStream; return nil }
         }
@@ -74,15 +80,17 @@ final class LevelScan: @unchecked Sendable {
         }
         if status == .endOfStream {
             guard eof, readFrames > 0, decoder.length < 0 || readFrames == decoder.length else { throw PreprocessingFailure.invalidAudio }
-            let levels = try meter.finish { try self.cancellation.check() }
-            try cancellation.check(); try source.validate()
+            let levels = try meter.finish { try self.cancellation.check(); try checkActive() }
+            try cancellation.check(); try checkActive(); try source.validate()
             return TrackAudioMetrics(source: source, profile: profile, levels: levels, sourceFrameCount: readFrames,
                 sourcePeak: TrackPeak(source: source, samplePeak: nativePeak, frameCount: readFrames,
                     sampleRate: input.format.sampleRate, channelCount: input.format.channelCount))
         }
         return nil
     }
-    func finish(_ result: Result<TrackAudioMetrics, any Error>) {
-        try? decoder.close(); continuation.resume(with: result)
-    }
+    func close() { try? decoder.close() }
+}
+
+private func durationSeconds(_ value: Duration) -> Double {
+    Double(value.components.seconds) + Double(value.components.attoseconds)/1e18
 }
