@@ -18,6 +18,7 @@ public final class PlaybackController {
     public private(set) var analysisResetID = UUID()
     public private(set) var analysisConfiguration: AnalysisConfiguration? = try? AnalysisConfiguration()
     @ObservationIgnored private var volumeBeforeMute: Float = 0.25
+    @ObservationIgnored public var onActivityChange: (@MainActor () -> Void)?
     @ObservationIgnored public var onNaturalFinish: (@MainActor () -> Void)?
 
     @ObservationIgnored private var backend: (any PlaybackBackend)?
@@ -33,6 +34,8 @@ public final class PlaybackController {
         self.fileAccess = fileAccess
         self.makeBackend = makeBackend
     }
+
+    public var activeFileLease: FileLease? { lease }
 
     public var canPlay: Bool { selectedURL != nil }
     public var canSeek: Bool {
@@ -71,6 +74,45 @@ public final class PlaybackController {
         }
     }
 
+    @discardableResult
+    public func selectMetadata(url: URL, duration: Double, supportsSeeking: Bool,
+                               committing: () throws -> Void = {}) -> Bool {
+        do {
+            guard duration.isFinite, duration > 0 else { throw PlaybackError.inaccessibleFile }
+            try committing()
+            endRun()
+            backend = SFBAudioBackend(url: url, duration: duration, supportsSeeking: supportsSeeking)
+            backend?.volume = volume
+            selectedURL = url; self.duration = duration; state = .ready
+            error = nil; message = "再生できます。"; connectAnalysis()
+            return true
+        } catch { self.error = .loadingFailed(error.localizedDescription); return false }
+    }
+
+    /// A completed background preparation enters the same transactional selection path.
+    @discardableResult
+    public func selectPrepared(_ prepared: PreparedAudio, using access: FileLease,
+                               committing: () throws -> Void = {}) -> Bool {
+        do {
+            let next = try SFBAudioBackend(prepared: prepared)
+            do { try committing() } catch { next.stop(); throw error }
+            endRun()
+            backend = next
+            lease = access
+            selectedURL = prepared.source.url
+            duration = next.duration
+            next.volume = volume
+            state = .ready
+            error = nil
+            message = "再生できます。"
+            connectAnalysis()
+            return true
+        } catch {
+            self.error = .loadingFailed(error.localizedDescription)
+            return false
+        }
+    }
+
     public func selectionCancelled() {
         error = nil
         message = "ファイル選択を取り消しました。"
@@ -93,7 +135,7 @@ public final class PlaybackController {
                 message = "再生中"
             default:
                 guard let selectedURL else { return }
-                lease = try access ?? fileAccess.acquire(selectedURL)
+                lease = try access ?? lease ?? fileAccess.acquire(selectedURL)
                 connectAnalysis()
                 bindEvents(to: backend)
                 try backend.play()
@@ -101,6 +143,7 @@ public final class PlaybackController {
                 message = "再生中"
             }
             error = nil
+            onActivityChange?()
         } catch {
             handle(.failed((error as? PlaybackError) ?? .playbackFailed(error.localizedDescription)))
         }
@@ -112,6 +155,7 @@ public final class PlaybackController {
         state = .stopped
         error = nil
         message = "停止中"
+        onActivityChange?()
     }
 
     /// Display implementations choose their resolution/cadence; nil unsubscribes.
@@ -158,6 +202,7 @@ public final class PlaybackController {
             state = .finished
             error = nil
             message = "再生が終了しました。"
+            onActivityChange?()
             return
         }
         do {
@@ -170,6 +215,7 @@ public final class PlaybackController {
             try backend.seek(to: target)
             if state == .finished { state = .stopped }
             error = nil
+            onActivityChange?()
         } catch {
             handle(.failed((error as? PlaybackError) ?? .playbackFailed(error.localizedDescription)))
         }
@@ -187,6 +233,7 @@ public final class PlaybackController {
         state = .empty
         error = nil
         message = "音楽ファイルを選択してください。"
+        onActivityChange?()
     }
 
     private func handle(_ event: PlaybackEvent) {
@@ -206,6 +253,7 @@ public final class PlaybackController {
             error = nil
             message = "音声出力の設定が変わりました。再生ボタンで先頭から再開できます。"
         }
+        onActivityChange?()
     }
 
     private func bindEvents(to backend: any PlaybackBackend) {

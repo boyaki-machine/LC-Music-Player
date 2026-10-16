@@ -70,14 +70,30 @@ public struct ExtensionView: View {
                         Spacer()
                     }
                 case .settings:
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("再生と表示")
-                        Text("音量はアプリ内の再生音量です。出力はmacOSの既定デバイスを使用します。")
-                        Text("⌘O 音源登録 · Space 再生／一時停止\n⌘M 最小化 · ⌘W 閉じる · ⌘Q 終了").foregroundStyle(.secondary)
-                        Spacer()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("再生と表示")
+                            Toggle("最大音量を測定", isOn: Binding(get: { library.measuresMaximumVolume },
+                                set: { library.setMeasuresMaximumVolume($0) }))
+                            Text("曲全体の最大サンプル音量を測定します。再生音量は変更しません。")
+                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            switch library.peakMeasurement {
+                            case .disabled: EmptyView()
+                            case .pending: Text("最大音量：未測定／測定待ち").foregroundStyle(.secondary)
+                            case .complete(let peak):
+                                Text(peak.samplePeak == 0 ? "最大音量：無音" : String(format: "最大音量：%.1f dBFS", peak.peakDBFS))
+                            case .failed: Text("最大音量を測定できませんでした。").foregroundStyle(.secondary)
+                            }
+                            Text("音量はアプリ内の再生音量です。出力はmacOSの既定デバイスを使用します。")
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("⌘O 音源登録 · Space 再生／一時停止\n⌘M 最小化 · ⌘W 閉じる · ⌘Q 終了")
+                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
                     }
+
                 }
             }.font(.system(size: 12)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if library.isPreparing { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("再生を準備しています…").font(.system(size: 11)) } }
             if library.isBusy { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("音源を登録しています…").font(.system(size: 11)) } }
             if let notice = library.error ?? library.message ?? playback.error?.localizedDescription {
                 HStack(alignment: .top, spacing: 4) {

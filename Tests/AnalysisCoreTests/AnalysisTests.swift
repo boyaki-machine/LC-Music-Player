@@ -175,7 +175,8 @@ struct AnalysisTests {
         engine.connect(observation, to: engine.mainMixerNode, format: format)
         try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 1024)
         let session = try AnalysisSession(configuration: AnalysisConfiguration())
-        #expect(session.attach(to: observation.audioUnit, sampleRate: 48000, outputLatency: 0) == noErr)
+        let renderSource = try AnalysisRenderSource(unit: observation.audioUnit)
+        #expect(session.attach(to: renderSource, sampleRate: 48000, outputLatency: 0) == noErr)
         let input = try makeBuffer(frames: 8192, sample: 0, rate: 48000)
         source.scheduleBuffer(input)
         try engine.start()
@@ -188,7 +189,7 @@ struct AnalysisTests {
             for i in 0..<1024 { #expect(abs(actual[i] - expected[chunk * 1024 + i]) < 1e-6) }
         }
         engine.stop()
-        #expect(session.detach(from: observation.audioUnit) == noErr)
+        session.detach()
         session.finish()
     }
 

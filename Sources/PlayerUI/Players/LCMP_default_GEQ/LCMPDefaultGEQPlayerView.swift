@@ -55,7 +55,10 @@ struct LCMPDefaultGEQPlayerView: View {
                           activeColor: playColor, status: status) { if let library { library.togglePlayPause() } else { playback.togglePlayPause() } }
                     .keyboardShortcut(.space, modifiers: [])
                 LEDButton(symbol: "forward.end.fill", label: "次の曲", enabled: library?.canNext == true) { library?.next() }
-                LEDButton(symbol: "stop.fill", label: "停止", enabled: playback.canStop, pulseColor: .orange, action: playback.stop)
+                LEDButton(symbol: "stop.fill", label: "停止", enabled: playback.canStop || library?.isPreparing == true, pulseColor: .orange) {
+                    if let library { library.stop() } else { playback.stop() }
+                }
+
                 LEDButton(symbol: playback.isMuted || playback.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
                           label: "音量", activeColor: presentation.volumeVisible ? .green : nil) { presentation.volumeVisible.toggle() }
                     .background(VolumeClickRegion(handler: volumeOutsideClick))

@@ -4,6 +4,7 @@
 
 - [基本設計](./basic-design.md)：製品の目的、対象プラットフォーム、機能構成、再生・可視化の流れ、画面構成。
 - [UI・UX設計](./ui-ux-design.md)：コンパクトなメイン画面、拡張画面、シーク、縦型音量、macOSとiPhoneの操作。
+- [再生前処理の実装設計](./preprocessing-implementation.md)：次曲の先頭PCM、任意の全曲最大音量測定、背景処理・取消・音声処理へのI/F。
 - [基本再生機能の実装設計](./playback-implementation.md)：単曲再生の責務分担、対応形式、状態遷移、ファイルアクセス、音量・出力、検証方法。
 - [ライブラリ・プレイリストの実装設計](./library-implementation.md)：JSON保存・復元、ブックマーク、M3U8交換、順次再生、音源管理。
 - [コンパクト画面の実装設計](./compact-ui-implementation.md)：ウィンドウ配置、LED、操作・フォーカス、シークと縦型音量。

@@ -4,7 +4,7 @@
 
 ## 責務と音声経路
 
-`AnalysisCore`は表示に依存しないスペクトラム・左右レベルと時刻情報を生成します。`PlaybackCore`のSFBAudioBackendが音声取得と解析セッションの寿命を所有します。`AnalysisTransport`はCの固定容量SPSCキューとAudio Unitのレンダー通知を実装します。音源を解析のために再度開いたり、ファイル全体を事前解析したりしません。
+`AnalysisCore`は表示に依存しないスペクトラム・左右レベルと時刻情報を生成します。`PlaybackCore`のSFBAudioBackendが音声取得と解析セッションの寿命を所有します。`AnalysisTransport`はCの固定容量SPSCキューとAudio Unitのレンダー通知を実装します。可視化の周波数解析は再生経路を観測し、音源を再度開きません。任意の全曲sample peak測定は[再生前処理](./preprocessing-implementation.md)の別処理です。
 
 ```text
 SFBAudioEngine source
@@ -29,7 +29,7 @@ SFBAudioEngine source
 
 ## 受渡し・上限・終了
 
-レンダー通知にはメモリ確保、FFT、Swift Task、UI更新、待つロック、I/Oを置きません。8スロット×最大16384フレーム×左右Float32を事前確保します。C11のlock-free原子操作とrelease/acquireで所有権を移します。Audio Unitには同じcallback/contextの組で登録・解除し、解除後にセッションを終了します。満杯・過大・不正なバッファは音声を待たせず解析側だけで捨てます。
+レンダー通知にはメモリ確保、FFT、Swift Task、UI更新、待つロック、I/Oを置きません。8スロット×最大16384フレーム×左右Float32を事前確保します。C11のlock-free原子操作とrelease/acquireで所有権を移します。`AnalysisRenderSource`は観測Audio Unitごとに安定したcallback contextを1つ登録し、エンジン停止まで保持します。解析キューは原子ポインターで差し替えます。callbackは読取数を増やしてからキューを読み、コピー後に減らします。`AnalysisSession.detach()`は制御側でポインターをnilにし、旧キューを読んでいるcallbackが完了するまで待ってから解放を許可します。render側は待機しません。通知解除だけを実行中callbackの完了保証として使いません。セッションを取り消しても観測contextは残り、キューがnilの間はコピーを省略します。エンジンを停止してから通知を解除しcontextを破棄します。attach／detachとSourceの所有・破棄は単一の制御側で直列に行い、render callbackから呼びません。満杯・過大・不正なバッファは音声を待たせず解析側だけで捨てます。
 
 単一の直列ワーカーが4ms周期で最大8バッファを回収し、最後の完全なFFT窓を解析します。窓のhopはmin(窓長/2, sampleRate/更新頻度)です。欠落連番・サンプル時刻/host時刻の不連続・時刻の有効/無効の切替・レート変更で途中の窓を破棄し、離れたPCM区間を結合しません。
 
@@ -99,3 +99,7 @@ LCMP_ANALYSIS_REPORT_DIR=build/analysis-soak \
 基準条件はステレオ48kHz音源・32帯域・2048点です。観測レートは出力形式に従うため、JSONに実レートを残します。受入チェックは実配信平均が指定値の90〜102%、計算p95が2ms以内、窓中央→生成p95が80ms以内、生成→受信p95と推定提示時刻からの遅れp95が1更新周期以内、最大配信間隔0.5秒未満、drop0、キュー最大8以下、プロセスCPU30%未満、開始60秒以降のRSS変動幅10MiB未満です。しきい値には実行環境が影響するため、測定条件・結果を併記して評価します。生成→受信や提示時刻に対する準備の遅れは描画そのものの遅れではありません。
 
 測定終了後は停止して追加の配信がないことも確認します。物理的な発音と画面の一致は、将来の表示・音声遅延機能を合わせた測定で評価します。
+
+### 解析キュー寿命の競合検証
+
+`scripts/check-analysis-lifetime.c`は製品のC render callbackを使い、別スレッドで5万回キューを差し替え、旧キューを直ちに解放する。`clang -std=c11 -g -O1 -fsanitize=address,undefined -I Sources/AnalysisTransport/include scripts/check-analysis-lifetime.c -framework AudioToolbox -o build/check-analysis-lifetime`で作成して実行する。Thread Sanitizerは`-fsanitize=thread`で別実行する。実音声の`AnalysisLifetimeTests`ではエンジンを動かしたまま解析を200回差し替え、音声継続・再購読・停止解放を確認する。
