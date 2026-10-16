@@ -8,8 +8,10 @@
 
 - `MeasurementCacheConfiguration`：保存先、プログラム識別、音源識別adapter、容量・件数・期限、測定/変換版。
 - `MeasurementCache`：前処理のutilityキューだけが操作するSQLite接続、検索・検証・更新・回収。
-- `AudioPreprocessor`：現在曲・次曲共通の`measureLevels`／`measure`でキャッシュ参照と測定要求の合流を行う。
+- `AudioPreprocessor`：現在曲・次曲・プレイリスト巡回共通の`measureLevels`／`measure`でキャッシュ参照と測定要求の合流を行う。
 - `LibraryController`：音源IDを測定へ渡し、正常なライブラリ読込・編集保存の後に、有効な音源ID集合を渡す。キャッシュからライブラリへ依存しない。
+
+プレイリスト事前測定も同じprocessor/cacheを使う。追加と正常復元から全リスト所属曲を巡回し、ヒット時は走査を省く。背景の完了結果は表示/補正のON/OFFと独立して保存する。
 
 macOSアプリは専用`AudioPreprocessor(cache: .application)`をLibraryControllerへ注入する。保存先はユーザーのCachesディレクトリ配下`LCMP/Measurements/v1/measurements.sqlite`。FoundationでOSの保存場所を求め、ユーザー名をハードコードしない。再生成可能なデータとして扱い、OS等に削除された場合は再測定する。設定のUserDefaults、音源参照とリストのlibrary.jsonから分離する。
 

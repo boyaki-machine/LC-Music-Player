@@ -27,7 +27,7 @@ final class PlayerWindow: NSWindow {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     private let playback = PlaybackController()
-    private lazy var library = LibraryController(playback: playback, preprocessingEnabled: true, preprocessor: AudioPreprocessor(cache: .application))
+    private lazy var library = LibraryController(playback: playback, preprocessingEnabled: true, playlistPreprocessingEnabled: true, preprocessor: AudioPreprocessor(cache: .application))
     private let presentation = PlayerPresentation()
     private var mainWindow: NSWindow!
     private var extensionWindow: NSWindow!

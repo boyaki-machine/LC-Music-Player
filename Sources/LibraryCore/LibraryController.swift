@@ -28,6 +28,8 @@ import AudioProcessingCore
     @ObservationIgnored private let preprocessingEnabled: Bool
     @ObservationIgnored private let preferences: UserDefaults
     @ObservationIgnored private let preprocessor: any AudioPreprocessing
+    @ObservationIgnored private var playlistPreprocessingMayStart = true
+    @ObservationIgnored private var playlistPreprocessing: PlaylistPreprocessing?
     @ObservationIgnored private var cacheAuditTask: Task<Void, Never>?
     @ObservationIgnored private var selectionIntent: SelectionIntent?
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
@@ -46,11 +48,19 @@ import AudioProcessingCore
 
     public init(playback: PlaybackController, store: any LibraryPersistence = JSONLibraryStore(url: JSONLibraryStore.defaultURL),
                 references: any FileReferenceProvider = BookmarkFileReferences(),
-                preprocessingEnabled: Bool = false, preferences: UserDefaults = .standard,
+                preprocessingEnabled: Bool = false, playlistPreprocessingEnabled: Bool = false, preferences: UserDefaults = .standard,
                 preprocessor: any AudioPreprocessing = AudioPreprocessor.shared) {
         self.playback = playback; self.store = store; self.references = references
         self.preprocessor = preprocessor
         self.preprocessingEnabled = preprocessingEnabled; self.preferences = preferences
+        if preprocessingEnabled && playlistPreprocessingEnabled {
+            playlistPreprocessing = PlaylistPreprocessing(references: references, worker: preprocessor, profile: { try SFBAudioBackend.measurementProfile() })
+            playlistPreprocessing?.onMeasured = { [weak self] id, metrics in
+                guard let self, self.currentTrack?.id == id, self.playback.selectedURL == metrics.source.url else { return }
+                self.measuredLevels = metrics
+                if self.measuresMaximumVolume { self.measuredTrack = id; self.peakMeasurement = .complete(metrics.sourcePeak) }
+            }
+        }
         measuresMaximumVolume = preferences.bool(forKey: "measureMaximumVolume")
         normalizesVolume = preferences.bool(forKey: "normalizeVolume")
         if let target = preferences.object(forKey: "normalizationTargetLUFS") as? Double,
@@ -60,6 +70,9 @@ import AudioProcessingCore
         if preprocessingEnabled { playback.onActivityChange = { [weak self] in self?.updatePreprocessing() } }
         do { document = try store.load(); message = store.recoveryMessage; auditMeasurementCache() }
         catch { self.error = error.localizedDescription; editsEnabled = false }
+        if playlistPreprocessing != nil {
+            Task { [weak self] in self?.resumePlaylistPreprocessing() }
+        }
         playback.onNaturalFinish = { [weak self] in
             guard let self else { return }
             if self.isPreparing { return }
@@ -243,8 +256,17 @@ import AudioProcessingCore
         guard let list = currentPlaylist, let i = currentIndex, list.entries.indices.contains(i + offset) else { return }
         selectEntry(list.entries[i + offset].id, in: list.id, autoPlay: autoPlay)
     }
+    private func retirePlaylistWorkForImport() async {
+        guard let playlistPreprocessing else { return }
+        playlistPreprocessing.suspend()
+        let selecting = selectionTask, retiring = playlistPreprocessing.retirement
+        await selecting?.value
+        await retiring?.value
+        await backgroundRetirement?.value
+    }
     private func finishImport() {
         isBusy = false
+        if playlistPreprocessing != nil { resumePlaylistPreprocessing(retryFailures: true) }
         if pendingAdvance { pendingAdvance = false; if playback.state == .finished { move(1, autoPlay: true) } }
     }
     public func shutdown() {
@@ -262,8 +284,11 @@ import AudioProcessingCore
     }
     public func importFiles(_ selections: [URL], into playlistID: UUID? = nil) async {
         guard canEdit else { return }; isBusy = true; error = nil
+        defer { finishImport() }
+        await retirePlaylistWorkForImport()
+        guard editsEnabled, !shuttingDown else { return }
         let scopes = selections.map { references.beginAccess($0) }
-        defer { withExtendedLifetime(scopes) {}; finishImport() }
+        defer { withExtendedLifetime(scopes) {} }
         do {
             let urls = try await Task.detached(priority: .userInitiated) { try AudioDiscovery.files(in: selections) }.value
             let folderRoots = selections.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
@@ -315,8 +340,11 @@ import AudioProcessingCore
     public func importM3U8(_ url: URL) async {
         guard url.isFileURL else { error = LibraryFailure.inaccessible.localizedDescription; return }
         guard canEdit else { return }; isBusy = true; error = nil
+        defer { finishImport() }
+        await retirePlaylistWorkForImport()
+        guard editsEnabled, !shuttingDown else { return }
         let scope = references.beginAccess(url)
-        defer { withExtendedLifetime(scope) {}; finishImport() }
+        defer { withExtendedLifetime(scope) {} }
         do {
             let data = try await Task.detached { try Data(contentsOf: url) }.value
             let items = try M3U8.decode(data, relativeTo: url)
@@ -374,9 +402,13 @@ extension LibraryController {
               peak.source.url == playback.selectedURL, (try? peak.source.validate()) != nil else { return nil }
         return peak
     }
-    var preparedNextHasLevels: Bool { nextPrepared?.levels != nil }
-    var preparedNextEntryID: UUID? { nextPrepared?.audio == nil ? nil : nextPrepared?.entry }
-    var preparedNextByteCount: Int { nextPrepared?.audio?.bufferedBytes ?? 0 }
+    var playlistWorkRetirement: Task<Void, Never>? { playlistPreprocessing?.retirement }
+    var preparedNextHasLevels: Bool { (playlistPreprocessing?.active ?? nextPrepared)?.levels != nil }
+    var preparedNextEntryID: UUID? {
+        let request = playlistPreprocessing?.active ?? nextPrepared
+        return request?.audio == nil ? nil : request?.entry
+    }
+    var preparedNextByteCount: Int { (playlistPreprocessing?.active ?? nextPrepared)?.audio?.bufferedBytes ?? 0 }
 
     public func stop() { cancelPreparation(); playback.stop() }
 
@@ -386,7 +418,13 @@ extension LibraryController {
         cancelMeasurement(); cancelNext()
         measuredTrack = nil
         peakMeasurement = enabled ? .pending : .disabled
-        if playback.state == .playing { prepareNext(); measureCurrent() }
+        if playback.state == .playing {
+            prepareNext()
+            if playlistPreprocessing == nil || playlistPreprocessing?.supportsProfile == false { measureCurrent() }
+            else if let metrics = measuredLevels, (try? metrics.source.validate()) != nil, enabled {
+                peakMeasurement = .complete(metrics.sourcePeak); measuredTrack = currentTrack?.id
+            }
+        }
     }
 
     private func cancelMeasurement() {
@@ -403,6 +441,8 @@ extension LibraryController {
         nextTask?.cancel(); nextTask = nil; nextID = nil; nextPrepared = nil
     }
     private func cancelPreparation() {
+        playlistPreprocessingMayStart = false
+        playlistPreprocessing?.suspend()
         let previous = backgroundRetirement, selection = selectionTask, next = nextTask, measurement = measurementTask
         if selection != nil || next != nil || measurement != nil {
             backgroundRetirement = Task {
@@ -420,16 +460,20 @@ extension LibraryController {
     }
     private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double = 0) {
         guard !shuttingDown else { return }
+        playlistPreprocessingMayStart = true
         let requestedReference = currentReference(entryID, in: playlistID)
         let intent = SelectionIntent(entry: entryID, playlist: playlistID, reference: requestedReference, autoPlay: autoPlay)
         selectionIntent = intent
-        let candidate = nextPrepared.flatMap { request in
+        let sweepTransfer = autoPlay && normalizesVolume ? trackForEntry(entryID, in: playlistID).flatMap { playlistPreprocessing?.take($0) } : nil
+        playlistPreprocessing?.suspend()
+        let sweepRetirement = playlistPreprocessing?.retirement
+        let candidate = sweepTransfer?.0 ?? nextPrepared.flatMap { request in
             request.entry == entryID && request.reference == requestedReference ? request : nil
         }
         // Transfer the existing waiter and lease, including a still-pending prefix.
         // OFF/metadata selections keep their cancellation path and never wait for a full scan.
         let promoted = autoPlay && normalizesVolume ? candidate : nil
-        let promotedTask = promoted == nil ? nil : nextTask
+        let promotedTask = sweepTransfer?.1 ?? (promoted == nil ? nil : nextTask)
         let retiringSelection = selectionTask, retiringNext = promoted == nil ? nextTask : nil
         selectionCancellation?.cancel(); selectionTask?.cancel()
         let id = UUID(); preparationID = id
@@ -446,11 +490,16 @@ extension LibraryController {
         preparationStage = "音声を準備しています…"
         selectionTask = Task { [weak self] in
             defer {
-                if let self, self.preparationID == id {
+                if let self, self.preparationID == id, self.isPreparing {
+                    let retiring = self.selectionTask, previous = self.backgroundRetirement
+                    self.backgroundRetirement = Task { await previous?.value; await retiring?.value }
                     self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
+                    self.preparationStage = nil
+                    if self.playback.state == .playing { self.resumePlaylistPreprocessing() }
                 }
             }
             do {
+                await sweepRetirement?.value
                 await retiringBackground?.value
                 await retiringSelection?.value
                 await retiringNext?.value
@@ -464,6 +513,12 @@ extension LibraryController {
                 if let cached, let audio = cached.audio, let access = cached.resolved,
                    (try? audio.source.validate()) != nil, cached.reference == track.reference {
                     resolved = access; prepared = audio
+                } else if sweepTransfer != nil, let cached, cached.audio == nil,
+                          let access = cached.resolved, cached.reference == track.reference,
+                          cached.levels?.profile == (try? SFBAudioBackend.measurementProfile()),
+                          (try? cached.levels?.source.validate()) != nil {
+                    resolved = access
+                    prepared = try await self.preprocessor.prepare(access.url, cancellation: cancellation, seconds: 2, byteLimit: 32 * 1024 * 1024)
                 } else {
                     // A changed source cannot keep an obsolete lease while reopening it.
                     cached?.audio = nil; cached?.resolved = nil; cached?.levels = nil; cached?.peak = nil
@@ -512,12 +567,15 @@ extension LibraryController {
                 self.measuredLevels = levels
                 self.levelMeasurement = self.normalizesVolume ? levels.map { .complete($0) } ?? .pending : .disabled
                 self.normalizationNeedsPreparation = false
-                if let peak = cached?.peak, peak.source == prepared.source {
+                if self.measuresMaximumVolume, let peak = levels?.sourcePeak ?? cached?.peak, peak.source == prepared.source {
                     self.measuredTrack = track.id; self.peakMeasurement = .complete(peak)
                 }
                 if intent.autoPlay { self.playback.togglePlayPause(using: resolved.lease) }
+                else if self.playlistPreprocessing != nil { self.resumePlaylistPreprocessing() }
             } catch {
                 guard let self, self.preparationID == id else { return }
+                let retiring = self.selectionTask, previous = self.backgroundRetirement
+                self.backgroundRetirement = Task { await previous?.value; await retiring?.value }
                 self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
                 self.preparationStage = nil
                 if !(error is CancellationError) {
@@ -529,11 +587,27 @@ extension LibraryController {
         }
     }
 
+    private func trackForEntry(_ entryID: UUID, in playlistID: UUID) -> LibraryTrack? {
+        playlist(playlistID)?.entries.first { $0.id == entryID }.flatMap { track($0.trackID) }
+    }
+    private func resumePlaylistPreprocessing(retryFailures: Bool = false) {
+        guard !shuttingDown, editsEnabled, !isBusy, !isPreparing, playlistPreprocessingMayStart else { return }
+        let audit = cacheAuditTask, previous = backgroundRetirement
+        let barrier = Task { await previous?.value; await audit?.value }
+        playlistPreprocessing?.update(document, playback: playback, after: barrier,
+                                      completed: measuredLevels, retryFailures: retryFailures)
+    }
     private func restartNextPreparation() {
+        if playlistPreprocessing != nil {
+            playlistPreprocessingMayStart = true
+            resumePlaylistPreprocessing(retryFailures: true)
+            return
+        }
         cancelNext()
         if playback.state == .playing { prepareNext() }
     }
     private func prepareNext() {
+        if playlistPreprocessing != nil { resumePlaylistPreprocessing(); return }
         guard !shuttingDown, !isPreparing, playback.state == .playing, let list = currentPlaylist, let index = currentIndex,
               list.entries.indices.contains(index + 1) else { return }
         let entry = list.entries[index + 1]
@@ -582,8 +656,9 @@ extension LibraryController {
         guard preprocessingEnabled, !shuttingDown else { return }
         if playback.state == .playing {
             guard !isPreparing else { return }
+            playlistPreprocessingMayStart = true
             prepareNext()
-            measureCurrent()
+            if playlistPreprocessing == nil || playlistPreprocessing?.supportsProfile == false { measureCurrent() }
         } else if playback.state == .paused {
             let levels = measuredLevels
             cancelPreparation()
@@ -620,7 +695,9 @@ extension LibraryController {
 }
 
 /// Main-actor ownership can move from speculation to selection without cancelling its worker.
-@MainActor private final class NextPreparation {
+@MainActor final class NextPreparation {
+    let trackID: UUID?
+    var profile: MeasurementProfile?
     let entry: UUID
     let reference: TrackReference
     let cancellation = PreparationCancellation()
@@ -629,7 +706,7 @@ extension LibraryController {
     var peak: TrackPeak?
     var levels: TrackAudioMetrics?
     var failure: (any Error)?
-    init(entry: UUID, reference: TrackReference) { self.entry = entry; self.reference = reference }
+    init(entry: UUID, reference: TrackReference, trackID: UUID? = nil) { self.entry = entry; self.reference = reference; self.trackID = trackID }
 }
 
 /// MainActor-owned intent; only the current selection can be upgraded by a row click.
