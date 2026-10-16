@@ -1,12 +1,12 @@
 # 基本再生機能の実装設計
 
-[設計書一覧](./README.md)に戻る。
+[設計書一覧](../README.md)に戻る。
 
-本書は、`Sources/LCMPApp`と`Sources/PlaybackCore`にある単曲再生機能の構造と動作を記述します。製品で目指す機能構成は[基本設計](./basic-design.md)に記載します。
+本書は、`Sources/LCMPApp`と`Sources/PlaybackCore`にある単曲再生機能の構造と動作を記述します。製品で目指す機能構成は[基本設計](00_basic-design.md)に記載します。
 
-再生PCMの観測ノード、解析セッションと同期用時刻の契約は[周波数解析の実装設計](./analysis-implementation.md)に記載します。解析は再生用ファイルを別途開かず、再生経路からデータを取得します。
+再生PCMの観測ノード、解析セッションと同期用時刻の契約は[周波数解析の実装設計](07_analysis-implementation.md)に記載します。解析は再生用ファイルを別途開かず、再生経路からデータを取得します。
 
-LUFSとtrue peakを併用した固定ゲイン段、測定結果の受領と再生前の検査は[音量自動調整](./audio-processing-design.md)に記載します。EQ・同期用ディレイは将来の追加対象です。
+LUFSとtrue peakを併用した固定ゲイン段、測定結果の受領と再生前の検査は[音量自動調整](06_audio-processing-design.md)に記載します。EQ・同期用ディレイは将来の追加対象です。
 
 ## 1. 構成と責務
 
@@ -38,11 +38,11 @@ WAV・FLACの24bit／96kHz入力を扱います。出力条件はOSと出力機�
 
 拡張子の対応判定に加え、通常ファイルで読み取り可能なことと、デコーダで読み込めることを確認します。同じ拡張子の破損ファイルも読み込み失敗として扱います。
 
-NSOpenPanelによるファイル・フォルダ登録と参照の永続化は[ライブラリ管理](./library-implementation.md)が担当します。再生制御は選択された1曲の元URLを受け取り、複製・移動を行いません。選択時の読み込み確認は一時的な`FileLease`で保護し、確認完了時に解放します。再生開始時にアクセスを取得し、再生・一時停止中だけ保持します。停止・自然終了・再生失敗・出力変更でエンジンを停止した後に解放し、次の再生時に取り直します。停止中のシークはその操作中だけアクセスを保持します。再生を停止しただけでは選択を解除しません。PlaybackCore自体は保存先やプレイリスト形式へ依存しません。
+NSOpenPanelによるファイル・フォルダ登録と参照の永続化は[ライブラリ管理](03_library-implementation.md)が担当します。再生制御は選択された1曲の元URLを受け取り、複製・移動を行いません。選択時の読み込み確認は一時的な`FileLease`で保護し、確認完了時に解放します。再生開始時にアクセスを取得し、再生・一時停止中だけ保持します。停止・自然終了・再生失敗・出力変更でエンジンを停止した後に解放し、次の再生時に取り直します。停止中のシークはその操作中だけアクセスを保持します。再生を停止しただけでは選択を解除しません。PlaybackCore自体は保存先やプレイリスト形式へ依存しません。
 
 ファイル選択はトランザクションとして扱います。新しい音源の読み込みと、呼び出し側の確定処理（ライブラリ保存）に成功してから、元の再生を停止して選択を差し替えます。選択取消・選択失敗では、元の音源と再生状態を維持して取消または理由を表示します。
 
-アプリの背景選択では、[前処理](./preprocessing-implementation.md)で読み込みを確認してから、`selectMetadata`で軽量情報だけを保持する。再生開始は`selectPrepared`で開いたままの先頭PCM付きデコーダを受け取り、`togglePlayPause(using:)`へ同じleaseを渡す。保存失敗時は受領候補を閉じ、旧再生を維持する。`onActivityChange`はLibraryCoreが停止・一時停止等に合わせて先行処理を取消・再開する通知として使う。
+アプリの背景選択では、[前処理](04_preprocessing-implementation.md)で読み込みを確認してから、`selectMetadata`で軽量情報だけを保持する。再生開始は`selectPrepared`で開いたままの先頭PCM付きデコーダを受け取り、`togglePlayPause(using:)`へ同じleaseを渡す。保存失敗時は受領候補を閉じ、旧再生を維持する。`onActivityChange`はLibraryCoreが停止・一時停止等に合わせて先行処理を取消・再開する通知として使う。
 
 ## 3. 再生状態と操作
 
@@ -93,9 +93,9 @@ UIに渡す状態とイベントはmain actorで処理します。SFBAudioEngine
 
 手動音量はPlaybackCoreの責務である。PlayerUIが操作を受け、`PlaybackController.setVolume`／`toggleMute`が値と状態を管理し、SFBAudioBackendが`mainMixerNode.outputVolume`へ反映する。音量・ミュート変更は再生を継続して行う。PlayerUIは音量バーの操作位置を小音量側の曲線から実倍率へ変換し、このAPIへ渡す。再生層は非線形の操作位置を保持しない。
 
-[後処理の追加設計](./audio-processing-design.md)では、EQ・レベル自動調整・同期用ディレイを直列に置き、その後のmainMixerで手動音量を適用する。自動補正と手動音量は別の倍率として管理する。手動音量を全曲測定や補正計画の入力に含めず、その変更で再測定・自動ゲイン再計算を行わない。EQ・ディレイの処理段は将来の追加対象であり、現行実装と区別する。
+[後処理の追加設計](06_audio-processing-design.md)では、EQ・レベル自動調整・同期用ディレイを直列に置き、その後のmainMixerで手動音量を適用する。自動補正と手動音量は別の倍率として管理する。手動音量を全曲測定や補正計画の入力に含めず、その変更で再測定・自動ゲイン再計算を行わない。EQ・ディレイの処理段は将来の追加対象であり、現行実装と区別する。
 
-OSのシステム音量やデバイスのサンプルレートを変更するAPIは使用しません。単曲再生の音量値はアプリの実行中に保持し、永続化しません。製品のデバイス別音量仕様は[基本設計](./basic-design.md)に記載します。
+OSのシステム音量やデバイスのサンプルレートを変更するAPIは使用しません。単曲再生の音量値はアプリの実行中に保持し、永続化しません。製品のデバイス別音量仕様は[基本設計](00_basic-design.md)に記載します。
 
 ## 5. M4Aの読み込み互換処理
 
@@ -144,4 +144,4 @@ python3 scripts/build-app.py
 
 - [SFBAudioEngine 0.14.0](https://github.com/sbooth/SFBAudioEngine/tree/0.14.0)。
 - [SFBAudioEngineの再生インターフェース](https://github.com/sbooth/SFBAudioEngine/blob/0.14.0/Sources/CSFBAudioEngine/include/SFBAudioEngine/SFBAudioPlayer.h)。
-- [依存ライブラリの構成](./third-party-dependencies.md)。
+- [依存ライブラリの構成](11_third-party-dependencies.md)。

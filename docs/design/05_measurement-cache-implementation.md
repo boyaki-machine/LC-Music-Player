@@ -1,8 +1,8 @@
 # 前処理測定結果の永続キャッシュ
 
-[設計書一覧](./README.md)に戻る。
+[設計書一覧](../README.md)に戻る。
 
-[再生前処理](./preprocessing-implementation.md)の完了測定値をSQLiteへ保存し、停止・他曲再生・アプリ再起動後も再利用する。音源そのもの、先頭PCM、デコーダ、アクセスlease、測定途中のblock energyは保存しない。目標LUFS・手動音量から独立した結果を保存し、[音量自動調整](./audio-processing-design.md)の補正計画は現在の設定から作り直す。
+[再生前処理](04_preprocessing-implementation.md)の完了測定値をSQLiteへ保存し、停止・他曲再生・アプリ再起動後も再利用する。音源そのもの、先頭PCM、デコーダ、アクセスlease、測定途中のblock energyは保存しない。目標LUFS・手動音量から独立した結果を保存し、[音量自動調整](06_audio-processing-design.md)の補正計画は現在の設定から作り直す。
 
 ## 責務と保存先
 

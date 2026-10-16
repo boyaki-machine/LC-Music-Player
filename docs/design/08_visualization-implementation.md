@@ -1,6 +1,6 @@
 # 可視化の実装設計
 
-[設計書一覧](./README.md)に戻る。入力データの算出方法と時刻は[周波数解析](./analysis-implementation.md)、画面と操作は[コンパクト画面](./compact-ui-implementation.md)、フォルダ構成・モジュールI/F・追加方法は[Player UI・可視化の開発ガイド](./playerUI_developers.md)を参照する。
+[設計書一覧](../README.md)に戻る。入力データの算出方法と時刻は[周波数解析](07_analysis-implementation.md)、画面と操作は[コンパクト画面](09_compact-ui-implementation.md)、フォルダ構成・モジュールI/F・追加方法は[Player UI・可視化の開発ガイド](10_playerUI_developers.md)を参照する。
 
 ## 責務と構成
 
