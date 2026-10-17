@@ -188,3 +188,20 @@ struct SoftGlassButtonStyle: ButtonStyle {
             .background(.white.opacity(enabled ? (configuration.isPressed ? 0.13 : 0.07) : 0.03), in: RoundedRectangle(cornerRadius: 5))
     }
 }
+/// Shuffle mode toggle. The pictogram glows softly like an LED while shuffle is on and stays
+/// near-dark while playback follows the playlist order.
+struct ShuffleToggle: View {
+    static let litColor = Color(red: 0.62, green: 0.91, blue: 0.74)
+    let isOn: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "shuffle").font(.system(size: 13, weight: .medium))
+                .foregroundStyle(isOn ? Self.litColor : .white.opacity(0.3))
+                .shadow(color: isOn ? Self.litColor.opacity(0.6) : .clear, radius: 4)
+                // A 32×28pt hit area that does not make the header row taller.
+                .frame(width: 32, height: 28).contentShape(Rectangle()).padding(.vertical, -6)
+        }.buttonStyle(.plain).help("ランダム再生").accessibilityLabel("ランダム再生")
+            .accessibilityValue(isOn ? "オン" : "オフ").accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}

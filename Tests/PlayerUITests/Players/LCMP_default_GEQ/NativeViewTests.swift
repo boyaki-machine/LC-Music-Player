@@ -356,3 +356,61 @@ extension LibraryNativeViewTests {
         }
     }
 }
+
+extension LibraryNativeViewTests {
+    @Test func shuffleToggleSitsBesideEntryCountAndSwitchesMode() async throws {
+        var doc = LibraryDocument()
+        for index in 0..<4 {
+            let track = LibraryTrack(name: "曲 \(index + 1)", reference: TrackReference(bookmark: nil, lastKnownURL: URL(fileURLWithPath: "/missing-\(index).wav")))
+            doc.tracks.append(track); doc.playlists[0].entries.append(PlaylistEntry(trackID: track.id))
+        }
+        let preferences = MemoryPreferences()
+        let library = LibraryController(playback: PlaybackController(makeBackend: { _ in UIBackend() }), store: UIStore(doc),
+                                        references: UIReferences(), preferences: preferences)
+        let presentation = PlayerPresentation(); presentation.toggleExtension()
+        let actions = LibraryActions(files: { _ in }, folder: {}, repair: { _ in }, importPlaylist: {}, exportPlaylist: { _ in })
+        let host = NSHostingView(rootView: ExtensionView(playback: library.playback, presentation: presentation, library: library, actions: actions))
+        host.frame = CGRect(origin: .zero, size: WindowLayout.extensionSize)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host; window.setFrameOrigin(NSPoint(x: -10000, y: -10000)); window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        host.layoutSubtreeIfNeeded(); host.display()
+        try await Task.sleep(for: .milliseconds(150))
+        func render() throws -> NSBitmapImageRep {
+            host.layoutSubtreeIfNeeded(); host.display()
+            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            return rep
+        }
+        func snapshot(_ rep: NSBitmapImageRep, _ name: String) throws {
+            guard let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] else { return }
+            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            try #require(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: directory).appendingPathComponent(name))
+        }
+        /// Lit LED pixels at the right of the title row (beside the entry count): green clearly above red and blue.
+        func litPixels(_ rep: NSBitmapImageRep) -> Int {
+            let scale = CGFloat(rep.pixelsHigh) / host.bounds.height
+            var count = 0
+            for y in Int(42 * scale)..<Int(64 * scale) {
+                for x in rep.pixelsWide / 2..<rep.pixelsWide {
+                    // Raw bitmap components; converting to sRGB lowers the saturation of the soft LED.
+                    guard let color = rep.colorAt(x: x, y: y) else { continue }
+                    if color.greenComponent > 0.6, color.greenComponent - color.redComponent > 0.15,
+                       color.greenComponent - color.blueComponent > 0.08 { count += 1 }
+                }
+            }
+            return count
+        }
+        let off = try render()
+        try snapshot(off, "shuffle-off.png")
+        library.setShufflesPlayback(true)
+        try await Task.sleep(for: .milliseconds(100))
+        let on = try render()
+        try snapshot(on, "shuffle-on.png")
+        #expect(litPixels(off) == 0)
+        #expect(litPixels(on) > 20)
+        library.setShufflesPlayback(false)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(litPixels(try render()) == 0)
+    }
+}

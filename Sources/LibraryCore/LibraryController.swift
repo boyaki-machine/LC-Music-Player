@@ -23,6 +23,9 @@ import AudioProcessingCore
     public private(set) var normalizesVolume = false
     public private(set) var normalizationSettings = NormalizationSettings.standard
     public private(set) var levelMeasurement: LevelMeasurementState = .disabled
+    public private(set) var shufflesPlayback = false
+    @ObservationIgnored private var shuffleOrder: ShuffleOrder?
+    @ObservationIgnored private var random: AnyRandomNumberGenerator
     public private(set) var preparationStage: String?
     @ObservationIgnored private var measuredLevels: TrackAudioMetrics?
     @ObservationIgnored private var normalizationNeedsPreparation = false
@@ -51,9 +54,10 @@ import AudioProcessingCore
     public init(playback: PlaybackController, store: any LibraryPersistence = JSONLibraryStore(url: JSONLibraryStore.defaultURL),
                 references: any FileReferenceProvider = BookmarkFileReferences(),
                 preprocessingEnabled: Bool = false, playlistPreprocessingEnabled: Bool = false, preferences: any PreferenceStoring = UserDefaults.standard,
-                preprocessor: any AudioPreprocessing = AudioPreprocessor.shared) {
+                preprocessor: any AudioPreprocessing = AudioPreprocessor.shared,
+                random: any RandomNumberGenerator = SystemRandomNumberGenerator()) {
         self.playback = playback; self.store = store; self.references = references
-        self.preprocessor = preprocessor
+        self.preprocessor = preprocessor; self.random = AnyRandomNumberGenerator(random)
         self.preprocessingEnabled = preprocessingEnabled; self.preferences = preferences
         if preprocessingEnabled && playlistPreprocessingEnabled {
             playlistPreprocessing = PlaylistPreprocessing(references: references, worker: preprocessor, profile: { try SFBAudioBackend.measurementProfile() })
@@ -65,6 +69,7 @@ import AudioProcessingCore
         }
         measuresMaximumVolume = preferences.bool(forKey: "measureMaximumVolume")
         normalizesVolume = preferences.bool(forKey: "normalizeVolume")
+        shufflesPlayback = preferences.bool(forKey: "shufflePlayback")
         if let target = preferences.object(forKey: "normalizationTargetLUFS") as? Double,
            let settings = try? NormalizationSettings(targetLUFS: target) { normalizationSettings = settings }
         playback.requireNormalization(normalizesVolume)
@@ -86,8 +91,8 @@ import AudioProcessingCore
     public var currentEntry: PlaylistEntry? { currentPlaylist?.entries.first { $0.id == document.currentEntryID } }
     public var currentTrack: LibraryTrack? { currentEntry.flatMap { track($0.trackID) } }
     public var currentIndex: Int? { currentPlaylist?.entries.firstIndex { $0.id == document.currentEntryID } }
-    public var canPrevious: Bool { canEdit && (currentIndex ?? 0) > 0 }
-    public var canNext: Bool { canEdit && currentIndex.map { $0 + 1 < (currentPlaylist?.entries.count ?? 0) } == true }
+    public var canPrevious: Bool { canEdit && adjacentEntry(-1) != nil }
+    public var canNext: Bool { canEdit && adjacentEntry(1) != nil }
 
     // MARK: Document lookup
 
@@ -248,11 +253,16 @@ import AudioProcessingCore
             if clickCount == 2, playback.state != .playing { togglePlayPause() }
             return
         }
+        startShuffle(playlistID, first: entryID)
         selectEntry(entryID, in: playlistID, autoPlay: play)
     }
 
     public func playPlaylist(_ id: UUID) {
-        if let entry = playlist(id)?.entries.first { selectEntry(entry.id, in: id, autoPlay: true) }
+        guard let list = playlist(id) else { return }
+        let first = shufflesPlayback ? list.entries.randomElement(using: &random) : list.entries.first
+        guard let first else { return }
+        startShuffle(id, first: first.id)
+        selectEntry(first.id, in: id, autoPlay: true)
     }
     public func togglePlayPause() {
         if playback.state == .playing || (playback.state == .paused && !normalizationNeedsPreparation) {
@@ -278,8 +288,37 @@ import AudioProcessingCore
     public func previous() { move(-1, autoPlay: playback.state == .playing) }
     public func next() { move(1, autoPlay: playback.state == .playing) }
     private func move(_ offset: Int, autoPlay: Bool) {
-        guard let list = currentPlaylist, let i = currentIndex, list.entries.indices.contains(i + offset) else { return }
-        selectEntry(list.entries[i + offset].id, in: list.id, autoPlay: autoPlay)
+        guard let list = currentPlaylist, let entry = adjacentEntry(offset) else { return }
+        selectEntry(entry.id, in: list.id, autoPlay: autoPlay)
+    }
+
+    // MARK: Shuffle
+
+    public func setShufflesPlayback(_ enabled: Bool) {
+        guard !shuttingDown, shufflesPlayback != enabled else { return }
+        shufflesPlayback = enabled; preferences.set(enabled, forKey: "shufflePlayback")
+        shuffleOrder = nil
+        if let list = document.currentPlaylistID, let entry = document.currentEntryID { startShuffle(list, first: entry) }
+        if preprocessingEnabled { restartNextPreparation() }
+    }
+    var shuffledEntries: [UUID]? { shuffleOrder?.entries }
+    /// An explicit start begins a new cycle; next, previous and natural finish keep the cycle.
+    private func startShuffle(_ playlistID: UUID, first: UUID) {
+        guard shufflesPlayback, let list = playlist(playlistID) else { return }
+        shuffleOrder = ShuffleOrder(list, first: first, using: &random)
+    }
+    /// The entry `offset` steps away in the playback order: the playlist order, or the shuffle order.
+    /// The last entry of either order has no next entry.
+    private func adjacentEntry(_ offset: Int) -> PlaylistEntry? {
+        guard let list = currentPlaylist, let current = document.currentEntryID, let i = currentIndex else { return nil }
+        guard shufflesPlayback else { return list.entries.indices.contains(i + offset) ? list.entries[i + offset] : nil }
+        var order: ShuffleOrder
+        if let existing = shuffleOrder, existing.playlistID == list.id, existing.contains(current) {
+            order = existing; order.reconcile(with: list, current: current, using: &random)
+        } else { order = ShuffleOrder(list, first: current, using: &random) }
+        shuffleOrder = order
+        let id = order.neighbor(of: current, offset: offset)
+        return list.entries.first { $0.id == id }
     }
 
     // MARK: Import, export and shutdown
@@ -635,7 +674,8 @@ extension LibraryController {
         let audit = cacheAuditTask, previous = backgroundRetirement
         let barrier = Task { await previous?.value; await audit?.value }
         playlistPreprocessing?.update(document, playback: playback, after: barrier,
-                                      completed: measuredLevels, retryFailures: retryFailures)
+                                      completed: measuredLevels, retryFailures: retryFailures,
+                                      adjacent: (adjacentEntry(1), adjacentEntry(-1)))
     }
     private func restartNextPreparation() {
         if playlistPreprocessing != nil {
@@ -649,9 +689,7 @@ extension LibraryController {
     /// Speculatively prepares the following entry while playing (without playlist sweeps).
     private func prepareNext() {
         if playlistPreprocessing != nil { resumePlaylistPreprocessing(); return }
-        guard !shuttingDown, !isPreparing, playback.state == .playing, let list = currentPlaylist, let index = currentIndex,
-              list.entries.indices.contains(index + 1) else { return }
-        let entry = list.entries[index + 1]
+        guard !shuttingDown, !isPreparing, playback.state == .playing, let entry = adjacentEntry(1) else { return }
         guard nextID != entry.id, let track = track(entry.trackID) else { return }
         let retiringNext = nextTask
         let retiringBackground = backgroundRetirement
