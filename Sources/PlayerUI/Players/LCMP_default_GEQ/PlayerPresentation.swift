@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import LibraryCore
 import PlaybackCore
 
 public enum ExtensionSection: String, CaseIterable {
@@ -26,14 +27,38 @@ public final class PlayerPresentation {
     public var section: ExtensionSection = .playlist
     public var selectingFile = false
     @ObservationIgnored public let visualizationDriver = VisualizationDriver()
+    @ObservationIgnored public let ermineChorusDriver = ErmineChorusDriver()
+    public private(set) var visualizationDesign: VisualizationDesign
+    @ObservationIgnored private let preferences: any PreferenceStoring
     public var visualizationVisible = true {
         didSet {
             // Stop immediately, even if an ordered-out hosting view no longer updates.
-            if !visualizationVisible { visualizationDriver.synchronize(activity: .inactive, visible: false) }
+            if !visualizationVisible { stopVisualizations() }
         }
     }
-    public init(seekHideDelay: Duration = .seconds(2), volumeHideDelay: Duration = .seconds(15)) {
+    public init(seekHideDelay: Duration = .seconds(2), volumeHideDelay: Duration = .seconds(15),
+                preferences: any PreferenceStoring = UserDefaults.standard) {
         self.seekHideDelay = seekHideDelay; self.volumeHideDelay = volumeHideDelay
+        self.preferences = preferences
+        visualizationDesign = (preferences.object(forKey: VisualizationDesign.preferenceKey) as? String)
+            .flatMap(VisualizationDesign.init(rawValue:)) ?? .fluorescentLED
+    }
+    var activeVisualizationDriver: any PlayerVisualizationDriver { driver(for: visualizationDesign) }
+    private func driver(for design: VisualizationDesign) -> any PlayerVisualizationDriver {
+        switch design {
+        case .fluorescentLED: visualizationDriver
+        case .ermineChorus: ermineChorusDriver
+        }
+    }
+    /// Changes only the drawing. The previous design's clock stops at once; the view starts the new one.
+    public func setVisualizationDesign(_ design: VisualizationDesign) {
+        guard design != visualizationDesign else { return }
+        driver(for: visualizationDesign).synchronize(activity: .inactive, visible: false)
+        visualizationDesign = design
+        preferences.set(design.rawValue, forKey: VisualizationDesign.preferenceKey)
+    }
+    private func stopVisualizations() {
+        for design in VisualizationDesign.allCases { driver(for: design).synchronize(activity: .inactive, visible: false) }
     }
     private func cancelVolumeHide() { volumeHideTask?.cancel(); volumeHideTask = nil }
     public func volumeInteraction() { scheduleVolumeHide() }

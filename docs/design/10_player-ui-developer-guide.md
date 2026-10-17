@@ -4,7 +4,7 @@
 
 ## 1. 概要
 
-Player UIは再生操作と画面構成を扱い、可視化は解析結果から表示を作る。現在の実装名・組込IDは`LCMP_default_GEQ`で、16列の蛍光管LEDとコンパクトな操作画面を組み合わせる。本書は、ソースの配置、他のモジュールとのI/F、可視化の開発・追加の手順をまとめる。
+Player UIは再生操作と画面構成を扱い、可視化は解析結果から表示を作る。現在の実装名・組込IDは`LCMP_default_GEQ`で、コンパクトな操作画面と、拡張画面で切り替える2つの可視化デザイン（16列の蛍光管LED、オコジョ合唱団）を組み合わせる。本書は、ソースの配置、他のモジュールとのI/F、可視化の開発・追加の手順をまとめる。
 
 製品の仕様は[基本設計](00_basic-design.md)と[UI・UX設計](01_ui-ux-design.md)、具体的な画面の動作は[コンパクト画面](09_compact-ui-implementation.md)、提示待ち・残光・描画の詳細は[可視化の実装設計](08_visualization-implementation.md)に記載する。
 
@@ -33,11 +33,13 @@ Sources/
 │           ├── SourceFolderList.swift         音源のフォルダ一覧
 │           ├── QuickTooltip.swift             省略されたタイトルの表示
 │           └── Visualization/
-│               ├── PlaybackVisualization.swift    再生・解析と描画の接続
-│               ├── LCMPDefaultGEQView.swift       SwiftUI/Canvasとrenderer
+│               ├── VisualizationDesign.swift      デザインの種類・共通の解析設定・driverの契約
+│               ├── PlaybackVisualization.swift    再生・解析と描画の接続、デザインの切り替え
+│               ├── LCMPDefaultGEQView.swift       蛍光管LEDのSwiftUI/Canvasとrenderer
 │               ├── LCMPDefaultGEQScale.swift      dBFSから表示感度への変換
 │               ├── SpectrumPresentation.swift     提示待ち・16×24セル・残光
-│               └── VisualizationDriver.swift      MainActorの受信・共通の時計
+│               ├── VisualizationDriver.swift      蛍光管LEDのMainActorの受信・時計
+│               └── ErmineChorus/                  オコジョ合唱団（原画・キャラクタ・演出・描画・driver・View）
 ├── VisualizationKit/
 │   └── Shared/
 │       ├── SpectrumSample.swift       UIに依存しない表示用レベル・時刻の値型
@@ -63,6 +65,7 @@ Tests/PlayerUITests/
     ├── VisualizationIntegrationTests.swift
     └── Visualization/
         ├── PresentationTests.swift
+        ├── ErmineChorusTests.swift
         └── VisualizationPerformanceTests.swift
 ```
 
@@ -106,8 +109,9 @@ flowchart LR
 | 画面 → ライブラリ | `LibraryController` | 再生開始・停止・前後の曲・編集・取り込みを公開操作へ渡す。`isPreparing`と`peakMeasurement`を表示し、測定の設定は`setMeasuresMaximumVolume(_:)`で変更する |
 | 画面 → 解析の購読 | `PlaybackController.configureAnalysis(_:)` | 表示するデザインの`AnalysisConfiguration`を設定し、非表示時はnilで解除する |
 | 再生 → 画面 | `analysisFrame`、`analysisResetID`、`state` | 最新のフレームを渡し、状態・取消IDの変更を可視化へ反映する |
-| 画面 → 可視化の状態 | `VisualizationDriver.synchronize(activity:visible:)`、`receive(_:)`、`reset()` | MainActorで、再生状態・表示可否・解析結果・シーク等のリセットを渡す |
-| 状態 → 描画 | `LCMPDefaultGEQView(driver:)` | `snapshot`と`drawTime`を描く。描画内から再生や解析を開始しない |
+| 画面 → デザインの選択 | `PlayerPresentation.setVisualizationDesign(_:)` | 表示タブから呼ぶ。旧デザインのdriverを止め、選択を`UserDefaults`へ保存する |
+| 画面 → 可視化の状態 | `PlayerVisualizationDriver`の`synchronize(activity:visible:)`、`receive(_:)`、`reset()` | MainActorで、表示中のデザインのdriverへ、再生状態・表示可否・解析結果・シーク等のリセットを渡す |
+| 状態 → 描画 | `LCMPDefaultGEQView(driver:)`、`ErmineChorusView(driver:)` | driverが公開する状態を描く。描画内から再生や解析を開始しない |
 
 - 曲の選択は背景で非同期に確定する。前処理のバッファや全曲測定をUIへ持ち込まない。
 - sample peak専用の表示には検証済みの`currentTrackPeak`を使い、自動調整用の結果として流用しない。LUFS/true peakには`currentTrackMetrics`を使う。
@@ -163,7 +167,7 @@ playback.configureAnalysis(configuration)
 
 ### 寿命の管理と画面への組み込み
 
-`PlayerPresentation`がdriverを1つ所有し、SwiftUIのbodyの評価ごとに生成しない。`PlaybackVisualization`が状態を中継し、`LCMPApp`はウィンドウの開閉・最小化から、表示可否と解析の購読を更新する。
+`PlayerPresentation`がデザインごとにdriverを1つずつ所有し、SwiftUIのbodyの評価ごとに生成しない。動かすのは表示中のデザインのdriverだけで、切り替えると旧デザインのdriverを直ちに止める。`PlaybackVisualization`が状態を中継し、`LCMPApp`はウィンドウの開閉・最小化から、表示可否と解析の購読を更新する。
 
 | 変更 | 接続側の処理 |
 | --- | --- |
@@ -215,8 +219,19 @@ PlayerUI/Players/
 ### 現在のUIの可視化だけを変える場合
 
 - `Players/LCMP_default_GEQ/Visualization/`内で描画・スケール・状態を変更し、必要なら同じ実装フォルダ内の`LCMPDefaultGEQ.configuration`とフレームの変換を合わせる。
+- 既存のデザインを残して別のデザインを足す場合は、次の「1つのPlayer UIに可視化デザインを追加する場合」に従う。
 - 既存のUIを残して独立したPlayer UIとして扱う場合は、新しいIDのフォルダを作る。
 - 複数のUIで共有すると決めた部品は、個別の実装への依存を取り除いた上で`Shared/`等へ抽出する。
+
+### 1つのPlayer UIに可視化デザインを追加する場合
+
+操作部を共通にしたまま、アニメーション領域の表示だけを切り替える場合の手順である。オコジョ合唱団はこの手順で追加した。
+
+1. `Visualization/<デザイン名>/`を作り、描画・状態・driver・Viewを置く。型名にはデザイン固有の接頭辞を付ける。
+2. driverは`PlayerVisualizationDriver`（`synchronize(activity:visible:)`、`receive(_:)`、`reset()`）に準拠させ、「寿命の管理と画面への組み込み」の表と同じく、表示中かつ再生中だけ時計を動かす。
+3. `VisualizationDesign`にケース・表示名・説明を足し、`PlayerPresentation`のdriverの所有と`driver(for:)`、`PlaybackVisualization`のViewの切り替えに加える。
+4. 解析は`VisualizationDesign.configuration`を共有する。切り替えで解析の購読をやり直さないためである。別の帯域数が必要になったら、デザインごとの設定を`PlaybackVisualization`から渡すように変える。
+5. 寿命・描画・切り替えのテストを`Tests/PlayerUITests/Players/<ID>/Visualization/`に置く。
 
 フォルダの分離はソースの責務を示すもので、アクセス制御の隔離ではない。独立した依存関係や配布が必要になったときは、その具体的な要件に合わせてSwiftPMのターゲットの分割を検討する。
 

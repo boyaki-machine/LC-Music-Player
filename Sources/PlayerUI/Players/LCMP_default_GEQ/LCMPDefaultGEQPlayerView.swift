@@ -31,8 +31,7 @@ struct LCMPDefaultGEQPlayerView: View {
     var body: some View {
         VStack(spacing: 0) {
             ZStack(alignment: .bottom) {
-                PlaybackVisualization(playback: playback, driver: presentation.visualizationDriver,
-                                      visible: presentation.visualizationVisible)
+                PlaybackVisualization(playback: playback, presentation: presentation)
                 AnimationDragSurface { presentation.seekVisible.toggle() }
                 VStack {
                     if playback.error != nil || library?.error != nil {
