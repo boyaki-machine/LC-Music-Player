@@ -42,15 +42,25 @@ import AudioProcessingCore
         self.references = references; self.worker = worker; profileProvider = profile
     }
 
+    typealias Adjacent = (next: PlaylistEntry?, previous: PlaylistEntry?)
+
+    /// Neighbors in playlist order. LibraryController passes the shuffle order's neighbors instead.
+    static func listAdjacent(_ document: LibraryDocument) -> Adjacent {
+        guard let list = document.playlists.first(where: { $0.id == document.currentPlaylistID }),
+              let i = list.entries.firstIndex(where: { $0.id == document.currentEntryID }) else { return (nil, nil) }
+        return (list.entries.indices.contains(i + 1) ? list.entries[i + 1] : nil, i > 0 ? list.entries[i - 1] : nil)
+    }
+
     /// Deduplicate logical tracks without changing entry identity or playback order.
-    static func ordered(_ document: LibraryDocument, playing: Bool) -> [Candidate] {
+    static func ordered(_ document: LibraryDocument, playing: Bool, adjacent: Adjacent? = nil) -> [Candidate] {
         let tracks = Dictionary(uniqueKeysWithValues: document.tracks.map { ($0.id, $0) })
         let current = document.playlists.first { $0.id == document.currentPlaylistID }
         var entries: [PlaylistEntry] = []
         if playing, let list = current, let i = list.entries.firstIndex(where: { $0.id == document.currentEntryID }) {
+            let adjacent = adjacent ?? listAdjacent(document)
             entries.append(list.entries[i])
-            if list.entries.indices.contains(i + 1) { entries.append(list.entries[i + 1]) }
-            if i > 0 { entries.append(list.entries[i - 1]) }
+            if let next = adjacent.next { entries.append(next) }
+            if let previous = adjacent.previous { entries.append(previous) }
         }
         entries += current?.entries ?? []
         entries += document.playlists.filter { $0.id != current?.id }.flatMap(\.entries)
@@ -62,9 +72,10 @@ import AudioProcessingCore
     }
 
     func update(_ document: LibraryDocument, playback: PlaybackController, after audit: Task<Void, Never>?,
-                completed: TrackAudioMetrics? = nil, retryFailures: Bool = false) {
+                completed: TrackAudioMetrics? = nil, retryFailures: Bool = false, adjacent: Adjacent? = nil) {
         let newProfile = try? profileProvider()
-        candidates = Self.ordered(document, playing: playback.state == .playing)
+        let adjacent = adjacent ?? Self.listAdjacent(document)
+        candidates = Self.ordered(document, playing: playback.state == .playing, adjacent: adjacent)
         let tracks = Dictionary(uniqueKeysWithValues: candidates.map { ($0.track.id, $0.track) })
         attempts = attempts.filter { id, attempt in
             guard tracks[id]?.reference == attempt.reference, attempt.profile == newProfile else { return false }
@@ -77,12 +88,9 @@ import AudioProcessingCore
             .entries.first { $0.id == document.currentEntryID }?.trackID
         currentURL = playback.selectedURL; currentLease = playback.activeFileLease
         nextCandidate = nil
-        if playback.state == .playing, let list = document.playlists.first(where: { $0.id == document.currentPlaylistID }),
-           let i = list.entries.firstIndex(where: { $0.id == document.currentEntryID }), list.entries.indices.contains(i + 1) {
-            let entry = list.entries[i + 1]
-            if let track = document.tracks.first(where: { $0.id == entry.trackID }) {
-                nextCandidate = Candidate(entry: entry.id, track: track)
-            }
+        if playback.state == .playing, let entry = adjacent.next,
+           let track = document.tracks.first(where: { $0.id == entry.trackID }) {
+            nextCandidate = Candidate(entry: entry.id, track: track)
         }
         if let completed, let id = currentID, let track = tracks[id], completed.profile == profile,
            completed.source.url == playback.selectedURL, (try? completed.source.validate()) != nil {

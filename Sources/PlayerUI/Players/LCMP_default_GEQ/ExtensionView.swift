@@ -168,7 +168,14 @@ public struct ExtensionView: View {
     @ViewBuilder private var playlistContent: some View {
         switch screen {
         case .list:
-            HStack { Text(viewed?.id == library.document.currentPlaylistID ? "現在の再生リスト" : "プレイリスト").fontWeight(.medium); Spacer(); Text("\(viewed?.entries.count ?? 0)曲").foregroundStyle(.secondary) }
+            HStack(spacing: 0) {
+                Text(viewed?.id == library.document.currentPlaylistID ? "現在の再生リスト" : "プレイリスト").fontWeight(.medium); Spacer()
+                // Playback mode toggles (a future repeat joins here), spaced apart against mistaken taps.
+                HStack(spacing: 12) {
+                    ShuffleToggle(isOn: library.shufflesPlayback) { library.setShufflesPlayback(!library.shufflesPlayback) }
+                }.padding(.trailing, 14)
+                Text("\(viewed?.entries.count ?? 0)曲").foregroundStyle(.secondary)
+            }
             HStack {
                 Button { screen = .chooser } label: { HStack { Text(viewed?.name ?? "リストを選択").lineLimit(1); Spacer(); Image(systemName: "chevron.right") } }.buttonStyle(.plain)
                 Button("管理") { screen = .manage }.buttonStyle(.plain)
