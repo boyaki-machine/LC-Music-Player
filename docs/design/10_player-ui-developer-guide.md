@@ -28,7 +28,7 @@ Sources/
 │           ├── WindowLayout.swift             ウィンドウの配置の計算
 │           ├── NativeControls.swift           移動・シーク・音量の入力
 │           ├── VolumeControls.swift           音量の操作曲線・内部のフォーカス境界
-│           ├── PlaylistClickSurface.swift     マウスのクリック回数・ドラッグの取消
+│           ├── PlaylistClickSurface.swift     マウスのクリック回数・行のドラッグ
 │           ├── LibraryControls.swift          リストの操作・グラス等
 │           ├── SourceFolderList.swift         音源のフォルダ一覧
 │           ├── QuickTooltip.swift             省略されたタイトルの表示
