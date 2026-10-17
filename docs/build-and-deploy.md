@@ -88,6 +88,17 @@ codesign --verify --deep --strict build/source-package-check/LCMP-distribution/L
 
 検証は全収録ファイルのSHA256とsymlinkを照合し、欠落・追加・改ざんを検出します。依存版を更新した場合は、コーデックの対応ソースと補足原文を再確認して設定を更新する必要があります。ラッパーの版だけをコーデックの版や対応ソースの証明に使いません。ビルド途中の失敗では完成出力を公開せず、作業ディレクトリを片付けます。
 
+署名方式や同梱物を変えたときは、展開したアプリで再リンクも確認します。出力先には新しい`.app`のパスを指定します。
+
+```sh
+S=build/source-package-check/LCMP-distribution/LCMP.app/Contents/Resources/CorrespondingSource
+python3 "$S/relink.py" --rebuild-taglib --output build/relink-check/LCMP.app
+codesign -dv build/relink-check/LCMP.app   # flagsにruntimeが含まれる
+codesign -d --entitlements - build/relink-check/LCMP.app
+```
+
+改変版のTagLib（`--taglib-object`）と、同梱ソースから`LCMP/scripts/rebuild_frameworks.py`で再構築したframework（`--frameworks`）でも同様に確認します。起動を確かめるときは、利用者のコンテナを読み書きしないよう、bundle IDを変えたコピーを`signing.py`で再署名して使います。`DYLD_INSERT_LIBRARIES`で指定したdylibが起動中のプロセスに読み込まれない（`lsof -p <pid>`に現れない）ことも確認します。Sandbox下では注入したdylibがファイルを書けないため、マーカーファイルの有無では判定しません。
+
 このコマンドも公開・アップロード・Developer ID署名・公証を実行しません。本体のApache 2.0 LICENSE/NOTICEを`Contents/Resources/LCMPLicense`と対応ソース内の`LCMP/`へ同梱します。依存のソース提供・再リンク材料、署名・ストア等の配布条件をそれぞれ確認します。通常の`make archive`だけでは対応ソース付きの配布物にはなりません。
 
 ## テスト
