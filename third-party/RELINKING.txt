@@ -1,0 +1,22 @@
+LCMPで使用するLGPLライブラリについて
+
+LCMPはLAME、Musepack、mpg123、libsndfile、TTA、TagLibを使用します。
+これらのライブラリとその利用には、それぞれのGNU Library/Lesser General
+Public Licenseが適用されます。各原文と著作権表示を併せて参照してください。
+
+対応ソースを含む配布用ビルドでは、このアプリ内の
+Contents/Resources/CorrespondingSource/ に、ライブラリの対応ソース、
+ビルド設定・変更、LCMPの再リンク用オブジェクトと手順を同梱します。
+README.mdとrelink.pyを参照してください。互換ライブラリの差し替え後には、
+同手順に沿ってアドホック再署名して利用できます。
+
+通常の開発用ビルドには対応ソース一式がありません。配布には
+make distributionで作る対応ソース付き成果物を使用してください。
+
+LCMPオリジナル部分について、利用者自身の利用のための変更、同梱LGPL
+ライブラリの改変版との再結合・再リンク、およびその変更のデバッグ目的の
+リバースエンジニアリングを許可します。第三者の成果物には各原許諾が適用されます。
+LCMPのオリジナル成果物はApache License, Version 2.0（Apache-2.0）で提供します。
+上記の案内はApache 2.0で認められる権利を制限しません。本体の原文と表示は
+リポジトリのLICENSE/NOTICE、またはアプリ内のContents/Resources/LCMPLicense
+を参照してください。依存OSSには各原許諾を適用します。

@@ -1,6 +1,6 @@
 # LC Music Player（LCMP）
 
-LC Music Player（LCMP）は、静かで個人的な音楽鑑賞体験を目指すネイティブ音楽プレイヤーです。楽曲情報を控えめに表示し、グラフィックイコライザーなどの可視化によって再生を楽しめるようにします。
+LC Music Player（LCMP）は、落ち着いた音楽鑑賞体験を目指すネイティブ音楽プレイヤーです。前世紀(Last Century : LC）の楽曲再生装置のように情報を控えめに表示し、グラフィックイコライザーなどの可視化によって再生を楽しめるようにします。
 
 macOS上のネイティブアプリとし、iPhone版にも共用できるよう、再生やプレイリストの機能と、画面表示、音声出力、ファイルアクセスなどのOS依存機能を分離する設計です。
 
@@ -30,7 +30,7 @@ make release
 open build/release/LCMP.app
 ```
 
-全曲測定を最適化するRelease構成で作成します。開発用は`make debug`、ローカル配布用ZIPは`make archive`です。前提環境、出力先の変更、配置・更新、署名と配布の範囲は[ビルド・配置手順](docs/build-and-deploy.md)を参照してください。
+全曲測定を最適化するRelease構成で作成します。開発用は`make debug`、ローカル検証用ZIPは`make archive`、コーデックをソースから構築し対応ソースと再リンク材料を含める配布準備用ZIPは`make distribution`です。前提環境、出力先の変更、配置・更新、署名と配布の範囲は[ビルド・配置手順](docs/build-and-deploy.md)を参照してください。
 
 起動中のアプリと同じ出力先を置き換えないでください。終了してから再ビルドするか、`python3 scripts/build-app.py --output build/preview/LCMP.app`のように別の出力先を指定します。
 
@@ -72,7 +72,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 ## ディレクトリとファイル
 
 - `docs/`：ビルド・配置手順と文書一覧。番号付きの製品・技術設計書は`docs/design/`。
-- `Makefile`：Release／Debugビルド、ZIP作成、通常テストの入口。
+- `Makefile`：Release／Debugビルド、ZIP作成、対応ソース付き配布物、通常テストの入口。
 - `Sources/`：macOS画面と、再生制御・音源アクセス・再生アダプター。
 - `Tests/`：状態遷移・デコード・音声出力の検証と独自のテスト音源。
 - `scripts/`：公開依存の認証検索を抑止するSwift実行、アプリ作成、テスト音源生成。
@@ -81,3 +81,11 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 - `AGENTS.md`：コーディングエージェント向けのリポジトリ固有の作業指示。
 
 前処理の完了測定値は[専用SQLiteキャッシュ](docs/design/05_measurement-cache-implementation.md)へ保存し、停止・再起動後も条件が一致すれば再測定を省きます。設定や音源一覧とは別の保存領域で、容量上限と不要記録の回収を行います。
+
+## ライセンス
+
+LCMPのオリジナル成果物（ソースコード、テスト、スクリプト、文書、プロトタイプ）は、Apache License, Version 2.0（Apache-2.0）の下で提供します。[LICENSE](LICENSE)と[NOTICE](NOTICE)を参照してください。
+
+第三者のコード・素材・依存ライブラリ・引用等には、それぞれに付された著作権表示とライセンスが適用されます。依存OSSをApache 2.0へ変更するものではありません。[依存OSSの構成と配布条件](docs/design/11_third-party-dependencies.md)に従い、原文・対応ソース・再リンク材料を提供します。
+
+ビルドしたアプリには、本体のLICENSEとNOTICEを`Contents/Resources/LCMPLicense`へ同梱します。依存OSSの原文は`Contents/Resources/ThirdPartyLicenses`、対応ソース付き配布物のソースと再リンク手順は`Contents/Resources/CorrespondingSource`にあります。

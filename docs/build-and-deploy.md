@@ -22,11 +22,12 @@ make debug
 | `make release` | `build/release/LCMP.app` | 最適化した通常利用・配布準備用 |
 | `make debug` | `build/debug/LCMP.app` | デバッガーを使う開発用 |
 | `make archive` | `build/dist/LCMP.zip` | Releaseを再ビルドしてZIP化 |
+| `make distribution` | `build/distribution/LCMP-distribution.zip` | ソースから構築したコーデック・対応ソース・再リンク材料付き |
 | `make test` | ターミナルの結果 | 音声出力なしの通常回帰 |
 
 ReleaseとDebugでアプリの識別子やデータ保存先は共通です。同じ利用者環境で両方を同時起動するとライブラリを共有するため、使用する方を切り替えるときは先に終了してください。全曲測定の速度評価には最適化されたReleaseを使います。
 
-各ビルドは、実行ファイル、動的framework、依存ライセンス、解決済みパッケージ情報をアプリ内へまとめ、ad-hoc署名と署名検証を行います。署名鍵は使いません。同梱仕様は[依存ライブラリ](./design/11_third-party-dependencies.md)を参照してください。
+各ビルドは、実行ファイル、動的framework、本体のApache 2.0 LICENSE/NOTICE、依存ライセンス、解決済みパッケージ情報をアプリ内へまとめ、ad-hoc署名と署名検証を行います。署名鍵は使いません。同梱仕様は[依存ライブラリ](./design/11_third-party-dependencies.md)を参照してください。
 
 任意の別出力先は変数で指定できます。パスに空白がある場合は変数の代入全体を引用符で囲みます。
 
@@ -65,7 +66,29 @@ codesign --verify --deep --strict build/archive-check/LCMP.app
 
 展開先には空の新しいディレクトリを使います。標準の`ditto`でアプリを親ディレクトリごと格納し、frameworkのsymlinkとリソースを保持します。ZIPは一時ファイルへ作成してから指定先へ置き換えます。ビルド・圧縮が失敗するとmakeは非0で終了し、新しいZIPの成功を表示しません。以前のZIPが残っていても今回の成功成果物と扱わず、終了コードを確認してください。
 
-このZIPはad-hoc署名のローカル検証用成果物です。Developer ID署名・公証は行っておらず、別のMacのGatekeeperによる受け入れを保証しません。一般公開用の配布では、Developer ID署名、公証と必要な配布設定、依存ライセンスのソース提供条件などを別途整備・検証してください。これらの鍵操作、アップロード、配布公開をmakeから実行する機能はありません。
+このZIPはad-hoc署名のローカル検証用成果物です。Developer ID署名・公証は行っておらず、別のMacのGatekeeperによる受け入れを保証しません。一般公開用の配布では、Developer ID署名、公証と必要な配布設定、配布チャネルの条件等を別途確認してください。依存の対応ソースと再リンク材料は次の配布準備用ビルドで作成します。これらの鍵操作、アップロード、配布公開をmakeから実行する機能はありません。
+
+## 対応ソース付きの配布物を作る
+
+```sh
+make distribution
+# 固定コミットの上流checkoutを既に持っている場合
+make distribution DISTRIBUTION_OUTPUT=build/source-package AUDIO_SOURCE=path/to/AudioXCFrameworks
+```
+
+完全なXcodeが必要です。現在のホストのarm64またはx86_64向けに、macOS 14以上のReleaseを作成します。`DISTRIBUTION_OUTPUT`は新しいディレクトリを指定します。既存の成果物は上書きしません。省略時は公開上流を取得し、`third-party/distribution.json`に固定されたソースコミットを使用します。`AUDIO_SOURCE`を指定しても、コミットと変更の有無を検査します。
+
+出力フォルダには`LCMP-distribution/LCMP.app`、`LCMP-distribution/SHA256SUMS.json`と、このフォルダをまとめた`LCMP-distribution.zip`ができます。アプリ内の`Contents/Resources/CorrespondingSource`に対応ソース・ビルド情報・再リンク材料を含みます。対象ライブラリの互換な改変版へ差し替え、秘密鍵なしで再署名する手順は、同梱READMEおよび[対応ソース案内](../third-party/CORRESPONDING-SOURCE.md)を参照してください。
+
+```sh
+ditto -x -k build/distribution/LCMP-distribution.zip build/source-package-check
+python3 scripts/distribution.py --verify build/source-package-check/LCMP-distribution
+codesign --verify --deep --strict build/source-package-check/LCMP-distribution/LCMP.app
+```
+
+検証は全収録ファイルのSHA256とsymlinkを照合し、欠落・追加・改ざんを検出します。依存版を更新した場合は、コーデックの対応ソースと補足原文を再確認して設定を更新する必要があります。ラッパーの版だけをコーデックの版や対応ソースの証明に使いません。ビルド途中の失敗では完成出力を公開せず、作業ディレクトリを片付けます。
+
+このコマンドも公開・アップロード・Developer ID署名・公証を実行しません。本体のApache 2.0 LICENSE/NOTICEを`Contents/Resources/LCMPLicense`と対応ソース内の`LCMP/`へ同梱します。依存のソース提供・再リンク材料、署名・ストア等の配布条件をそれぞれ確認します。通常の`make archive`だけでは対応ソース付きの配布物にはなりません。
 
 ## テスト
 
