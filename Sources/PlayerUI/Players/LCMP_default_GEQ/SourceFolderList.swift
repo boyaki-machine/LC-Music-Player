@@ -24,9 +24,11 @@ struct SourceFolderGroup: Identifiable {
 struct SourceFolderList: View {
     let tracks: [LibraryTrack]
     let unavailable: [UUID: String]
+    var canRemove = true
     let select: (UUID) -> Void
+    var removeFolder: (SourceFolderGroup) -> Void = { _ in }
     var body: some View {
-        SourceFolderSections(tracks: tracks) { track in
+        SourceFolderSections(tracks: tracks, removeFolder: canRemove ? removeFolder : nil) { track in
             Button { select(track.id) } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -45,6 +47,8 @@ struct SourceFolderList: View {
 /// Share folder identity, order and disclosure behavior across source and add screens.
 struct SourceFolderSections<Row: View>: View {
     let tracks: [LibraryTrack]
+    /// Shows a remove button on real folders. The default group has none against mistaken taps.
+    var removeFolder: ((SourceFolderGroup) -> Void)? = nil
     @ViewBuilder var row: (LibraryTrack) -> Row
     @State private var expanded: Set<String> = []
     var body: some View {
@@ -65,6 +69,13 @@ struct SourceFolderSections<Row: View>: View {
                         OverflowTitle(name: group.name).fontWeight(.medium)
                         Spacer(minLength: 4)
                         Text("\(group.tracks.count)曲").font(.system(size: 11)).foregroundStyle(.secondary)
+                        if let removeFolder, group.directory != nil {
+                            Button { removeFolder(group) } label: {
+                                Image(systemName: "trash").font(.system(size: 11)).frame(width: 24, height: 24).contentShape(Rectangle())
+                            }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.55))
+                                .accessibilityLabel("フォルダ「\(group.name)」を除外").help("フォルダ「\(group.name)」を除外")
+                                .padding(.vertical, -4)
+                        }
                     }
                 }.tint(.white.opacity(0.6))
             }

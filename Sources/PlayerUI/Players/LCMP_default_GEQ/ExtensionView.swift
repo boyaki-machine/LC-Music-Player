@@ -30,6 +30,7 @@ public struct ExtensionView: View {
     @State private var checked: Set<UUID> = []
     @State private var confirmPlaylist: UUID?
     @State private var confirmSource: UUID?
+    @State private var confirmFolder: SourceFolderGroup?
     @State private var reveal = UUID()
     private enum Screen { case list, chooser, manage, create, rename, add }
     public init(playback: PlaybackController, presentation: PlayerPresentation, library: LibraryController, actions: LibraryActions,
@@ -156,6 +157,10 @@ public struct ExtensionView: View {
             }
             .confirmationDialog("ライブラリと各プレイリストから除外します。元ファイルは削除しません。", isPresented: Binding(get: { confirmSource != nil }, set: { if !$0 { confirmSource = nil } })) {
                 Button("ライブラリから除外", role: .destructive) { if let id = confirmSource { library.excludeTrack(id) }; confirmSource = nil; sourceID = nil }
+            }
+            .confirmationDialog("「\(confirmFolder?.name ?? "")」の\(confirmFolder?.tracks.count ?? 0)曲を、ライブラリと各プレイリストから除外します。元ファイルは削除しません。",
+                                isPresented: Binding(get: { confirmFolder != nil }, set: { if !$0 { confirmFolder = nil } })) {
+                Button("フォルダを除外", role: .destructive) { if let group = confirmFolder { library.excludeTracks(group.tracks.map(\.id)) }; confirmFolder = nil }
             }
         }
     }
@@ -330,9 +335,8 @@ public struct ExtensionView: View {
                 Button(action: actions.folder) { Label("フォルダを登録…", systemImage: "folder.badge.plus") }
             }.buttonStyle(SoftGlassButtonStyle()).disabled(!library.canEdit)
             scrolled {
-                SourceFolderList(tracks: library.document.tracks, unavailable: library.unavailable) { id in
-                    sourceID = id; originID = nil
-                }
+                SourceFolderList(tracks: library.document.tracks, unavailable: library.unavailable, canRemove: library.canEdit,
+                                 select: { id in sourceID = id; originID = nil }, removeFolder: { confirmFolder = $0 })
             }
         }
     }

@@ -166,6 +166,7 @@
 - フォルダはパス順、各フォルダ内は元の登録順とする。同名フォルダでもフルパスが違えば別グループとする。
 - `DisclosureGroup`で初期状態は閉じ、見出しにフォルダ名・曲数、配下にインデントした音源行を表示する。パス文字列は見出しやツールチップに出さない。
 - 折りたたみは表示状態だけで、JSONやプレイリストを変更しない。
+- 音源タブの`SourceFolderList`だけが、フォルダのグループの見出しに除外ボタンを出す（曲の追加画面と「デフォルト」には出さない）。確認の後、`excludeTracks(_:)`がグループの全曲を1回の保存でライブラリと全プレイリストから外す。現在の再生対象が含まれる場合は選択を解除する。2曲以上を除外したときは件数を通知する。
 - 参照切れも元の場所に残し、ブックマークの更新後は更新した場所で表示する。
 
 ### 終了処理
@@ -190,6 +191,7 @@
 ./scripts/swift.sh test --filter LibraryTests
 ./scripts/swift.sh test --filter ReferenceAndStoreTests
 ./scripts/swift.sh test --filter Shuffle
+./scripts/swift.sh test --filter LibraryEditingTests
 ./scripts/swift.sh test --filter LibraryOrganizationTests
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --filter ShufflePlaybackTests
 LCMP_UI_SNAPSHOTS="$PWD/build/library-ui-qa" ./scripts/swift.sh test --filter LibraryNativeViewTests
@@ -204,3 +206,4 @@ LCMP_UI_SNAPSHOTS="$PWD/build/library-ui-qa" ./scripts/swift.sh test --filter Li
 5. テスト音源の改名・移動・削除やボリュームの切断で参照状態を確認し、音源詳細で再選択・除外を試す。
 6. M3U8の読み込み・書き出し、システムのスクロールバー設定と透明度を下げる設定、キーボードと支援技術での操作を確認する。
 7. 曲数の左にあるランダム再生の切替で、点灯・消灯が切り替わることを確認する。有効にして「このリストを再生」と次の曲を繰り返し、全曲が1回ずつ流れて末尾で止まること、開始し直すたびに順序が変わることを確認する。再起動後も有効状態が保たれることを確認する。
+8. 1曲だけファイル登録した後に同じフォルダの別の曲をファイル登録し、両方がそのフォルダのまとまりへ移ることを確認する。フォルダのゴミ箱で全曲が除外され、各リストからも外れ、元ファイルが残ることを確認する。
