@@ -3,6 +3,7 @@ import AudioToolbox
 import Foundation
 import SFBAudioEngine
 import AudioProcessingCore
+import LevelDSP
 
 /// One utility queue, shared by prefix preparation and incremental full-track scans.
 public final class AudioPreprocessor: AudioPreprocessing {
@@ -288,39 +289,42 @@ enum NativeSamplePeak {
         let interleaved = format.isInterleaved
         let sampleStride = numeric.stride
         let frameCount = Int(numeric.frameLength)
-        let description = format.streamDescription.pointee
-        let width = Int(description.mBytesPerFrame) / (interleaved ? Int(format.channelCount) : 1)
-        let bits = Int(description.mBitsPerChannel)
-        let denominator = bits > 0 && bits <= 32 ? Double(Int64(1) << (bits - 1)) : 1
         for channel in 0..<Int(format.channelCount) {
             guard let raw = buffers[interleaved ? 0 : channel].mData else { throw PreprocessingFailure.invalidAudio }
-            for frame in 0..<frameCount {
-                let index = frame * sampleStride + (interleaved ? channel : 0)
-                let value: Double
-                switch commonFormat {
-                case .pcmFormatFloat32: value = Double(raw.assumingMemoryBound(to: Float.self)[index])
-                case .pcmFormatFloat64: value = raw.assumingMemoryBound(to: Double.self)[index]
-                case .pcmFormatInt16: value = Double(raw.assumingMemoryBound(to: Int16.self)[index]) / 32768
-                case .pcmFormatInt32: value = Double(raw.assumingMemoryBound(to: Int32.self)[index]) / 2147483648
-                case .otherFormat:
-                    guard width > 0, width <= 4, description.mBitsPerChannel <= width * 8 else { throw PreprocessingFailure.invalidAudio }
-                    let sample = raw.advanced(by: frame * Int(description.mBytesPerFrame) + (interleaved ? channel * width : 0))
-                    let bytes = sample.assumingMemoryBound(to: UInt8.self)
-                    var integer: UInt64 = 0
-                    for byte in 0..<width {
-                        let shift = description.mFormatFlags & kAudioFormatFlagIsBigEndian != 0 ? (width - 1 - byte) * 8 : byte * 8
-                        integer |= UInt64(bytes[byte]) << shift
-                    }
-                    if description.mFormatFlags & kAudioFormatFlagIsAlignedHigh != 0 { integer >>= width * 8 - bits }
-                    integer &= (UInt64(1) << bits) - 1
-                    let signed = integer & (UInt64(1) << (bits - 1)) != 0 ? Int64(integer) - (Int64(1) << bits) : Int64(integer)
-                    value = Double(signed) / denominator
-                default: throw PreprocessingFailure.invalidAudio
+            // The sample format is fixed per buffer: dispatch once, then scan the channel in C.
+            let first = interleaved ? channel : 0
+            var channelPeak = 0.0
+            switch commonFormat {
+            case .pcmFormatFloat32:
+                guard lcmp_peak_f32(raw.assumingMemoryBound(to: Float.self) + first, frameCount, sampleStride, &channelPeak) != 0 else {
+                    throw PreprocessingFailure.nonFiniteSample
                 }
-                guard value.isFinite else { throw PreprocessingFailure.nonFiniteSample }
-                peak = max(peak, abs(value))
+            case .pcmFormatFloat64:
+                guard lcmp_peak_f64(raw.assumingMemoryBound(to: Double.self) + first, frameCount, sampleStride, &channelPeak) != 0 else {
+                    throw PreprocessingFailure.nonFiniteSample
+                }
+            case .pcmFormatInt16: channelPeak = lcmp_peak_i16(raw.assumingMemoryBound(to: Int16.self) + first, frameCount, sampleStride)
+            case .pcmFormatInt32: channelPeak = lcmp_peak_i32(raw.assumingMemoryBound(to: Int32.self) + first, frameCount, sampleStride)
+            case .otherFormat: channelPeak = try packedIntegerPeak(raw, format: format, channel: channel, frames: frameCount)
+            default: if frameCount > 0 { throw PreprocessingFailure.invalidAudio }
             }
+            peak = max(peak, channelPeak)
         }
         return peak
+    }
+
+    /// Native signed integers that have no AVAudioCommonFormat, such as packed 24-bit PCM
+    /// or 16-bit samples aligned high in 32-bit words.
+    private static func packedIntegerPeak(_ raw: UnsafeMutableRawPointer, format: AVAudioFormat,
+                                          channel: Int, frames frameCount: Int) throws -> Double {
+        guard frameCount > 0 else { return 0 }
+        let interleaved = format.isInterleaved
+        let description = format.streamDescription.pointee
+        let width = Int(description.mBytesPerFrame) / (interleaved ? Int(format.channelCount) : 1)
+        guard width > 0, width <= 4, description.mBitsPerChannel <= width * 8 else { throw PreprocessingFailure.invalidAudio }
+        return lcmp_peak_packed(raw.assumingMemoryBound(to: UInt8.self) + (interleaved ? channel * width : 0), frameCount,
+                                Int(description.mBytesPerFrame), UInt32(width), description.mBitsPerChannel,
+                                description.mFormatFlags & kAudioFormatFlagIsBigEndian != 0 ? 1 : 0,
+                                description.mFormatFlags & kAudioFormatFlagIsAlignedHigh != 0 ? 1 : 0)
     }
 }

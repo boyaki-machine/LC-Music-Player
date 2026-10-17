@@ -22,6 +22,11 @@ import Foundation
             .appendingPathComponent("LCMP", isDirectory: true).appendingPathComponent("library.json")
     }
     public var backupURL: URL { url.appendingPathExtension("backup") }
+    /// Library files hold music paths and bookmarks: owner read/write only.
+    private static func restrict(_ file: URL) throws {
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+    }
     private func decode(_ data: Data) throws -> LibraryDocument {
         // Future documents must never fall back to an older backup and be overwritten.
         struct Version: Decodable { var schemaVersion: Int }
@@ -58,13 +63,16 @@ import Foundation
         } else if expectedMain != nil { throw LibraryFailure.storeChanged }
         try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
                                attributes: [.posixPermissions: 0o700])
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.deletingLastPathComponent().path)
         if damagedMain {
             let preserved = url.appendingPathExtension("damaged-\(UUID().uuidString)")
             try fm.copyItem(at: url, to: preserved)
+            try Self.restrict(preserved)
             damagedMain = false
         }
-        if let lastGood { try write(lastGood, backupURL) }
+        if let lastGood { try write(lastGood, backupURL); try Self.restrict(backupURL) }
         try write(data, url)
+        try Self.restrict(url)
         lastGood = data
         expectedMain = data
     }

@@ -6,6 +6,8 @@ import unittest
 from unittest.mock import patch
 from distribution import clean_revision, copy_files, inventory, main, project_files, verify, write_json
 from project_license import bundle as bundle_project_license
+import plistlib
+from signing import ENTITLEMENTS, sign_app
 
 
 class DistributionTests(unittest.TestCase):
@@ -105,6 +107,20 @@ class DistributionTests(unittest.TestCase):
         self.assertEqual((target / 'NOTICE').read_bytes(), original_notice)
         (source / 'LICENSE').unlink()
         with self.assertRaises(FileNotFoundError): bundle_project_license(source, target)
+
+    def test_app_signature_uses_hardened_runtime_with_only_library_validation_relaxed(self):
+        self.assertEqual(ENTITLEMENTS, {'com.apple.security.cs.disable-library-validation': True})
+        seen = []
+        def record(command, check):
+            self.assertTrue(check)
+            if '--entitlements' in command:
+                seen.append(plistlib.loads(Path(command[command.index('--entitlements') + 1]).read_bytes()))
+            seen.append(command)
+        with patch('subprocess.run', side_effect=record):
+            sign_app(self.root / 'LCMP.app')
+        self.assertEqual(seen[0], ENTITLEMENTS)
+        self.assertEqual(seen[1][:6], ['codesign', '--force', '--sign', '-', '--options', 'runtime'])
+        self.assertEqual(seen[2], ['codesign', '--verify', '--deep', '--strict', str(self.root / 'LCMP.app')])
 
 
 if __name__ == '__main__':

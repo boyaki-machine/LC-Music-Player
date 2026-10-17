@@ -7,6 +7,8 @@ import AudioProcessingCore
 
 @Observable @MainActor public final class LibraryController {
     public private(set) var document = LibraryDocument()
+    /// Track positions in `document`; every assignment goes through `publish(_:)`.
+    @ObservationIgnored private var trackIndex: [UUID: Int] = [:]
     public private(set) var unavailable: [UUID: String] = [:]
     public private(set) var error: String?
     public private(set) var message: String?
@@ -68,7 +70,7 @@ import AudioProcessingCore
         playback.requireNormalization(normalizesVolume)
         levelMeasurement = normalizesVolume ? .pending : .disabled
         if preprocessingEnabled { playback.onActivityChange = { [weak self] in self?.updatePreprocessing() } }
-        do { document = try store.load(); message = store.recoveryMessage; auditMeasurementCache() }
+        do { publish(try store.load()); message = store.recoveryMessage; auditMeasurementCache() }
         catch { self.error = error.localizedDescription; editsEnabled = false }
         if playlistPreprocessing != nil {
             Task { [weak self] in self?.resumePlaylistPreprocessing() }
@@ -86,9 +88,23 @@ import AudioProcessingCore
     public var currentIndex: Int? { currentPlaylist?.entries.firstIndex { $0.id == document.currentEntryID } }
     public var canPrevious: Bool { canEdit && (currentIndex ?? 0) > 0 }
     public var canNext: Bool { canEdit && currentIndex.map { $0 + 1 < (currentPlaylist?.entries.count ?? 0) } == true }
+
+    // MARK: Document lookup
+
     public func playlist(_ id: UUID?) -> MusicPlaylist? { document.playlists.first { $0.id == id } }
-    public func track(_ id: UUID) -> LibraryTrack? { document.tracks.first { $0.id == id } }
+    public func track(_ id: UUID) -> LibraryTrack? { trackIndex[id].map { document.tracks[$0] } }
+    private func publish(_ next: LibraryDocument) {
+        document = next
+        trackIndex = Self.positions(next.tracks)
+    }
+    /// The first occurrence wins, matching a linear search; validated documents have unique IDs.
+    private static func positions(_ tracks: [LibraryTrack]) -> [UUID: Int] {
+        Dictionary(tracks.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
     public func clearNotice() { message = nil; if editsEnabled { error = nil } }
+
+
+    // MARK: Persistence
 
     private func auditMeasurementCache() {
         guard preprocessingEnabled else { return }
@@ -103,7 +119,7 @@ import AudioProcessingCore
         do {
             try next.validate(); try store.save(next)
             let oldEntry = document.currentEntryID
-            document = next; error = nil
+            publish(next); error = nil
             auditMeasurementCache()
             let trackIDs = Set(next.tracks.map(\.id))
             unavailable = unavailable.filter { id, _ in trackIDs.contains(id) }
@@ -112,6 +128,9 @@ import AudioProcessingCore
             return true
         } catch { self.error = "保存できませんでした。\(error.localizedDescription)"; return false }
     }
+
+    // MARK: Playlist editing (each edit is one validated, saved commit)
+
     @discardableResult public func createPlaylist(_ name: String) -> UUID? {
         guard canEdit, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         var next = document
@@ -155,6 +174,9 @@ import AudioProcessingCore
         for i in next.playlists.indices { next.playlists[i].entries.removeAll { $0.trackID == id } }
         _ = commit(next)
     }
+
+    // MARK: File references and availability
+
     public func repairTrack(_ id: UUID, using url: URL) {
         guard canEdit, let i = document.tracks.firstIndex(where: { $0.id == id }) else { return }
         do {
@@ -188,6 +210,9 @@ import AudioProcessingCore
         }
         if next != document && editsEnabled { _ = commit(next) }
     }
+
+    // MARK: Selection and transport
+
     @discardableResult public func selectEntry(_ entryID: UUID, in playlistID: UUID, autoPlay: Bool = false) -> Bool {
         guard canEdit, let entry = playlist(playlistID)?.entries.first(where: { $0.id == entryID }), let track = track(entry.trackID) else { return false }
         if preprocessingEnabled {
@@ -201,7 +226,7 @@ import AudioProcessingCore
             // Decoder and file lease are prepared first; disk failure keeps the old audio intact.
             let success = playback.select(resolved.url, using: resolved.lease) { if next != document { try store.save(next) } }
             guard success else { self.error = playback.error?.localizedDescription; return false }
-            document = next; unavailable[track.id] = nil; error = nil; message = nil
+            publish(next); unavailable[track.id] = nil; error = nil; message = nil
             if autoPlay { playback.togglePlayPause(using: resolved.lease) }
             return true
         } catch {
@@ -256,6 +281,9 @@ import AudioProcessingCore
         guard let list = currentPlaylist, let i = currentIndex, list.entries.indices.contains(i + offset) else { return }
         selectEntry(list.entries[i + offset].id, in: list.id, autoPlay: autoPlay)
     }
+
+    // MARK: Import, export and shutdown
+
     private func retirePlaylistWorkForImport() async {
         guard let playlistPreprocessing else { return }
         playlistPreprocessing.suspend()
@@ -312,6 +340,7 @@ import AudioProcessingCore
             } else { paths[t.reference.lastKnownURL.standardizedFileURL.resolvingSymlinksInPath()] = t.id }
         }
         var ids: [UUID] = [], failed = 0
+        var positions = Self.positions(next.tracks)
         for (index, item) in items.enumerated() {
             try Task.checkCancellation()
             guard editsEnabled else { throw CancellationError() }
@@ -319,7 +348,7 @@ import AudioProcessingCore
             let path = item.url.standardizedFileURL.resolvingSymlinksInPath()
             let fromFolder = folderRoots.contains { path.path.hasPrefix($0.standardizedFileURL.resolvingSymlinksInPath().path + "/") }
             if let id = paths[path] {
-                if fromFolder, let i = next.tracks.firstIndex(where: { $0.id == id }) { next.tracks[i].registration = .folder }
+                if fromFolder, let i = positions[id] { next.tracks[i].registration = .folder }
                 ids.append(id); continue
             }
             let reference: TrackReference
@@ -330,6 +359,7 @@ import AudioProcessingCore
             }
             let name = item.title?.isEmpty == false ? item.title! : item.url.deletingPathExtension().lastPathComponent
             let track = LibraryTrack(name: name, reference: reference, registration: fromFolder ? .folder : .file)
+            positions[track.id] = next.tracks.count
             next.tracks.append(track); paths[path] = track.id; ids.append(track.id)
             if reference.bookmark == nil { unavailable[track.id] = "ファイルが見つからないか、アクセスできません。" }
             if index % 32 == 0 { await Task.yield() }
@@ -346,7 +376,7 @@ import AudioProcessingCore
         let scope = references.beginAccess(url)
         defer { withExtendedLifetime(scope) {} }
         do {
-            let data = try await Task.detached { try Data(contentsOf: url) }.value
+            let data = try await Task.detached { try M3U8.read(url) }.value
             let items = try M3U8.decode(data, relativeTo: url)
             var next = document
             let ids = try await stage(items, in: &next, allowMissing: true)
@@ -371,6 +401,8 @@ import AudioProcessingCore
         } catch { self.error = error.localizedDescription }
     }
 }
+
+// MARK: - Volume measurement and normalization
 
 extension LibraryController {
     public var currentTrackMetrics: TrackAudioMetrics? {
@@ -427,6 +459,11 @@ extension LibraryController {
         }
     }
 
+
+    // MARK: Background preparation
+    // Ownership of a prepared prefix, measurement and file lease moves only on the main actor;
+    // every cancelled Task is chained into backgroundRetirement before new scoped access begins.
+
     private func cancelMeasurement() {
         measurementCancellation?.cancel(); measurementCancellation = nil
         measurementTask?.cancel(); measurementTask = nil; measurementID = UUID()
@@ -458,6 +495,9 @@ extension LibraryController {
         measuredTrack = nil; peakMeasurement = measuresMaximumVolume ? .pending : .disabled
         measuredLevels = nil; levelMeasurement = normalizesVolume ? .pending : .disabled; preparationStage = nil
     }
+    /// Selects an entry through the worker: reuses a matching speculative result when its
+    /// source is unchanged, otherwise resolves, prepares a prefix and (for normalized
+    /// playback) measures. Only the latest preparationID may commit the selection.
     private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double = 0) {
         guard !shuttingDown else { return }
         playlistPreprocessingMayStart = true
@@ -560,7 +600,7 @@ extension LibraryController {
                             if next != self.document { try self.store.save(next) }
                         }) else { throw self.playback.error ?? PlaybackError.inaccessibleFile }
                 }
-                self.document = next; self.unavailable[track.id] = nil; self.error = nil; self.message = nil
+                self.publish(next); self.unavailable[track.id] = nil; self.error = nil; self.message = nil
                 self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
                 self.preparationStage = nil
                 if position > 0 { self.playback.seek(to: position) }
@@ -606,6 +646,7 @@ extension LibraryController {
         cancelNext()
         if playback.state == .playing { prepareNext() }
     }
+    /// Speculatively prepares the following entry while playing (without playlist sweeps).
     private func prepareNext() {
         if playlistPreprocessing != nil { resumePlaylistPreprocessing(); return }
         guard !shuttingDown, !isPreparing, playback.state == .playing, let list = currentPlaylist, let index = currentIndex,
@@ -652,6 +693,8 @@ extension LibraryController {
     private func currentReference(_ entryID: UUID, in playlistID: UUID) -> TrackReference? {
         playlist(playlistID)?.entries.first { $0.id == entryID }.flatMap { track($0.trackID)?.reference }
     }
+    /// Follows playback state: playing starts speculation, paused keeps measured levels,
+    /// any other state retires background work.
     private func updatePreprocessing() {
         guard preprocessingEnabled, !shuttingDown else { return }
         if playback.state == .playing {

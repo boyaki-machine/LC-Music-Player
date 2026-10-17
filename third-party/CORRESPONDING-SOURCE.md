@@ -34,7 +34,7 @@ python3 LCMP/scripts/rebuild_frameworks.py --source AudioXCFrameworks --output .
 python3 relink.py --frameworks ../../../../modified-codecs/Frameworks --output ../../../../LCMP-modified.app
 ```
 
-ソースの変更は`AudioXCFrameworks/`で行います。frameworkの名前・install name・公開API/ABIが使用側と互換である必要があります。必要な一部だけを再構築した場合も、その`.framework`を格納したディレクトリを`--frameworks`へ指定できます。`--rebuild-taglib`との併用も可能です。再リンクスクリプトはframeworkとアプリをアドホック再署名し、deep/strict検証を行います。元の署名を維持するための秘密鍵は必要ありません。
+ソースの変更は`AudioXCFrameworks/`で行います。frameworkの名前・install name・公開API/ABIが使用側と互換である必要があります。必要な一部だけを再構築した場合も、その`.framework`を格納したディレクトリを`--frameworks`へ指定できます。`--rebuild-taglib`との併用も可能です。再リンクスクリプトはframeworkとアプリをアドホック再署名し、deep/strict検証を行います。アプリの署名は同梱の`signing.py`が行い、配布版と同じくhardened runtimeを有効にし、アドホック署名のframeworkを差し替えられるようライブラリ検証だけを外します。元の署名を維持するための秘密鍵は必要ありません。
 
 ## 本体もソースから再構築する
 

@@ -6,7 +6,21 @@ public struct M3U8Item: Equatable, Sendable {
     public init(url: URL, title: String? = nil) { self.url = url; self.title = title }
 }
 public enum M3U8 {
+    /// Bounds for an untrusted playlist, far above any music library list.
+    public static let maximumBytes = 16 * 1024 * 1024
+    public static let maximumItems = 50_000
+
+    /// Reads at most `maximumBytes + 1` bytes, so an oversized file is never loaded whole.
+    public static func read(_ url: URL) throws -> Data {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        let data = try handle.read(upToCount: maximumBytes + 1) ?? Data()
+        guard data.count <= maximumBytes else { throw LibraryFailure.invalidPlaylist("ファイルが大きすぎます。") }
+        return data
+    }
+
     public static func decode(_ data: Data, relativeTo file: URL) throws -> [M3U8Item] {
+        guard data.count <= maximumBytes else { throw LibraryFailure.invalidPlaylist("ファイルが大きすぎます。") }
         guard var text = String(data: data, encoding: .utf8) else { throw LibraryFailure.invalidPlaylist("UTF-8のファイルを選択してください。") }
         if text.first == "\u{feff}" { text.removeFirst() }
         var result: [M3U8Item] = [], title: String?
@@ -26,6 +40,7 @@ public enum M3U8 {
                 url = parsed
             } else if line.hasPrefix("/") { url = URL(fileURLWithPath: line) }
             else { url = file.deletingLastPathComponent().appendingPathComponent(line) }
+            guard result.count < maximumItems else { throw LibraryFailure.invalidPlaylist("曲数が多すぎます。") }
             result.append(M3U8Item(url: url.standardizedFileURL, title: title)); title = nil
         }
         return result
