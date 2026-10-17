@@ -135,6 +135,7 @@ make test
 ```
 
 - `LCMP_TEST_AUDIO_OUTPUT=0`を明示し、`--no-parallel`で通常のテストを行います。生成器のPythonテストも含みます。
+- テストの前後で`~/Library/Preferences`の`lcmp-*.plist`の件数を比べ、増えていたら失敗にします。
 - 長時間の負荷試験用の`LCMP_*`環境変数を設定したシェルでは、その設定を解除してから実行してください。
 
 実際の出力を確認する場合は、別に次を実行します。既定の出力へテスト音を送ります。手動の確認は[再生の検証手順](design/02_playback-implementation.md#5-検証)を参照してください。

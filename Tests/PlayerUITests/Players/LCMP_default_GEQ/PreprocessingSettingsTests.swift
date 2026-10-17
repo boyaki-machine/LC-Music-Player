@@ -8,9 +8,7 @@ import LibraryCore
 
 @Suite(.serialized) @MainActor struct PreprocessingSettingsTests {
     @Test func measurementSettingsRenderWithinMinimumExtension() async throws {
-        let suite = "lcmp-settings-\(UUID())"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         let playback = PlaybackController()
         let library = LibraryController(playback: playback, store: SettingsStore(),
                                         preprocessingEnabled: true, preferences: defaults)

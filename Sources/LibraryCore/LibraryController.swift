@@ -28,7 +28,7 @@ import AudioProcessingCore
     @ObservationIgnored private var normalizationNeedsPreparation = false
     @ObservationIgnored private var backgroundRetirement: Task<Void, Never>?
     @ObservationIgnored private let preprocessingEnabled: Bool
-    @ObservationIgnored private let preferences: UserDefaults
+    @ObservationIgnored private let preferences: any PreferenceStoring
     @ObservationIgnored private let preprocessor: any AudioPreprocessing
     @ObservationIgnored private var playlistPreprocessingMayStart = true
     @ObservationIgnored private var playlistPreprocessing: PlaylistPreprocessing?
@@ -50,7 +50,7 @@ import AudioProcessingCore
 
     public init(playback: PlaybackController, store: any LibraryPersistence = JSONLibraryStore(url: JSONLibraryStore.defaultURL),
                 references: any FileReferenceProvider = BookmarkFileReferences(),
-                preprocessingEnabled: Bool = false, playlistPreprocessingEnabled: Bool = false, preferences: UserDefaults = .standard,
+                preprocessingEnabled: Bool = false, playlistPreprocessingEnabled: Bool = false, preferences: any PreferenceStoring = UserDefaults.standard,
                 preprocessor: any AudioPreprocessing = AudioPreprocessor.shared) {
         self.playback = playback; self.store = store; self.references = references
         self.preprocessor = preprocessor

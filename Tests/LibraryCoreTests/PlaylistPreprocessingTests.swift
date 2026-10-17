@@ -216,8 +216,7 @@ private actor PlaylistWorker: AudioPreprocessing {
     @Test func controllerStartsOnSuccessfulAddWithProcessingOffAndStopPreventsRestart() async throws {
         let f = try Fixture(); defer { f.cleanup() }
         let doc = try playlistFixture(f.root, count: 2), refs = TestReferences(), store = MemoryStore(), worker = PlaylistWorker()
-        let suite = "lcmp-playlist-sweep-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         await worker.block(doc.tracks[0].reference.lastKnownURL)
         let playback = PlaybackController(), model = LibraryController(playback: playback, store: store, references: refs,
             preprocessingEnabled: true, playlistPreprocessingEnabled: true, preferences: defaults, preprocessor: worker)
@@ -245,8 +244,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         store.document = doc
         let processor = AudioPreprocessor(cache: .init(url: f.root.appendingPathComponent("cache/measurements.sqlite"),
             program: .init(applicationVersion: "test", build: "1", executableDigest: "display", environment: "test")))
-        let suite = "lcmp-sweep-display-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         let playback = PlaybackController(); playback.setVolume(0)
         let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true,
             playlistPreprocessingEnabled: true, preferences: defaults, preprocessor: processor)
@@ -286,8 +284,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         store.document = doc
         let targetURL = doc.tracks[2].reference.lastKnownURL
         await worker.block(targetURL)
-        let suite = "lcmp-sweep-playback-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         if action != "off" { defaults.set(true, forKey: "normalizeVolume") }
         let playback = PlaybackController(); playback.setVolume(0)
         let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true,

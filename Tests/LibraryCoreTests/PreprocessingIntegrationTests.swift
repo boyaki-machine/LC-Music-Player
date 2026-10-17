@@ -40,8 +40,8 @@ import PlaybackCore
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_TEST_AUDIO_OUTPUT"] == "1"))
     func normalizationGatesPlaybackPersistsAndKeepsManualVolumeIndependent() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
-        let suite = "lcmp-normalization-\(UUID())", store = MemoryStore(), refs = TestReferences()
-        let defaults = try #require(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MemoryStore(), refs = TestReferences()
+        let defaults = MemoryPreferences()
         defaults.set(true, forKey: "measureMaximumVolume") // never migrates into processing ON
         let playback = PlaybackController(); playback.setVolume(0)
         let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true, preferences: defaults)
@@ -117,8 +117,8 @@ import PlaybackCore
 
     @Test func backgroundSelectionRetainsOnlyMetadataAndHonorsCancelAndSaveFailure() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
-        let suite = "lcmp-test-\(UUID())", store = MemoryStore(), refs = TestReferences()
-        let defaults = try #require(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MemoryStore(), refs = TestReferences()
+        let defaults = MemoryPreferences()
         let playback = PlaybackController()
         let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true, preferences: defaults)
         defer { model.shutdown() }
@@ -169,8 +169,8 @@ import PlaybackCore
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_TEST_AUDIO_OUTPUT"] == "1"))
     func preparedPlaybackMeasurementReorderPauseSeekAdvanceAndShutdown() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
-        let suite = "lcmp-test-\(UUID())", store = MemoryStore(), refs = TestReferences()
-        let defaults = try #require(UserDefaults(suiteName: suite)); defer { defaults.removePersistentDomain(forName: suite) }
+        let store = MemoryStore(), refs = TestReferences()
+        let defaults = MemoryPreferences()
         let playback = PlaybackController(); playback.setVolume(0)
         let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true, preferences: defaults)
         defer { model.shutdown() }
