@@ -6,7 +6,10 @@
 .env.*
 !.env.example
 .codex/config.toml
+.mcp.json
+.claude/
 LEARNINGS_CODEX.md
+LEARNINGS_CLAUDE.md
 /DEVELOPMENT_NOTES.md
 
 # Xcode and Swift build products
@@ -24,6 +27,7 @@ __pycache__/
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
 
 # Editor and temporary files
+.vscode/
 *.swp
 *.swo
 *~
