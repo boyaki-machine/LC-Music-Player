@@ -1,20 +1,45 @@
-# LC Music Player 設計書
+# LC Music Player 文書一覧
 
-[ビルド・配置手順](./build-and-deploy.md)は開発・ローカル配布の入口です。設計書は`design/`配下へ、基本設計から実装・開発ガイド・依存構成の順に2桁の番号を付けて配置します。
+[README](../README.md)に戻る。
 
-このディレクトリでは、LC Music Player（LCMP）で目指す製品の仕様と、実装の構造・動作を管理します。
+このディレクトリでは、LC Music Player（LCMP）のビルド手順と設計書を管理します。
 
-- [基本設計](design/00_basic-design.md)：製品の目的、対象プラットフォーム、機能構成、再生・可視化の流れ、画面構成。
-- [UI・UX設計](design/01_ui-ux-design.md)：コンパクトなメイン画面、拡張画面、シーク、縦型音量、macOSの操作と将来のiPhone共用方針。
-- [基本再生機能の実装設計](design/02_playback-implementation.md)：単曲再生の責務分担、対応形式、状態遷移、ファイルアクセス、音量・出力、検証方法。
-- [ライブラリ・プレイリストの実装設計](design/03_library-implementation.md)：JSON保存・復元、ブックマーク、M3U8交換、順次再生、音源管理。
-- [再生前処理の実装設計](design/04_preprocessing-implementation.md)：次曲の先頭PCM、プレイリスト全曲の背景測定、背景処理・取消・音声処理へのI/F。
-- [前処理測定結果の永続キャッシュ](design/05_measurement-cache-implementation.md)：SQLite・ハッシュ索引・識別/失効、音源ID対応のAudit、OS別境界。
-- [音量自動調整と前処理拡張の設計](design/06_audio-processing-design.md)：全曲LUFS/true peakの追加測定、固定ゲイン算出、測定待ちと設定・出力条件の契約。測定・固定ゲインは実装済み、EQ/同期delayは将来の構成として区別する。
-- [周波数解析の実装設計](design/07_analysis-implementation.md)：解析データ、更新設定、音声取得、時刻情報と将来の同期補償の接続点。
-- [可視化の実装設計](design/08_visualization-implementation.md)：16列蛍光管LED、提示時刻・残光・欠落、表示の寿命と描画測定。
-- [コンパクト画面の実装設計](design/09_compact-ui-implementation.md)：ウィンドウ配置、LED、操作・フォーカス、シークと縦型音量。
-- [Player UI・可視化の開発ガイド](design/10_playerUI_developers.md)：`LCMP_default_GEQ`のフォルダ構成、モジュール間I/F、状態と時刻の契約、新しいUI・可視化の追加手順。
-- [依存ライブラリ](design/11_third-party-dependencies.md)：バージョン固定、動的リンク、ライセンス表示、アプリへの同梱構成。
+## ビルドと配布
 
-設計書には合意した仕様と実装設計を記載します。進捗、選定の経緯、未決事項、チケットへの引き継ぎ、検証の実施結果は、リポジトリ直下の`DEVELOPMENT_NOTES.md`に記録します。このファイルはローカル専用で、Git管理対象外です。ファイルが存在する環境でのみ参照してください。
+- [ビルド・配置手順](build-and-deploy.md)：必要な環境、ビルドコマンド、ZIPと対応ソース付き配布物の作成と検証、テスト、問題の切り分け。
+
+## 設計書
+
+設計書は`design/`に置き、基本設計から実装設計・開発ガイド・依存構成の順に2桁の番号を付けます。
+
+| 文書 | 内容 |
+| --- | --- |
+| [00 基本設計](design/00_basic-design.md) | 製品の目的、機能要件、機能構成とデータの流れ、画面構成、品質方針 |
+| [01 UI・UX設計](design/01_ui-ux-design.md) | メイン画面、拡張画面、シーク、縦型音量、設定、状態の伝え方 |
+| [02 基本再生機能の実装設計](design/02_playback-implementation.md) | 単曲再生の構成、対応形式、ファイルアクセス、状態遷移、シーク、音量、デコーダの選択 |
+| [03 ライブラリ・プレイリストの実装設計](design/03_library-implementation.md) | 保存・復元、ブックマーク、再生順序、M3U8交換、リスト表示、終了処理 |
+| [04 再生前処理の実装設計](design/04_preprocessing-implementation.md) | 次曲の先頭PCM、全曲測定、プレイリストの事前測定、取消とファイルアクセス |
+| [05 前処理測定結果の永続キャッシュ](design/05_measurement-cache-implementation.md) | SQLiteの保存形式、識別と失効、Audit、容量の回収 |
+| [06 音量自動調整の実装設計](design/06_volume-normalization-implementation.md) | 全曲LUFS/true peakの測定、固定ゲインの算出、処理段の順序、再生準備と設定 |
+| [07 周波数解析の実装設計](design/07_analysis-implementation.md) | 解析データ、音声の取得、時刻情報と将来の同期補償の契約 |
+| [08 可視化の実装設計](design/08_visualization-implementation.md) | 16列の蛍光管LED、提示時刻・残光・欠落、表示の寿命と描画の測定 |
+| [09 コンパクト画面の実装設計](design/09_compact-ui-implementation.md) | ウィンドウの配置、シークと音量、キーボードと支援技術、設定タブ、謝辞ウィンドウ |
+| [10 Player UI・可視化の開発ガイド](design/10_player-ui-developer-guide.md) | `LCMP_default_GEQ`のフォルダ構成、モジュール間のI/F、新しいUI・可視化の追加手順 |
+| [11 依存ライブラリと同梱構成](design/11_third-party-dependencies.md) | バージョンの固定、リンクと署名、ライセンス表示、対応ソース、脆弱性の確認 |
+
+## 設計書の書き方
+
+- 00・01は製品の仕様として、「目的 → 機能要件 → 画面 → 品質方針」の順に書きます。
+- 02〜11の実装設計は、「概要 → 要件 → 方式 → 実装 → 検証 → 参照」の順に書きます。書くことがない章は省きます。
+
+| 章 | 書くこと |
+| --- | --- |
+| 概要 | その機能が何をするか、対象範囲、前提 |
+| 要件 | 満たすべき仕様（挙動・数値・制約） |
+| 方式 | 要件をどう実現するか。部品の分担と外部I/F、データの流れ |
+| 実装 | 採用した技術・アルゴリズム・状態遷移・資源の寿命など、具体的な処理 |
+| 検証 | 何を正解とするか（合格基準）と、その確かめ方（自動テスト・手動確認・性能測定） |
+| 参照 | 外部の規格・APIの資料 |
+
+- 設計書の本文は「である」調、利用者向けの文書（README・ビルド手順・アプリに同梱する11とthird-party/）は「です・ます」調で書きます。
+- 設計書には、合意した仕様と実装済みの設計だけを書きます。チケット番号、作業の経緯、検証の実施結果は書きません。

@@ -17,6 +17,7 @@
 | Claude 固有の知見、次のセッションへの引き継ぎ | `LEARNINGS_CLAUDE.md`（ローカル専用・Git管理外） |
 | 進捗・判断の経緯・未決事項・検証結果・チケットの引き継ぎ | `DEVELOPMENT_NOTES.md`（ローカル専用・Git管理外） |
 | 合意した仕様と実装済みの設計 | `docs/design/` |
+| 設計・実装の大きな決定とその理由 | プロジェクト管理の「判断の記録」 |
 
 - セッションの終了時、有用な判断・知見・引き継ぎがあれば `LEARNINGS_CLAUDE.md` に日付付きで簡潔に追記する。古い記載は消さない。
 - AGENTS.md が `LEARNINGS_CODEX.md` に書くよう指示している内容は、Claude の場合は `LEARNINGS_CLAUDE.md` に書く。
