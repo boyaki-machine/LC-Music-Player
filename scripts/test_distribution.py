@@ -108,8 +108,13 @@ class DistributionTests(unittest.TestCase):
         (source / 'LICENSE').unlink()
         with self.assertRaises(FileNotFoundError): bundle_project_license(source, target)
 
-    def test_app_signature_uses_hardened_runtime_with_only_library_validation_relaxed(self):
-        self.assertEqual(ENTITLEMENTS, {'com.apple.security.cs.disable-library-validation': True})
+    def test_app_signature_uses_hardened_runtime_sandbox_and_only_library_validation_relaxed(self):
+        self.assertEqual(ENTITLEMENTS, {
+            'com.apple.security.app-sandbox': True,
+            'com.apple.security.files.user-selected.read-write': True,
+            'com.apple.security.files.bookmarks.app-scope': True,
+            'com.apple.security.cs.disable-library-validation': True,
+        })
         seen = []
         def record(command, check):
             self.assertTrue(check)

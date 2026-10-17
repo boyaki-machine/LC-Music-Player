@@ -25,9 +25,9 @@ make debug
 | `make distribution` | `build/distribution/LCMP-distribution.zip` | ソースから構築したコーデック・対応ソース・再リンク材料付き |
 | `make test` | ターミナルの結果 | 音声出力なしの通常回帰 |
 
-ReleaseとDebugでアプリの識別子やデータ保存先は共通です。同じ利用者環境で両方を同時起動するとライブラリを共有するため、使用する方を切り替えるときは先に終了してください。全曲測定の速度評価には最適化されたReleaseを使います。
+ReleaseとDebugでアプリの識別子やデータ保存先（App Sandboxのコンテナ`~/Library/Containers/local.lcmp.player`）は共通です。同じ利用者環境で両方を同時起動するとライブラリを共有するため、使用する方を切り替えるときは先に終了してください。全曲測定の速度評価には最適化されたReleaseを使います。
 
-各ビルドは、実行ファイル、動的framework、本体のApache 2.0 LICENSE/NOTICE、依存ライセンス、解決済みパッケージ情報をアプリ内へまとめ、ad-hoc署名と署名検証を行います。署名鍵は使いません。同梱仕様は[依存ライブラリ](./design/11_third-party-dependencies.md)を参照してください。
+各ビルドは、実行ファイル、動的framework、本体のApache 2.0 LICENSE/NOTICE、依存ライセンス、解決済みパッケージ情報をアプリ内へまとめ、hardened runtimeとApp Sandboxを付けたad-hoc署名と署名検証を行います。署名鍵は使いません。同梱仕様は[依存ライブラリ](./design/11_third-party-dependencies.md)を参照してください。
 
 任意の別出力先は変数で指定できます。パスに空白がある場合は変数の代入全体を引用符で囲みます。
 

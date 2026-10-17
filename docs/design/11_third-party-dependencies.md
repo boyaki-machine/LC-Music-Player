@@ -10,7 +10,7 @@ LCMPのオリジナル成果物はApache License, Version 2.0（Apache-2.0）で
 
 ## アプリのリンクと同梱構成
 
-`scripts/build-app.py`は、macOS用frameworkを`LCMP.app/Contents/Frameworks`へコピーし、アプリから動的に読み込みます。LAME、Musepack、mpg123、libsndfile、TTAは動的frameworkです。TagLibはSwiftPMのソース依存としてLCMPへ静的リンクされるため、LGPL条件に対応するソースと再リンク材料を配布用ビルドに含めます。TagLib全体をMPLだけで扱えるとは仮定しません。ローカル起動用アプリには、秘密鍵やキーチェーンの認証を必要としないアドホック署名を使用します。アプリの署名は`scripts/signing.py`に集約し、通常ビルド・配布準備用ビルド・再リンクの全てでhardened runtimeを有効にします。これによりdyldは`DYLD_INSERT_LIBRARIES`等の環境変数による注入を無視します。アドホック署名のframeworkにはTeam IDがなく、LGPLの再リンクではframeworkを差し替えるため、entitlementは`com.apple.security.cs.disable-library-validation`だけを付けます。
+`scripts/build-app.py`は、macOS用frameworkを`LCMP.app/Contents/Frameworks`へコピーし、アプリから動的に読み込みます。LAME、Musepack、mpg123、libsndfile、TTAは動的frameworkです。TagLibはSwiftPMのソース依存としてLCMPへ静的リンクされるため、LGPL条件に対応するソースと再リンク材料を配布用ビルドに含めます。TagLib全体をMPLだけで扱えるとは仮定しません。ローカル起動用アプリには、秘密鍵やキーチェーンの認証を必要としないアドホック署名を使用します。アプリの署名は`scripts/signing.py`に集約し、通常ビルド・配布準備用ビルド・再リンクの全てでhardened runtimeを有効にします。これによりdyldは`DYLD_INSERT_LIBRARIES`等の環境変数による注入を無視します。アドホック署名のframeworkにはTeam IDがなく、LGPLの再リンクではframeworkを差し替えるため、ライブラリ検証だけを`com.apple.security.cs.disable-library-validation`で外します。あわせてApp Sandboxを有効にし、`com.apple.security.app-sandbox`、利用者が選んだファイルの読み書き（`com.apple.security.files.user-selected.read-write`）、security-scoped bookmark（`com.apple.security.files.bookmarks.app-scope`）だけを許可します。ネットワーク・カメラ等の権限は持ちません。保存先は[ライブラリ設計](03_library-implementation.md)を参照してください。
 
 各依存チェックアウトのLICENSE／COPYING／COPYRIGHT（内包するソースの表示を含む）と、SFBAudioEngineのACKNOWLEDGMENTSを`Contents/Resources/ThirdPartyLicenses`へコピーします。固定したPackage.resolvedも同梱します。
 
