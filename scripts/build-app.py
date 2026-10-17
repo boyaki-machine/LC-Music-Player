@@ -66,6 +66,8 @@ def main():
     shutil.copy2(ROOT / "Package.resolved", notices / "Package.resolved")
     shutil.copy2(ROOT / "docs/design/11_third-party-dependencies.md", notices / "dependency-notes.md")
     bundle(ROOT, contents / "Resources/LCMPLicense")
+    # Rendered by scripts/render-app-icon.swift; committed so builds do not redraw it.
+    shutil.copy2(ROOT / "assets/AppIcon.icns", contents / "Resources/AppIcon.icns")
     # One dotted version; the build number is its last part, not a separate value.
     version = resolve_version(ROOT)
     with (contents / "Info.plist").open("wb") as file:
@@ -74,7 +76,7 @@ def main():
             "CFBundleName": "LCMP", "CFBundleDisplayName": "LC Music Player",
             "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
             "CFBundleVersion": version, "LSMinimumSystemVersion": "14.0",
-            "NSHighResolutionCapable": True,
+            "CFBundleIconFile": "AppIcon", "NSHighResolutionCapable": True,
         }, file)
     # Ad-hoc signing uses no private signing key and does not read Keychain.
     sign_app(app)

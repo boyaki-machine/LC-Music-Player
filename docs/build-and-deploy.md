@@ -44,6 +44,20 @@
 - 作業ブランチでビルドすると、マイナーは分岐元までのマージの数、ビルド番号は作業ブランチのコミットも含めた数になります。
 - `LCMP_VERSION=0.20.50 make release`のように、`<メジャー>.<マイナー>.<ビルド番号>`の形で値を上書きできます。Gitの履歴がない場所（対応ソースの展開先など）では、上書きしない限り`<メジャー>.0.0`になり、警告を表示します。
 
+### アイコン
+
+ビルドは、リポジトリにある`assets/AppIcon.icns`をアプリの`Contents/Resources/AppIcon.icns`へコピーし、Info.plistの`CFBundleIconFile`に設定します。ビルドのたびには描き直しません。
+
+アイコンの図形を変えたときは、`scripts/render-app-icon.swift`を直してから、次のコマンドで描き直します。各サイズのPNGを図形から描き、`iconutil`でicnsにまとめます。
+
+```sh
+swift scripts/render-app-icon.swift assets/AppIcon.icns
+```
+
+- 外観の仕様は[UI・UX設計](design/01_ui-ux-design.md#アプリのアイコン)に従います。
+- `make test`は、icnsに16pxから1024pxまでのすべてのサイズが入っていることを確かめます（`scripts/test_app_icon.py`）。
+- Finder や Dock が古いアイコンを表示し続けるときは、アプリを入れ直すか、`touch`でアプリの更新日時を変えてください。
+
 ### 出力先を変える
 
 別の出力先は変数で指定できます。パスに空白がある場合は、変数の代入全体を引用符で囲みます。

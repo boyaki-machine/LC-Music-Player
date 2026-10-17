@@ -18,7 +18,7 @@ from project_license import documents
 from signing import sign_app
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE_ROOTS = {'Sources', 'Tests', 'scripts', 'docs', 'third-party', 'prototypes'}
+SOURCE_ROOTS = {'Sources', 'Tests', 'scripts', 'docs', 'third-party', 'prototypes', 'assets'}
 SOURCE_FILES = {'Package.swift', 'Package.resolved', 'Makefile', 'README.md', 'AGENTS.md',
                 '.gitignore', 'LICENSE', 'NOTICE'}
 
