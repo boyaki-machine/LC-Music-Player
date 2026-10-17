@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -84,6 +85,42 @@ class CatalogueTests(unittest.TestCase):
         (self.source / 'LICENSE').write_bytes(b'\xff\xfe')
         with self.assertRaises(UnicodeDecodeError): self.run_generator()
         self.assertEqual(previous, (self.output / 'index.json').read_bytes())
+
+    def test_supplement_integrity_revision_and_dependency_removal(self):
+        self.run_generator()
+        text = self.root / 'GPL.txt'; text.write_text('Full additional original\n')
+        config = self.root / 'notices.json'
+        value = {'example': {'revision': 'abc', 'documents': [
+            {'path': 'GPL.txt', 'sha256': hashlib.sha256(text.read_bytes()).hexdigest()}]}}
+        config.write_text(json.dumps(value))
+        generate(self.resolved, self.graph, self.artifacts, self.output, config)
+        self.assertEqual((self.output / 'example/supplement/GPL.txt').read_bytes(), text.read_bytes())
+        previous = (self.output / 'index.json').read_bytes()
+        text.write_text('Truncated or replaced text')
+        with self.assertRaises(ValueError):
+            generate(self.resolved, self.graph, self.artifacts, self.output, config)
+        self.assertEqual(previous, (self.output / 'index.json').read_bytes())
+        text.unlink()
+        with self.assertRaises(FileNotFoundError):
+            generate(self.resolved, self.graph, self.artifacts, self.output, config)
+        value['example']['revision'] = 'wrong'; config.write_text(json.dumps(value))
+        with self.assertRaises(ValueError):
+            generate(self.resolved, self.graph, self.artifacts, self.output, config)
+        self.resolved.write_text(json.dumps({'pins': []}))
+        generate(self.resolved, {'dependencies': []}, self.artifacts, self.output, config)
+        self.assertFalse((self.output / 'example').exists())
+
+    def test_supplement_cannot_read_outside_its_directory(self):
+        self.run_generator()
+        directory = self.root / 'supplements'; directory.mkdir()
+        outside = self.root / 'outside'; outside.write_text('outside')
+        (directory / 'GPL').symlink_to(outside)
+        config = directory / 'notices.json'
+        for path in ['../outside', 'GPL', str(outside)]:
+            config.write_text(json.dumps({'example': {'revision': 'abc', 'documents': [
+                {'path': path, 'sha256': hashlib.sha256(outside.read_bytes()).hexdigest()}]}}))
+            with self.assertRaises(ValueError):
+                generate(self.resolved, self.graph, self.artifacts, self.output, config)
 
 
 if __name__ == '__main__':

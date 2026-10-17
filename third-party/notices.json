@@ -1,0 +1,64 @@
+{
+  "lame-binary-xcframework": {
+    "revision": "07703e040231d50f2e7f160c670f356f129a00e4",
+    "documents": [
+      {
+        "path": "RELINKING.txt",
+        "sha256": "70ab534e8cd2b232812ef55d18633b91d6d1a4f8ea4a346586f7448f9e6cad22"
+      }
+    ]
+  },
+  "mpc-binary-xcframework": {
+    "revision": "de4b45fa64ed88467806c50217e9da7032a99d80",
+    "documents": [
+      {
+        "path": "RELINKING.txt",
+        "sha256": "70ab534e8cd2b232812ef55d18633b91d6d1a4f8ea4a346586f7448f9e6cad22"
+      }
+    ]
+  },
+  "mpg123-binary-xcframework": {
+    "revision": "acc2c651cbd8fff8bc8cdeb4faf14b35ba81adee",
+    "documents": [
+      {
+        "path": "RELINKING.txt",
+        "sha256": "70ab534e8cd2b232812ef55d18633b91d6d1a4f8ea4a346586f7448f9e6cad22"
+      }
+    ]
+  },
+  "sndfile-binary-xcframework": {
+    "revision": "52f73460dc04ba789ad3007ad004faa328b732dd",
+    "documents": [
+      {
+        "path": "RELINKING.txt",
+        "sha256": "70ab534e8cd2b232812ef55d18633b91d6d1a4f8ea4a346586f7448f9e6cad22"
+      }
+    ]
+  },
+  "tta-cpp-binary-xcframework": {
+    "revision": "b68cf8a127936434cae93aa2c613d4b47eb34de4",
+    "documents": [
+      {
+        "path": "RELINKING.txt",
+        "sha256": "70ab534e8cd2b232812ef55d18633b91d6d1a4f8ea4a346586f7448f9e6cad22"
+      },
+      {
+        "path": "licenses/GPL-3.0.txt",
+        "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+      }
+    ]
+  },
+  "cxxtaglib": {
+    "revision": "9e499ea0a69d107791ac0a2fe9d6a59cf401c6f9",
+    "documents": [
+      {
+        "path": "RELINKING.txt",
+        "sha256": "70ab534e8cd2b232812ef55d18633b91d6d1a4f8ea4a346586f7448f9e6cad22"
+      },
+      {
+        "path": "licenses/LGPL-2.1.txt",
+        "sha256": "814cf1a7e79dc6a3eda3d197fa7ded36c3b733917ed5da1e8cc135eb24f3ac09"
+      }
+    ]
+  }
+}

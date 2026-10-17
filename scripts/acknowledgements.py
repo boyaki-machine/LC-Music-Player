@@ -1,5 +1,6 @@
 """Generate an offline catalogue from the resolved dependency graph and notices."""
 import json
+import hashlib
 from pathlib import Path
 import re
 import shutil
@@ -22,7 +23,7 @@ def notice_files(root):
     return result
 
 
-def generate(resolved, graph, artifacts, destination):
+def generate(resolved, graph, artifacts, destination, supplements=None):
     pins = json.loads(resolved.read_text())['pins']
     nodes = {}
 
@@ -40,6 +41,7 @@ def generate(resolved, graph, artifacts, destination):
         raise ValueError('Resolved dependencies and graph differ')
     entries = []
     copies = []
+    additions = json.loads(supplements.read_text()) if supplements else {}
     for pin in sorted(pins, key=lambda p: p['identity']):
         identity = pin['identity']
         if not re.fullmatch(r'[a-z0-9][a-z0-9._-]*', identity):
@@ -61,6 +63,24 @@ def generate(resolved, graph, artifacts, destination):
             for relative, item in notice_files(source):
                 path = (Path(identity) / category / relative).as_posix()
                 documents.append({'title': f'{category}/{relative.as_posix()}', 'path': path})
+                copies.append((item, path))
+        if identity in additions:
+            extra = additions[identity]
+            if extra['revision'] != pin['state']['revision']:
+                raise ValueError(f'Supplement revision mismatch: {identity}')
+            base = supplements.parent.resolve(strict=True)
+            for document in extra['documents']:
+                relative = Path(document['path'])
+                if relative.is_absolute() or any(p in ('..', '.') for p in relative.parts):
+                    raise ValueError('Invalid supplement path')
+                item = (base / relative).resolve(strict=True)
+                if not item.is_relative_to(base):
+                    raise ValueError('Supplement escapes source directory')
+                item.read_text(encoding='utf-8')
+                if hashlib.sha256(item.read_bytes()).hexdigest() != document['sha256']:
+                    raise ValueError('Supplement hash mismatch')
+                path = (Path(identity) / 'supplement' / relative).as_posix()
+                documents.append({'title': f'supplement/{relative.as_posix()}', 'path': path})
                 copies.append((item, path))
         if not documents:
             raise ValueError(f'No notices for resolved package {identity}')

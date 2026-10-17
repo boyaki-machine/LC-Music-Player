@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "audioSourceURL": "https://github.com/sbooth/AudioXCFrameworks.git",
+  "audioSourceRevision": "03caaf2617f2eed0c705faf36e4206b59162456b",
+  "resolvedSHA256": "ed88305c54bfa87864d7f5a66830f5ca445e75e155570e1b8b8d68f6f3bd597d",
+  "deploymentTarget": "14.0",
+  "codecFrameworks": [
+    "lame",
+    "mpc",
+    "mpg123",
+    "sndfile",
+    "tta-cpp"
+  ],
+  "frameworks": [
+    "FLAC",
+    "lame",
+    "mpc",
+    "mpg123",
+    "ogg",
+    "opus",
+    "sndfile",
+    "tta-cpp",
+    "vorbis",
+    "wavpack"
+  ]
+}
