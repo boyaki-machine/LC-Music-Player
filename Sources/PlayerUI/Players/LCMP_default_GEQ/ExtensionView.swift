@@ -119,6 +119,10 @@ public struct ExtensionView: View {
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             Divider()
                             Text("このアプリについて")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(AppVersion.displayName)
+                                Text("バージョン \(AppVersion.text())").foregroundStyle(.secondary)
+                            }.textSelection(.enabled).accessibilityElement(children: .combine).accessibilityIdentifier("appVersion")
                             AcknowledgementsButton(action: showAcknowledgements)
                                 .frame(height: 24)
 

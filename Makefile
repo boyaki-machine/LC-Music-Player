@@ -39,6 +39,7 @@ distribution:
 test:
 	$(PYTHON) scripts/test_acknowledgements.py
 	$(PYTHON) scripts/test_distribution.py
+	$(PYTHON) scripts/test_app_version.py
 	@# Tests must not leave UserDefaults suite plists behind.
 	@set -eu; \
 	  count() { find "$$HOME/Library/Preferences" -maxdepth 1 -name 'lcmp-*.plist' 2>/dev/null | wc -l | tr -d ' '; }; \

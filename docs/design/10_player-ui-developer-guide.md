@@ -16,6 +16,7 @@ Sources/
 │   └── LCMPApp.swift                  アプリ・ウィンドウ・ファイル選択
 ├── PlayerUI/
 │   ├── PlayerView.swift               アプリ向けのメイン画面の入口
+│   ├── AppVersion.swift               正式名称とInfo.plistからのバージョン表示
 │   ├── Acknowledgements/
 │   │   └── Acknowledgements.swift     謝辞とライセンスの表示モデル・View
 │   └── Players/

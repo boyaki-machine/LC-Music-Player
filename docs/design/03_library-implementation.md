@@ -190,6 +190,7 @@
 ./scripts/swift.sh test --filter LibraryTests
 ./scripts/swift.sh test --filter ReferenceAndStoreTests
 ./scripts/swift.sh test --filter Shuffle
+./scripts/swift.sh test --filter LibraryOrganizationTests
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --filter ShufflePlaybackTests
 LCMP_UI_SNAPSHOTS="$PWD/build/library-ui-qa" ./scripts/swift.sh test --filter LibraryNativeViewTests
 ```

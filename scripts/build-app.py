@@ -3,6 +3,7 @@
 import argparse
 import json
 from acknowledgements import generate
+from app_version import resolve as resolve_version
 from project_license import bundle, documents
 from signing import sign_app
 from pathlib import Path
@@ -65,12 +66,14 @@ def main():
     shutil.copy2(ROOT / "Package.resolved", notices / "Package.resolved")
     shutil.copy2(ROOT / "docs/design/11_third-party-dependencies.md", notices / "dependency-notes.md")
     bundle(ROOT, contents / "Resources/LCMPLicense")
+    # One dotted version; the build number is its last part, not a separate value.
+    version = resolve_version(ROOT)
     with (contents / "Info.plist").open("wb") as file:
         plistlib.dump({
             "CFBundleExecutable": "LCMP", "CFBundleIdentifier": "local.lcmp.player",
             "CFBundleName": "LCMP", "CFBundleDisplayName": "LC Music Player",
-            "CFBundlePackageType": "APPL", "CFBundleShortVersionString": "0.0.2",
-            "CFBundleVersion": "2", "LSMinimumSystemVersion": "14.0",
+            "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
+            "CFBundleVersion": version, "LSMinimumSystemVersion": "14.0",
             "NSHighResolutionCapable": True,
         }, file)
     # Ad-hoc signing uses no private signing key and does not read Keychain.
