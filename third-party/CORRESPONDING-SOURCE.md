@@ -34,7 +34,7 @@ python3 LCMP/scripts/rebuild_frameworks.py --source AudioXCFrameworks --output .
 python3 relink.py --frameworks ../../../../modified-codecs/Frameworks --output ../../../../LCMP-modified.app
 ```
 
-ソースの変更は`AudioXCFrameworks/`で行います。frameworkの名前・install name・公開API/ABIが使用側と互換である必要があります。必要な一部だけを再構築した場合も、その`.framework`を格納したディレクトリを`--frameworks`へ指定できます。`--rebuild-taglib`との併用も可能です。再リンクスクリプトはframeworkとアプリをアドホック再署名し、deep/strict検証を行います。アプリの署名は同梱の`signing.py`が行い、配布版と同じくhardened runtimeを有効にし、アドホック署名のframeworkを差し替えられるようライブラリ検証だけを外します。元の署名を維持するための秘密鍵は必要ありません。
+ソースの変更は`AudioXCFrameworks/`で行います。frameworkの名前・install name・公開API/ABIが使用側と互換である必要があります。必要な一部だけを再構築した場合も、その`.framework`を格納したディレクトリを`--frameworks`へ指定できます。`--rebuild-taglib`との併用も可能です。再リンクスクリプトはframeworkとアプリをアドホック再署名し、deep/strict検証を行います。アプリの署名は同梱の`signing.py`が行い、配布版と同じくhardened runtimeとApp Sandboxを有効にし、アドホック署名のframeworkを差し替えられるようライブラリ検証だけを外します。元の署名を維持するための秘密鍵は必要ありません。
 
 ## 本体もソースから再構築する
 
@@ -44,4 +44,4 @@ python3 LCMP/scripts/build-app.py --configuration release --prefix-map --framewo
 
 この方法はSwiftPM依存を固定版で再取得するため、初回にネットワークを使います。上記のオブジェクトによる再リンクは依存の再取得を必要としません。取得したwrapperのバイナリを、同梱コーデックソースから作ったframeworkで置き換えます。
 
-アドホック署名は公証やDeveloper ID署名ではありません。別のMacでのGatekeeperの扱い、将来のストア配布やhardened runtimeの設定は別途確認してください。再リンク版の起動は通常のアプリと同じデータ保存先を使用するので、同時起動せず、必要なら検証専用の利用者環境を用意してください。
+アドホック署名は公証やDeveloper ID署名ではありません。別のMacでのGatekeeperの扱いや将来のストア配布は別途確認してください。再リンク版は通常のアプリと同じbundle IDとコンテナを使い、保存済みのライブラリとブックマークをそのまま読みます。同じデータ保存先を使用するので、同時起動せず、必要なら検証専用の利用者環境を用意してください。

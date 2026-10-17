@@ -13,7 +13,7 @@
 
 プレイリスト事前測定も同じprocessor/cacheを使う。追加と正常復元から全リスト所属曲を巡回し、ヒット時は走査を省く。背景の完了結果は表示/補正のON/OFFと独立して保存する。
 
-macOSアプリは専用`AudioPreprocessor(cache: .application)`をLibraryControllerへ注入する。保存先はユーザーのCachesディレクトリ配下`LCMP/Measurements/v1/measurements.sqlite`。FoundationでOSの保存場所を求め、ユーザー名をハードコードしない。再生成可能なデータとして扱い、OS等に削除された場合は再測定する。設定のUserDefaults、音源参照とリストのlibrary.jsonから分離する。
+macOSアプリは専用`AudioPreprocessor(cache: .application)`をLibraryControllerへ注入する。保存先はアプリのコンテナ内のCachesディレクトリ配下`LCMP/Measurements/v1/measurements.sqlite`。FoundationでOSの保存場所を求め、ユーザー名をハードコードしない。再生成可能なデータとして扱い、OS等に削除された場合は再測定する。設定のUserDefaults、音源参照とリストのlibrary.jsonから分離する。
 
 通常の`AudioPreprocessor()`と`.shared`は永続保存なし。テストや独立利用から実ユーザーのキャッシュへ書き込まず、必要な呼出元だけが保存先を注入する。
 

@@ -6,8 +6,13 @@ import tempfile
 
 # The hardened runtime makes dyld ignore DYLD_* injection. Library validation stays
 # off: ad-hoc frameworks have no Team ID, and the LGPL relink path replaces them.
-ENTITLEMENTS = {'com.apple.security.cs.disable-library-validation': True}
-
+# The sandbox reads only files the user picks; library bookmarks keep that access.
+ENTITLEMENTS = {
+    'com.apple.security.app-sandbox': True,
+    'com.apple.security.files.user-selected.read-write': True,
+    'com.apple.security.files.bookmarks.app-scope': True,
+    'com.apple.security.cs.disable-library-validation': True,
+}
 
 def sign_app(app):
     """Sign the bundle after its frameworks, then verify the whole bundle."""

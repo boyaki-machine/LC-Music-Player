@@ -25,9 +25,9 @@ make debug
 | `make distribution` | `build/distribution/LCMP-distribution.zip` | ソースから構築したコーデック・対応ソース・再リンク材料付き |
 | `make test` | ターミナルの結果 | 音声出力なしの通常回帰 |
 
-ReleaseとDebugでアプリの識別子やデータ保存先は共通です。同じ利用者環境で両方を同時起動するとライブラリを共有するため、使用する方を切り替えるときは先に終了してください。全曲測定の速度評価には最適化されたReleaseを使います。
+ReleaseとDebugでアプリの識別子やデータ保存先（App Sandboxのコンテナ`~/Library/Containers/local.lcmp.player`）は共通です。同じ利用者環境で両方を同時起動するとライブラリを共有するため、使用する方を切り替えるときは先に終了してください。全曲測定の速度評価には最適化されたReleaseを使います。
 
-各ビルドは、実行ファイル、動的framework、本体のApache 2.0 LICENSE/NOTICE、依存ライセンス、解決済みパッケージ情報をアプリ内へまとめ、ad-hoc署名と署名検証を行います。署名鍵は使いません。同梱仕様は[依存ライブラリ](./design/11_third-party-dependencies.md)を参照してください。
+各ビルドは、実行ファイル、動的framework、本体のApache 2.0 LICENSE/NOTICE、依存ライセンス、解決済みパッケージ情報をアプリ内へまとめ、hardened runtimeとApp Sandboxを付けたad-hoc署名と署名検証を行います。署名鍵は使いません。同梱仕様は[依存ライブラリ](./design/11_third-party-dependencies.md)を参照してください。
 
 任意の別出力先は変数で指定できます。パスに空白がある場合は変数の代入全体を引用符で囲みます。
 
@@ -87,6 +87,17 @@ codesign --verify --deep --strict build/source-package-check/LCMP-distribution/L
 ```
 
 検証は全収録ファイルのSHA256とsymlinkを照合し、欠落・追加・改ざんを検出します。依存版を更新した場合は、コーデックの対応ソースと補足原文を再確認して設定を更新する必要があります。ラッパーの版だけをコーデックの版や対応ソースの証明に使いません。ビルド途中の失敗では完成出力を公開せず、作業ディレクトリを片付けます。
+
+署名方式や同梱物を変えたときは、展開したアプリで再リンクも確認します。出力先には新しい`.app`のパスを指定します。
+
+```sh
+S=build/source-package-check/LCMP-distribution/LCMP.app/Contents/Resources/CorrespondingSource
+python3 "$S/relink.py" --rebuild-taglib --output build/relink-check/LCMP.app
+codesign -dv build/relink-check/LCMP.app   # flagsにruntimeが含まれる
+codesign -d --entitlements - build/relink-check/LCMP.app
+```
+
+改変版のTagLib（`--taglib-object`）と、同梱ソースから`LCMP/scripts/rebuild_frameworks.py`で再構築したframework（`--frameworks`）でも同様に確認します。起動を確かめるときは、利用者のコンテナを読み書きしないよう、bundle IDを変えたコピーを`signing.py`で再署名して使います。`DYLD_INSERT_LIBRARIES`で指定したdylibが起動中のプロセスに読み込まれない（`lsof -p <pid>`に現れない）ことも確認します。Sandbox下では注入したdylibがファイルを書けないため、マーカーファイルの有無では判定しません。
 
 このコマンドも公開・アップロード・Developer ID署名・公証を実行しません。本体のApache 2.0 LICENSE/NOTICEを`Contents/Resources/LCMPLicense`と対応ソース内の`LCMP/`へ同梱します。依存のソース提供・再リンク材料、署名・ストア等の配布条件をそれぞれ確認します。通常の`make archive`だけでは対応ソース付きの配布物にはなりません。
 
