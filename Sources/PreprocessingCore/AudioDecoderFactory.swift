@@ -4,26 +4,42 @@ import Foundation
 import SFBAudioEngine
 
 public enum AudioDecoderFactory {
+    /// Each accepted extension maps to exactly one decoder. SFBAudioEngine's default
+    /// content detection would let a renamed file reach any parser it bundles, so a
+    /// file whose content does not match its extension fails instead.
+    /// PCM containers use Core Audio, which receives fixes through OS updates.
+    static func decoderName(for url: URL) -> AudioDecoder.Name? {
+        switch url.pathExtension.lowercased() {
+        case "mp3": .MPEG
+        case "flac": .FLAC
+        case "m4a", "wav", "aif", "aiff": .coreAudio
+        default: nil
+        }
+    }
+
     public static func open(_ url: URL) throws -> any PCMDecoding {
+        guard let name = decoderName(for: url) else { throw PreprocessingFailure.invalidAudio }
         do {
-            let decoder = try AudioDecoder(url: url)
+            let decoder = try AudioDecoder(url: url, decoderName: name)
             try decoder.open()
             return decoder
         } catch {
             // SFBAudioEngine 0.14.0's Core Audio callback can report eofErr
-            // when opening a valid short M4A. Keep playback in SFBAudioEngine,
-            // but let AVAudioFile stream PCM for this specific read failure.
+            // when opening a valid short M4A, WAV or AIFF. Keep playback in SFBAudioEngine,
+            // but let AVAudioFile (also Core Audio) stream PCM for this specific read failure.
             let underlying = (error as NSError).userInfo[NSUnderlyingErrorKey] as? NSError
-            guard url.pathExtension.lowercased() == "m4a",
+            guard name == .coreAudio,
                   underlying?.domain == NSOSStatusErrorDomain,
                   underlying?.code == Int(kAudioFileEndOfFileError) else { throw error }
-            return try M4AFileDecoder(url: url)
+            let formats: Set<AudioFormatID> = url.pathExtension.lowercased() == "m4a"
+                ? [kAudioFormatMPEG4AAC, kAudioFormatAppleLossless] : [kAudioFormatLinearPCM]
+            return try AudioFileDecoder(url: url, formats: formats)
         }
     }
 }
 
 /// Used exclusively by SFBAudioEngine's decoding thread after enqueue.
-private final class M4AFileDecoder: NSObject, PCMDecoding {
+private final class AudioFileDecoder: NSObject, PCMDecoding {
     let inputSource: InputSource
     let sourceFormat: AVAudioFormat
     let processingFormat: AVAudioFormat
@@ -36,18 +52,16 @@ private final class M4AFileDecoder: NSObject, PCMDecoding {
     private let url: URL
     private var file: AVAudioFile?
 
-    init(url: URL) throws {
+    init(url: URL, formats: Set<AudioFormatID>) throws {
         let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
         let formatID = file.fileFormat.streamDescription.pointee.mFormatID
-        guard formatID == kAudioFormatMPEG4AAC || formatID == kAudioFormatAppleLossless else {
-            throw PreprocessingFailure.invalidAudio
-        }
+        guard formats.contains(formatID) else { throw PreprocessingFailure.invalidAudio }
         self.url = url
         self.file = file
         sourceFormat = file.fileFormat
         processingFormat = file.processingFormat
         length = file.length
-        decodingIsLossless = formatID == kAudioFormatAppleLossless
+        decodingIsLossless = formatID != kAudioFormatMPEG4AAC
         inputSource = try InputSource(for: url)
     }
 

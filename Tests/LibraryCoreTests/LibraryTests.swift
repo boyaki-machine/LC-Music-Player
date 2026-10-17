@@ -193,7 +193,15 @@ struct Fixture {
         #expect(recovered.recoveryMessage != nil)
         try recovered.save(original)
         #expect(try JSONLibraryStore(url: path).load() == original)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: path.deletingLastPathComponent().path).contains { $0.contains("damaged-") })
+        let saved = try FileManager.default.contentsOfDirectory(atPath: path.deletingLastPathComponent().path)
+        #expect(saved.contains { $0.contains("damaged-") })
+        // Paths and bookmarks are personal data: every library file is owner-only.
+        let directory = try FileManager.default.attributesOfItem(atPath: path.deletingLastPathComponent().path)
+        #expect((directory[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+        for name in saved {
+            let attributes = try FileManager.default.attributesOfItem(atPath: path.deletingLastPathComponent().appendingPathComponent(name).path)
+            #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "\(name)")
+        }
         try Data("{\"schemaVersion\":999}".utf8).write(to: path)
         #expect(throws: (any Error).self) { try JSONLibraryStore(url: path).load() }
         #expect(try String(contentsOf: path, encoding: .utf8).contains("999"))
@@ -349,6 +357,12 @@ struct Fixture {
         #expect(throws: (any Error).self) { try M3U8.decode(Data("#EXTM3U\n#EXT-X-VERSION:3\nsegment.ts".utf8), relativeTo: playlist) }
         #expect(throws: (any Error).self) { try M3U8.decode(Data("https://example.invalid/song.mp3".utf8), relativeTo: playlist) }
         #expect(throws: (any Error).self) { try M3U8.decode(Data([0xff]), relativeTo: playlist) }
+        let many = Data(String(repeating: "a.mp3\n", count: M3U8.maximumItems + 1).utf8)
+        #expect(throws: (any Error).self) { try M3U8.decode(many, relativeTo: playlist) }
+        #expect(try M3U8.decode(Data(String(repeating: "a.mp3\n", count: M3U8.maximumItems).utf8), relativeTo: playlist).count == M3U8.maximumItems)
+        let oversized = f.root.appendingPathComponent("oversized.m3u8")
+        try Data(count: M3U8.maximumBytes + 1).write(to: oversized)
+        #expect(throws: (any Error).self) { try M3U8.read(oversized) }
         try (String(decoding: data, as: UTF8.self) + "./missing.flac\n").write(to: playlist, atomically: true, encoding: .utf8)
         let model = LibraryController(playback: PlaybackController(makeBackend: { _ in TestBackend() }), store: MemoryStore(), references: TestReferences())
         await model.importM3U8(playlist)

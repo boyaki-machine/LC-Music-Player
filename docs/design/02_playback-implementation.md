@@ -20,7 +20,7 @@ LUFSとtrue peakを併用した固定ゲイン段、測定結果の受領と再�
 | `LocalFileAccess`／`FileLease` | 通常ファイルの読み取り確認とsecurity-scoped accessの保持・解放 |
 | `PlaybackBackend` | 再生ライブラリに依存しない操作と通知のインターフェース |
 | `SFBAudioBackend` | SFBAudioEngineによる再生、アプリ内音量、delegate通知の受け渡し |
-| `PreprocessingCore.AudioDecoderFactory` | PCMデコーダの生成・読み込みとM4A互換処理 |
+| `PreprocessingCore.AudioDecoderFactory` | 拡張子に固定したPCMデコーダの生成・読み込みと短い音源の互換処理 |
 
 UIは再生ライブラリを直接操作しません。`PlaybackController`が`PlaybackBackend`を通じて再生を制御します。OS依存のファイルアクセスもUIと再生制御から分離します。
 
@@ -97,11 +97,19 @@ UIに渡す状態とイベントはmain actorで処理します。SFBAudioEngine
 
 OSのシステム音量やデバイスのサンプルレートを変更するAPIは使用しません。単曲再生の音量値はアプリの実行中に保持し、永続化しません。製品のデバイス別音量仕様は[基本設計](00_basic-design.md)に記載します。
 
-## 5. M4Aの読み込み互換処理
+## 5. デコーダの選択と読み込み互換処理
 
-`AudioDecoderFactory`はSFBAudioEngineのデコーダ生成とopenを使用します。M4Aの読み込みが、下位の`NSOSStatusErrorDomain`のeofErr（-39）で失敗した場合に限り、AVAudioFileでPCMを読み取る`PCMDecoding`アダプターへ切り替えます。
+`AudioDecoderFactory`は拡張子ごとに一つのデコーダ名を指定してSFBAudioEngineのデコーダを生成・openします。SFBAudioEngineの既定の内容判定は使いません。内容判定では拡張子と無関係に、同梱する全デコーダ（Monkey's Audio、TTA、モジュール形式等）の解析処理へ到達し得るためです。
 
-アダプターは元音源がAAC／ALACであることを確認します。それ以外の形式や読み込み失敗を正常扱いしません。PCMの再生は引き続きSFBAudioEngineが担当します。依存ライブラリのソースは変更せず、互換処理をアプリ側のデコーダ生成に集約します。
+| 拡張子 | デコーダ |
+| --- | --- |
+| mp3 | mpg123（`.MPEG`） |
+| flac | libFLAC（`.FLAC`） |
+| m4a・wav・aif・aiff | Core Audio（`.coreAudio`） |
+
+PCMコンテナはOS更新で修正されるCore Audioで読み、libsndfileは使用しません。内容が拡張子と一致しないファイルは、指定したデコーダで読めなければ読み込み失敗として扱い、別の解析処理へ回しません。対応形式の正常な音源では、内容判定による従来の選択とPCMが一致することを回帰テストで確認します。
+
+Core Audioでの読み込みが、下位の`NSOSStatusErrorDomain`のeofErr（-39）で失敗した場合に限り、AVAudioFileでPCMを読み取る`PCMDecoding`アダプターへ切り替えます。SFBAudioEngine 0.14.0では短いM4A・WAV・AIFFで生じます。アダプターはm4aではAAC／ALAC、wav・aif・aiffではリニアPCMであることを確認します。それ以外の形式や読み込み失敗を正常扱いしません。PCMの再生は引き続きSFBAudioEngineが担当します。依存ライブラリのソースは変更せず、互換処理をアプリ側のデコーダ生成に集約します。
 
 ## 6. エラーの扱い
 

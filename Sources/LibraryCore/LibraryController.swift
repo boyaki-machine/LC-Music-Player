@@ -376,7 +376,7 @@ import AudioProcessingCore
         let scope = references.beginAccess(url)
         defer { withExtendedLifetime(scope) {} }
         do {
-            let data = try await Task.detached { try Data(contentsOf: url) }.value
+            let data = try await Task.detached { try M3U8.read(url) }.value
             let items = try M3U8.decode(data, relativeTo: url)
             var next = document
             let ids = try await stage(items, in: &next, allowMissing: true)

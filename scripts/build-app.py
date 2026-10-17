@@ -4,6 +4,7 @@ import argparse
 import json
 from acknowledgements import generate
 from project_license import bundle, documents
+from signing import sign_app
 from pathlib import Path
 import plistlib
 import re
@@ -73,8 +74,7 @@ def main():
             "NSHighResolutionCapable": True,
         }, file)
     # Ad-hoc signing uses no private signing key and does not read Keychain.
-    subprocess.run(["codesign", "--force", "--sign", "-", str(app)], check=True)
-    subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+    sign_app(app)
     print(app)
 
 

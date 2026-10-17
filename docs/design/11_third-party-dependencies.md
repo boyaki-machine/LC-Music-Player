@@ -10,7 +10,7 @@ LCMPのオリジナル成果物はApache License, Version 2.0（Apache-2.0）で
 
 ## アプリのリンクと同梱構成
 
-`scripts/build-app.py`は、macOS用frameworkを`LCMP.app/Contents/Frameworks`へコピーし、アプリから動的に読み込みます。LAME、Musepack、mpg123、libsndfile、TTAは動的frameworkです。TagLibはSwiftPMのソース依存としてLCMPへ静的リンクされるため、LGPL条件に対応するソースと再リンク材料を配布用ビルドに含めます。TagLib全体をMPLだけで扱えるとは仮定しません。ローカル起動用アプリには、秘密鍵やキーチェーンの認証を必要としないアドホック署名を使用します。
+`scripts/build-app.py`は、macOS用frameworkを`LCMP.app/Contents/Frameworks`へコピーし、アプリから動的に読み込みます。LAME、Musepack、mpg123、libsndfile、TTAは動的frameworkです。TagLibはSwiftPMのソース依存としてLCMPへ静的リンクされるため、LGPL条件に対応するソースと再リンク材料を配布用ビルドに含めます。TagLib全体をMPLだけで扱えるとは仮定しません。ローカル起動用アプリには、秘密鍵やキーチェーンの認証を必要としないアドホック署名を使用します。アプリの署名は`scripts/signing.py`に集約し、通常ビルド・配布準備用ビルド・再リンクの全てでhardened runtimeを有効にします。これによりdyldは`DYLD_INSERT_LIBRARIES`等の環境変数による注入を無視します。アドホック署名のframeworkにはTeam IDがなく、LGPLの再リンクではframeworkを差し替えるため、entitlementは`com.apple.security.cs.disable-library-validation`だけを付けます。
 
 各依存チェックアウトのLICENSE／COPYING／COPYRIGHT（内包するソースの表示を含む）と、SFBAudioEngineのACKNOWLEDGMENTSを`Contents/Resources/ThirdPartyLicenses`へコピーします。固定したPackage.resolvedも同梱します。
 
@@ -27,6 +27,17 @@ LCMPのオリジナル成果物はApache License, Version 2.0（Apache-2.0）で
 `third-party/notices.json`は対象revisionに結び付けた補足原文とSHA256を持ちます。TTAにはLGPLv3に加えてGPLv3原文を、TagLibにはLGPL-2.1原文を補完し、対象依存の文書選択欄に表示します。原文の取得元は[原文の収録方針](../../third-party/README.md)を参照してください。LGPLの版ごとの条件と、利用者自身のための改変・再リンク・そのデバッグ目的のリバースエンジニアリングの許可を保持します。ソース取得・再リンク手順は同梱の[対応ソース案内](../../third-party/CORRESPONDING-SOURCE.md)に従います。
 
 音源テストデータには、`scripts/generate-fixtures.py`で生成する独自の正弦波を使用します。市販音源や第三者の音楽を含めません。
+
+## 既知の脆弱性の確認
+
+音声ファイルとM3U8は信頼できない入力として扱います。アプリはネットワーク通信と外部プロセスの起動を行わないため、外部からの主な攻撃面はデコーダの解析処理です。到達できる解析処理は[デコーダの選択](02_playback-implementation.md)で拡張子ごとに固定したmpg123・libFLAC・Core Audioに限ります。他の同梱ライブラリはSFBAudioEngineのリンク上は残りますが、アプリの再生・測定経路からは呼びません。
+
+依存の固定版を変更するとき、および公開前には次を確認します。
+
+1. 同梱frameworkの実際の版を、ビルドしたアプリの`Contents/Frameworks/*/` の実行ファイルの版文字列（例：`strings -a <binary> | grep -E 'libFLAC|libsndfile|libopus|libVorbis'`）と`Package.resolved`で確認する。
+2. 各版について、NVD・Debian/Ubuntuのセキュリティトラッカー等で既知のCVEと修正版を確認する。
+3. 到達し得る解析処理（上記の固定デコーダ）に該当するものは、修正版への更新またはその経路の停止を行う。到達しない処理に該当するものは、到達しないことと更新予定を記録する。
+4. 確認日、対象版、該当CVE、判断を開発記録へ残す。
 
 ## 公開依存の取得時の認証
 

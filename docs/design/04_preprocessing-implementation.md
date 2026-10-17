@@ -15,7 +15,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
            └─ AnalysisCore → Player UI内の可視化
 ```
 
-`PreprocessingCore`はFoundation、AVFAudio、固定版SFBAudioEngineに依存し、LibraryCore、PlaybackCore、UIには依存しない。`AudioDecoderFactory`はここで共有し、PlaybackCoreからも参照できる。特定の短いM4Aでopen時にeofErrが生じる場合のAVAudioFile互換デコーダを維持し、既知の末尾位置では長さ0の正常な読み取りを返す。
+`PreprocessingCore`はFoundation、AVFAudio、固定版SFBAudioEngineに依存し、LibraryCore、PlaybackCore、UIには依存しない。`AudioDecoderFactory`はここで共有し、PlaybackCoreからも参照できる。拡張子ごとのデコーダ固定と、短いM4A・WAV・AIFFでopen時にeofErrが生じる場合のAVAudioFile互換デコーダは[再生実装](02_playback-implementation.md)に記載する。互換デコーダは既知の末尾位置では長さ0の正常な読み取りを返す。
 
 `AudioPreprocessing`は先頭準備・測定・Auditの非同期境界で、取消を確認して戻るまで呼出側がファイルアクセスを保持する。アプリは永続キャッシュを設定したAudioPreprocessorを`LibraryController(preprocessingEnabled: true, playlistPreprocessingEnabled: true, preprocessor: ...)`へ注入する。`playlistPreprocessingEnabled`の既定はfalseで、独立した呼出元や既存の単曲/次曲検証に出力形式依存の全リスト巡回を暗黙に追加しない。`false`は同期操作の互換経路であり、注入した再生バックエンドの単体検証等に使う。単曲再生の同期APIは残すが、アプリのリスト選択・再生開始は背景準備を経由する。
 

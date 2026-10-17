@@ -15,6 +15,7 @@ import tempfile
 from acknowledgements import notice_files
 from rebuild_frameworks import rebuild
 from project_license import documents
+from signing import sign_app
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_ROOTS = {'Sources', 'Tests', 'scripts', 'docs', 'third-party', 'prototypes'}
@@ -180,6 +181,7 @@ def main():
             if str(ROOT).encode() in target.read_bytes():
                 raise ValueError(f'Build-machine path remains in {target.name}')
         shutil.copyfile(ROOT / 'scripts/relink.py', staged_sources / 'relink.py')
+        shutil.copyfile(ROOT / 'scripts/signing.py', staged_sources / 'signing.py')
         shutil.copyfile(ROOT / 'third-party/RELINKING.txt', staged_sources / 'RELINKING.txt')
         shutil.copyfile(ROOT / 'third-party/CORRESPONDING-SOURCE.md', staged_sources / 'README.md')
         framework_hashes = {p.stem: digest(p / p.stem) for p in (app / 'Contents/Frameworks').glob('*.framework')}
@@ -199,8 +201,7 @@ def main():
         write_json(staged_sources / 'SOURCE-SHA256SUMS.json', inventory(staged_sources))
         source_destination = app / 'Contents/Resources/CorrespondingSource'
         shutil.move(str(staged_sources), source_destination)
-        subprocess.run(['codesign', '--force', '--sign', '-', str(app)], check=True)
-        subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
+        sign_app(app)
         for binary in [app / 'Contents/MacOS/LCMP',
                        *[p / p.stem for p in (app / 'Contents/Frameworks').glob('*.framework')]]:
             if str(ROOT).encode() in binary.read_bytes():

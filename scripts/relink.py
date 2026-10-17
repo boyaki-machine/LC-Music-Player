@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+from signing import sign_app
 
 
 def relink(source, output, taglib=None, rebuild_taglib=False, frameworks=None):
@@ -52,8 +53,7 @@ def relink(source, output, taglib=None, rebuild_taglib=False, frameworks=None):
             command.append(str(taglib if name == 'taglib.o' and taglib else source / 'Objects' / name))
         subprocess.run(command, check=True)
         subprocess.run(['strip', '-S', str(output / 'Contents/MacOS/LCMP')], check=True)
-        subprocess.run(['codesign', '--force', '--sign', '-', str(output)], check=True)
-        subprocess.run(['codesign', '--verify', '--deep', '--strict', str(output)], check=True)
+        sign_app(output)
     return output
 
 
