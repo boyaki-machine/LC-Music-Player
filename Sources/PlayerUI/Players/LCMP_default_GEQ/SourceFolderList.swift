@@ -6,8 +6,16 @@ struct SourceFolderGroup: Identifiable {
     let directory: URL?
     let tracks: [LibraryTrack]
     var name: String { directory.map { $0.lastPathComponent.isEmpty ? $0.path : $0.lastPathComponent } ?? "デフォルト" }
+    /// A parent folder becomes a group when it holds a folder-registered track or two or more
+    /// tracks. A file registered alone stays in the default group until another track from its
+    /// folder arrives. Only the display changes; the stored registration does not.
     static func groups(_ tracks: [LibraryTrack]) -> [Self] {
-        Dictionary(grouping: tracks) { $0.registration == .folder ? $0.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL : nil }
+        let byFolder = Dictionary(grouping: tracks) { $0.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL }
+        let folders = Set(byFolder.filter { _, members in members.count > 1 || members.contains { $0.registration == .folder } }.keys)
+        return Dictionary(grouping: tracks) { track -> URL? in
+            let folder = track.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL
+            return folders.contains(folder) ? folder : nil
+        }
             .map { Self(directory: $0.key, tracks: $0.value) }
             .sorted { ($0.directory?.path ?? "").localizedStandardCompare($1.directory?.path ?? "") == .orderedAscending }
     }
