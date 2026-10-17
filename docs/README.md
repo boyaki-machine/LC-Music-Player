@@ -26,6 +26,7 @@
 | [09 コンパクト画面の実装設計](design/09_compact-ui-implementation.md) | ウィンドウの配置、シークと音量、キーボードと支援技術、設定タブ、謝辞ウィンドウ |
 | [10 Player UI・可視化の開発ガイド](design/10_player-ui-developer-guide.md) | `LCMP_default_GEQ`のフォルダ構成、モジュール間のI/F、新しいUI・可視化の追加手順 |
 | [11 依存ライブラリと同梱構成](design/11_third-party-dependencies.md) | バージョンの固定、リンクと署名、ライセンス表示、対応ソース、脆弱性の確認 |
+| [12 オコジョ合唱団の実装設計](design/12_ermine-chorus-implementation.md) | 原画と中割り、キャラクタごとの演出、音域と感度、セルの描画、時計と寿命 |
 
 ## 設計書の書き方
 

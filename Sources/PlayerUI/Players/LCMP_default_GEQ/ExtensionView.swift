@@ -67,11 +67,14 @@ public struct ExtensionView: View {
                 case .playlist: playlistContent
                 case .source: sourceContent
                 case .visualization:
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(LCMPDefaultGEQ.name)
-                        Text("16列の周波数レベルを、緑・黄・赤のLEDで表示します。")
-                        Text("セルごとに点灯し、消灯後は淡い残光が消えていきます。音量やミュートを変えても表示は音源のレベルに反応します。")
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("表示するデザイン", selection: Binding(get: { presentation.visualizationDesign },
+                            set: { presentation.setVisualizationDesign($0) })) {
+                            ForEach(VisualizationDesign.allCases, id: \.self) { Text($0.title).tag($0) }
+                        }.pickerStyle(.radioGroup).accessibilityIdentifier("visualizationDesign")
+                        Text(presentation.visualizationDesign.summary).fixedSize(horizontal: false, vertical: true)
+                        Text("音量やミュートを変えても、表示は音源のレベルに反応します。切り替えても再生と音量は変わりません。")
+                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Spacer()
                     }
                 case .settings:

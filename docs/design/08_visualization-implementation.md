@@ -9,6 +9,7 @@
 - 画面と操作は[コンパクト画面](09_compact-ui-implementation.md)に記載する。
 - フォルダ構成・モジュールのI/F・新しい可視化の追加方法は、[Player UI・可視化の開発ガイド](10_player-ui-developer-guide.md)に記載する。
 - 外観の要件は[UI・UX設計](01_ui-ux-design.md)に記載する。
+- 同じ領域で切り替えるもう1つのデザインは、[オコジョ合唱団の実装設計](12_ermine-chorus-implementation.md)に記載する。
 
 ## 2. 要件
 
