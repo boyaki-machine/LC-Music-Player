@@ -30,8 +30,11 @@ public struct ExtensionView: View {
     @State private var checked: Set<UUID> = []
     @State private var confirmPlaylist: UUID?
     @State private var confirmSource: UUID?
+    @State private var confirmFolder: SourceFolderGroup?
+    @State private var rowDrag: RowDrag?
     @State private var reveal = UUID()
     private enum Screen { case list, chooser, manage, create, rename, add }
+    private struct RowDrag { let entryID: UUID; let index: Int; var offset: CGFloat }
     public init(playback: PlaybackController, presentation: PlayerPresentation, library: LibraryController, actions: LibraryActions,
                 resizeExtension: @escaping (CGFloat) -> Void = { _ in }, showAcknowledgements: @escaping () -> Void = {}) {
         self.playback = playback; self.presentation = presentation; self.library = library; self.actions = actions
@@ -119,6 +122,10 @@ public struct ExtensionView: View {
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             Divider()
                             Text("このアプリについて")
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(AppVersion.displayName)
+                                Text("バージョン \(AppVersion.text())").foregroundStyle(.secondary)
+                            }.textSelection(.enabled).accessibilityElement(children: .combine).accessibilityIdentifier("appVersion")
                             AcknowledgementsButton(action: showAcknowledgements)
                                 .frame(height: 24)
 
@@ -152,6 +159,10 @@ public struct ExtensionView: View {
             }
             .confirmationDialog("ライブラリと各プレイリストから除外します。元ファイルは削除しません。", isPresented: Binding(get: { confirmSource != nil }, set: { if !$0 { confirmSource = nil } })) {
                 Button("ライブラリから除外", role: .destructive) { if let id = confirmSource { library.excludeTrack(id) }; confirmSource = nil; sourceID = nil }
+            }
+            .confirmationDialog("「\(confirmFolder?.name ?? "")」の\(confirmFolder?.tracks.count ?? 0)曲を、ライブラリと各プレイリストから除外します。元ファイルは削除しません。",
+                                isPresented: Binding(get: { confirmFolder != nil }, set: { if !$0 { confirmFolder = nil } })) {
+                Button("フォルダを除外", role: .destructive) { if let group = confirmFolder { library.excludeTracks(group.tracks.map(\.id)) }; confirmFolder = nil }
             }
         }
     }
@@ -268,6 +279,12 @@ public struct ExtensionView: View {
     private func playlistRow(_ track: LibraryTrack, entry: PlaylistEntry, index: Int, list: MusicPlaylist) -> some View {
         let current = entry.id == library.document.currentEntryID
         let missing = library.unavailable[track.id] != nil
+        let dragged = rowDrag?.entryID == entry.id
+        let target = rowDrag.map { PlaylistReorder.target(from: $0.index, offset: $0.offset, count: list.entries.count) }
+        let insertion: Alignment? = rowDrag.flatMap { drag in
+            guard !dragged, target == index else { return nil }
+            return drag.index < index ? .bottom : .top
+        }
         return HStack(spacing: 6) {
             Text(current ? (playback.state == .playing ? "▸" : playback.state == .paused ? "Ⅱ" : "•") : String(format: "%02d", index + 1)).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
             Button {
@@ -283,7 +300,9 @@ public struct ExtensionView: View {
                     }.font(.system(size: 11))
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.buttonStyle(.plain).accessibilityLabel("\(track.name)\(current ? "、\(currentWord)" : "")\(missing ? "、音源を確認" : "")")
-                .overlay(PlaylistClickSurface(entryID: entry.id) { count in
+                .overlay(PlaylistClickSurface(entryID: entry.id, drag: library.canEdit && list.entries.count > 1 ? { phase in
+                    dragRow(phase, entry: entry, index: index, list: list)
+                } : nil) { count in
                     activatePlaylistRow(track, entry: entry, list: list, clickCount: count)
                 }.accessibilityHidden(true))
             PlaylistRowActions(name: track.name, canMoveUp: index > 0 && library.canEdit,
@@ -295,6 +314,26 @@ public struct ExtensionView: View {
         }.frame(height: 44).padding(.horizontal, 3)
             .overlay(alignment: .leading) { if current { RoundedRectangle(cornerRadius: 1).fill(indicator.opacity(playback.state == .playing ? 0.55 : 0.3)).frame(width: 2, height: 22) } }
             .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.05)).frame(height: 1) }
+            // The lifted row is opaque so the row it passes over does not show through.
+            .background { if dragged { RoundedRectangle(cornerRadius: 6).fill(Color(white: 0.27)).shadow(color: .black.opacity(0.4), radius: 6, y: 2) } }
+            .overlay(alignment: insertion ?? .top) {
+                // The insertion line sits in the 2pt gap between rows.
+                if insertion != nil {
+                    RoundedRectangle(cornerRadius: 1).fill(Color(red: 0.66, green: 0.85, blue: 0.74)).frame(height: 2)
+                        .offset(y: insertion == .bottom ? 2 : -2).allowsHitTesting(false)
+                }
+            }
+            .offset(y: dragged ? rowDrag?.offset ?? 0 : 0).zIndex(dragged ? 1 : 0)
+    }
+    private func dragRow(_ phase: PlaylistRowDrag, entry: PlaylistEntry, index: Int, list: MusicPlaylist) {
+        switch phase {
+        case .moved(let offset): rowDrag = RowDrag(entryID: entry.id, index: index, offset: offset)
+        case .cancelled: rowDrag = nil
+        case .ended(let offset):
+            rowDrag = nil
+            let target = PlaylistReorder.target(from: index, offset: offset, count: list.entries.count)
+            if target != index { library.moveEntry(entry.id, in: list.id, to: PlaylistReorder.destination(from: index, target: target)) }
+        }
     }
     private func activatePlaylistRow(_ track: LibraryTrack, entry: PlaylistEntry, list: MusicPlaylist, clickCount: Int) {
         if library.unavailable[track.id] != nil {
@@ -326,9 +365,8 @@ public struct ExtensionView: View {
                 Button(action: actions.folder) { Label("フォルダを登録…", systemImage: "folder.badge.plus") }
             }.buttonStyle(SoftGlassButtonStyle()).disabled(!library.canEdit)
             scrolled {
-                SourceFolderList(tracks: library.document.tracks, unavailable: library.unavailable) { id in
-                    sourceID = id; originID = nil
-                }
+                SourceFolderList(tracks: library.document.tracks, unavailable: library.unavailable, canRemove: library.canEdit,
+                                 select: { id in sourceID = id; originID = nil }, removeFolder: { confirmFolder = $0 })
             }
         }
     }

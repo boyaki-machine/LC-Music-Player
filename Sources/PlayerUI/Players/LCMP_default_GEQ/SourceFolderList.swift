@@ -6,8 +6,16 @@ struct SourceFolderGroup: Identifiable {
     let directory: URL?
     let tracks: [LibraryTrack]
     var name: String { directory.map { $0.lastPathComponent.isEmpty ? $0.path : $0.lastPathComponent } ?? "デフォルト" }
+    /// A parent folder becomes a group when it holds a folder-registered track or two or more
+    /// tracks. A file registered alone stays in the default group until another track from its
+    /// folder arrives. Only the display changes; the stored registration does not.
     static func groups(_ tracks: [LibraryTrack]) -> [Self] {
-        Dictionary(grouping: tracks) { $0.registration == .folder ? $0.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL : nil }
+        let byFolder = Dictionary(grouping: tracks) { $0.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL }
+        let folders = Set(byFolder.filter { _, members in members.count > 1 || members.contains { $0.registration == .folder } }.keys)
+        return Dictionary(grouping: tracks) { track -> URL? in
+            let folder = track.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL
+            return folders.contains(folder) ? folder : nil
+        }
             .map { Self(directory: $0.key, tracks: $0.value) }
             .sorted { ($0.directory?.path ?? "").localizedStandardCompare($1.directory?.path ?? "") == .orderedAscending }
     }
@@ -16,9 +24,11 @@ struct SourceFolderGroup: Identifiable {
 struct SourceFolderList: View {
     let tracks: [LibraryTrack]
     let unavailable: [UUID: String]
+    var canRemove = true
     let select: (UUID) -> Void
+    var removeFolder: (SourceFolderGroup) -> Void = { _ in }
     var body: some View {
-        SourceFolderSections(tracks: tracks) { track in
+        SourceFolderSections(tracks: tracks, removeFolder: canRemove ? removeFolder : nil) { track in
             Button { select(track.id) } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -37,6 +47,8 @@ struct SourceFolderList: View {
 /// Share folder identity, order and disclosure behavior across source and add screens.
 struct SourceFolderSections<Row: View>: View {
     let tracks: [LibraryTrack]
+    /// Shows a remove button on real folders. The default group has none against mistaken taps.
+    var removeFolder: ((SourceFolderGroup) -> Void)? = nil
     @ViewBuilder var row: (LibraryTrack) -> Row
     @State private var expanded: Set<String> = []
     var body: some View {
@@ -57,6 +69,13 @@ struct SourceFolderSections<Row: View>: View {
                         OverflowTitle(name: group.name).fontWeight(.medium)
                         Spacer(minLength: 4)
                         Text("\(group.tracks.count)曲").font(.system(size: 11)).foregroundStyle(.secondary)
+                        if let removeFolder, group.directory != nil {
+                            Button { removeFolder(group) } label: {
+                                Image(systemName: "trash").font(.system(size: 11)).frame(width: 24, height: 24).contentShape(Rectangle())
+                            }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.55))
+                                .accessibilityLabel("フォルダ「\(group.name)」を除外").help("フォルダ「\(group.name)」を除外")
+                                .padding(.vertical, -4)
+                        }
                     }
                 }.tint(.white.opacity(0.6))
             }

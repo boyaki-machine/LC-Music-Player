@@ -202,6 +202,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
     @objc private func minimizePlayer() { mainWindow.miniaturize(nil) }
     @objc private func revealPlayer() { showPlayer() }
+    /// The standard panel with the full name and the one dotted version; an empty `version`
+    /// drops the panel's parenthesized CFBundleVersion.
+    @objc private func showAbout() {
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(options: [.applicationName: AppVersion.displayName,
+                                                     .applicationVersion: AppVersion.text(), .version: ""])
+    }
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(chooseFile), #selector(importPlaylist): return !presentation.selectingFile && library.canEdit
@@ -222,7 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             }
             root.submenu = submenu; bar.addItem(root)
         }
-        menu("LCMP", items: [("LCMPを終了", #selector(quitPlayer), "q")])
+        menu("LCMP", items: [("LCMPについて", #selector(showAbout), ""), ("LCMPを終了", #selector(quitPlayer), "q")])
+        bar.items.last?.submenu?.insertItem(.separator(), at: 1)
         menu("ファイル", items: [("音楽ファイルを登録…", #selector(chooseFile), "o"), ("M3U8を読み込む…", #selector(importPlaylist), "i"), ("閉じる", #selector(closePlayer), "w")])
         let edit = NSMenuItem(); edit.title = "編集"
         let editMenu = NSMenu(title: "編集")

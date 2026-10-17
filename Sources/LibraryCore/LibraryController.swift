@@ -171,13 +171,29 @@ import AudioProcessingCore
         let to = from + offset; guard document.playlists[i].entries.indices.contains(to) else { return }
         var next = document; next.playlists[i].entries.swapAt(from, to); _ = commit(next)
     }
-    public func excludeTrack(_ id: UUID) {
-        guard canEdit else { return }
+    /// Moves an entry so that it lands at `destination`, an index in the list before the move
+    /// (`entries.count` puts it last), like `Array.move(fromOffsets:toOffset:)`.
+    public func moveEntry(_ id: UUID, in playlistID: UUID, to destination: Int) {
+        guard canEdit, let i = document.playlists.firstIndex(where: { $0.id == playlistID }),
+              let from = document.playlists[i].entries.firstIndex(where: { $0.id == id }),
+              (0...document.playlists[i].entries.count).contains(destination),
+              destination != from, destination != from + 1 else { return }
         var next = document
-        if currentTrack?.id == id { next.currentEntryID = nil }
-        next.tracks.removeAll { $0.id == id }
-        for i in next.playlists.indices { next.playlists[i].entries.removeAll { $0.trackID == id } }
+        let entry = next.playlists[i].entries.remove(at: from)
+        next.playlists[i].entries.insert(entry, at: destination > from ? destination - 1 : destination)
         _ = commit(next)
+    }
+    public func excludeTrack(_ id: UUID) { excludeTracks([id]) }
+    /// Removes tracks from the library and every playlist in one saved commit. Audio files stay.
+    public func excludeTracks(_ ids: [UUID]) {
+        let ids = Set(ids)
+        guard canEdit, !ids.isEmpty else { return }
+        var next = document
+        if let current = currentTrack?.id, ids.contains(current) { next.currentEntryID = nil }
+        next.tracks.removeAll { ids.contains($0.id) }
+        for i in next.playlists.indices { next.playlists[i].entries.removeAll { ids.contains($0.trackID) } }
+        let removed = document.tracks.count - next.tracks.count
+        if commit(next), removed > 1 { message = "\(removed)曲をライブラリから除外しました。" }
     }
 
     // MARK: File references and availability

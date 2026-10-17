@@ -414,3 +414,67 @@ extension LibraryNativeViewTests {
         #expect(litPixels(try render()) == 0)
     }
 }
+
+extension LibraryNativeViewTests {
+    @Test func draggingAHostedRowMovesItAndShortMovesStayClicks() async throws {
+        var doc = LibraryDocument()
+        for index in 0..<5 {
+            let track = LibraryTrack(name: "並べ替え \(index)", reference: TrackReference(bookmark: Data([1]), lastKnownURL: URL(fileURLWithPath: "/reorder-\(index).wav")))
+            doc.tracks.append(track); doc.playlists[0].entries.append(PlaylistEntry(trackID: track.id))
+        }
+        let store = UIStore(doc), playback = PlaybackController(makeBackend: { _ in UIBackend() })
+        let library = LibraryController(playback: playback, store: store, references: UIReferences())
+        defer { library.shutdown() }
+        let presentation = PlayerPresentation(); presentation.toggleExtension()
+        let actions = LibraryActions(files: { _ in }, folder: {}, repair: { _ in }, importPlaylist: {}, exportPlaylist: { _ in })
+        let host = NSHostingView(rootView: ExtensionView(playback: playback, presentation: presentation, library: library, actions: actions))
+        host.frame = NSRect(x: 0, y: 0, width: 360, height: 400)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host; window.setFrameOrigin(NSPoint(x: -10000, y: -10000)); window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        func order() -> [String] { library.document.playlists[0].entries.compactMap { library.track($0.trackID)?.name.last.map(String.init) } }
+        func surface(_ entry: UUID) throws -> PlaylistClickSurface.ClickView {
+            host.layoutSubtreeIfNeeded()
+            let view = try #require(allViews(host).compactMap { $0 as? PlaylistClickSurface.ClickView }.first { $0.identifier?.rawValue == entry.uuidString })
+            view.tracksDragInLoop = false
+            return view
+        }
+        func event(_ type: NSEvent.EventType, _ location: NSPoint) throws -> NSEvent {
+            try #require(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        /// Drags by `rows` row pitches; window coordinates grow upward, so a drag down lowers y.
+        func drag(_ index: Int, rows: CGFloat, snapshot: String? = nil) async throws {
+            let view = try surface(library.document.playlists[0].entries[index].id)
+            let start = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
+            let end = NSPoint(x: start.x + 3, y: start.y - rows * PlaylistReorder.pitch)
+            view.mouseDown(with: try event(.leftMouseDown, start))
+            view.mouseDragged(with: try event(.leftMouseDragged, NSPoint(x: start.x, y: start.y - 3)))
+            view.mouseDragged(with: try event(.leftMouseDragged, end))
+            if let snapshot, let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
+                host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100))
+                try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: rep)
+                try #require(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: directory).appendingPathComponent(snapshot))
+            }
+            view.mouseUp(with: try event(.leftMouseUp, end))
+            try await Task.sleep(for: .milliseconds(40))
+        }
+        host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(100))
+        try await drag(0, rows: 2.2, snapshot: "playlist-row-drag.png")
+        #expect(order() == ["1", "2", "0", "3", "4"])
+        try await drag(4, rows: -9)
+        #expect(order() == ["4", "1", "2", "0", "3"])
+        // A drag shorter than half a row keeps the order and never counts as a click.
+        try await drag(1, rows: 0.3)
+        #expect(order() == ["4", "1", "2", "0", "3"] && library.currentEntry == nil)
+        // Without edits the row is click-only.
+        library.shutdown()
+        let view = try surface(library.document.playlists[0].entries[0].id)
+        #expect(view.drag == nil)
+        #expect(order() == ["4", "1", "2", "0", "3"])
+        #expect(store.document == library.document)
+    }
+}
