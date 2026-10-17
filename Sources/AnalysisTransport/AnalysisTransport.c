@@ -94,7 +94,9 @@ static OSStatus capture(void *context, AudioUnitRenderActionFlags *flags,
     }
     const float *right = NULL;
     if (data->mNumberBuffers > 1) {
-        if (data->mBuffers[1].mNumberChannels != 1 || data->mBuffers[1].mDataByteSize < frames * sizeof(float)) goto done;
+        if (data->mBuffers[1].mNumberChannels != 1 || data->mBuffers[1].mDataByteSize < frames * sizeof(float)) {
+            atomic_fetch_add_explicit(&q->dropped, 1, memory_order_relaxed); goto done;
+        }
         right = data->mBuffers[1].mData;
     }
     LCMPPCMStamp stamp = {0};

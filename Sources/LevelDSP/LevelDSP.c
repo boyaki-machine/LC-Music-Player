@@ -1,4 +1,5 @@
 #include "LevelDSP.h"
+#include <float.h>
 #include <math.h>
 #include <stdlib.h>
 
@@ -90,3 +91,41 @@ void lcmp_level_flush_peak(LCMPLevelMeter *m) {
 double lcmp_level_sample_peak(const LCMPLevelMeter *m) { return m->sample_peak; }
 double lcmp_level_true_peak(const LCMPLevelMeter *m) { return fmax(m->sample_peak,m->true_peak); }
 uint64_t lcmp_level_frames(const LCMPLevelMeter *m) { return m->frames; }
+
+/* Native sample peaks. Branch-free so -O2 vectorizes them; a NaN or infinity
+   clears the returned flag instead of ending the loop early. */
+int lcmp_peak_f32(const float *s, size_t count, size_t stride, double *peak) {
+    float m=0; int finite=1;
+    for (size_t i=0;i<count;++i) { float a=fabsf(s[i*stride]); finite&=(a<=FLT_MAX); m=a>m ? a : m; }
+    *peak=m; return finite;
+}
+int lcmp_peak_f64(const double *s, size_t count, size_t stride, double *peak) {
+    double m=0; int finite=1;
+    for (size_t i=0;i<count;++i) { double a=fabs(s[i*stride]); finite&=(a<=DBL_MAX); m=a>m ? a : m; }
+    *peak=m; return finite;
+}
+double lcmp_peak_i16(const int16_t *s, size_t count, size_t stride) {
+    int m=0;
+    for (size_t i=0;i<count;++i) { int a=abs((int)s[i*stride]); m=a>m ? a : m; }
+    return m/32768.0;
+}
+double lcmp_peak_i32(const int32_t *s, size_t count, size_t stride) {
+    int64_t m=0;
+    for (size_t i=0;i<count;++i) { int64_t a=llabs((int64_t)s[i*stride]); m=a>m ? a : m; }
+    return (double)m/2147483648.0;
+}
+double lcmp_peak_packed(const uint8_t *s, size_t count, size_t frame_bytes,
+                        unsigned width, unsigned bits, int big_endian, int aligned_high) {
+    if (!bits || bits > 32 || bits > width*8) return 0;
+    uint64_t mask=(1ULL<<bits)-1, sign=1ULL<<(bits-1);
+    int64_t m=0;
+    for (size_t i=0;i<count;++i) {
+        const uint8_t *b=s+i*frame_bytes; uint64_t x=0;
+        for (unsigned k=0;k<width;++k) x|=(uint64_t)b[k]<<(big_endian ? (width-1-k)*8 : k*8);
+        if (aligned_high) x>>=width*8-bits;
+        x&=mask;
+        int64_t v=(x&sign) ? (int64_t)x-(int64_t)(1ULL<<bits) : (int64_t)x, a=v<0 ? -v : v;
+        m=a>m ? a : m;
+    }
+    return (double)m/(double)(1ULL<<(bits-1));
+}

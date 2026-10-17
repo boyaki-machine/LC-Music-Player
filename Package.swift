@@ -17,7 +17,7 @@ let package = Package(
         .target(name: "AnalysisCore", dependencies: ["AnalysisTransport"]),
         .target(name: "LevelDSP", cSettings: [.unsafeFlags(["-O2"])]),
         .target(name: "AudioProcessingCore", dependencies: ["LevelDSP"]),
-        .target(name: "PreprocessingCore", dependencies: ["SFBAudioEngine", "AudioProcessingCore", "CSQLite"]),
+        .target(name: "PreprocessingCore", dependencies: ["SFBAudioEngine", "AudioProcessingCore", "LevelDSP", "CSQLite"]),
         .target(name: "PlaybackCore", dependencies: ["SFBAudioEngine", "AnalysisCore", "PreprocessingCore", "AudioProcessingCore"]),
         .target(name: "LibraryCore", dependencies: ["PlaybackCore", "PreprocessingCore", "AudioProcessingCore"]),
         .target(name: "VisualizationKit"),

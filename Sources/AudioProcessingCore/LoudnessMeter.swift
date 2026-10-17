@@ -12,6 +12,8 @@ public final class LoudnessMeter {
     private var absoluteSum = 0.0
     private var absoluteCount = 0
     private var finished = false
+    /// Reused per call; 8 slots exceed lcmp_level_push's bound for an 8192-frame chunk at 32 kHz or above.
+    private var blocks = [Double](repeating: 0, count: 8)
     public static var temporaryDirectory: URL { FileManager.default.temporaryDirectory.appendingPathComponent("LCMP-level-energy", isDirectory: true) }
     public init(profile: MeasurementProfile, energyByteLimit: Int = 64 * 1024 * 1024) throws {
         guard energyByteLimit >= 8, let meter = lcmp_level_create(profile.sampleRate, profile.channels) else { throw AudioProcessingFailure.unsupportedProfile }
@@ -38,7 +40,6 @@ public final class LoudnessMeter {
     }
     public func consume(left: UnsafePointer<Float>, right: UnsafePointer<Float>?, frames: UInt32) throws {
         guard !finished, frames <= 8192 else { throw AudioProcessingFailure.invalidMeasurement }
-        var blocks = [Double](repeating: 0, count: 8)
         let count = lcmp_level_push(meter, left, right, frames, &blocks, UInt32(blocks.count))
         guard count >= 0 else { throw AudioProcessingFailure.invalidMeasurement }
         let length = Int(count) * 8
