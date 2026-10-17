@@ -54,8 +54,7 @@ private actor HeldPreprocessor: AudioPreprocessing {
             .appendingPathComponent("PlaybackCoreTests/Fixtures/tone.wav")
         let a = fixture.root.appendingPathComponent("a.wav"), b = fixture.root.appendingPathComponent("b.wav")
         try FileManager.default.copyItem(at: source, to: a); try FileManager.default.copyItem(at: source, to: b)
-        let suite = "lcmp-next-transfer-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         let worker = HeldPreprocessor(b, prefix: action == "prefix")
         let playback = PlaybackController(); playback.setVolume(0)
         let store = MemoryStore(), refs = TestReferences()
@@ -127,8 +126,7 @@ private actor HeldPreprocessor: AudioPreprocessing {
             .appendingPathComponent("PlaybackCoreTests/Fixtures/tone.wav")
         let url = fixture.root.appendingPathComponent("a.wav")
         try FileManager.default.copyItem(at: source, to: url)
-        let suite = "lcmp-row-click-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         let worker = HeldPreprocessor(url, prefix: true)
         let playback = PlaybackController(); playback.setVolume(0)
         let store = MemoryStore(), refs = TestReferences()
@@ -174,8 +172,7 @@ private actor HeldPreprocessor: AudioPreprocessing {
         var rows: [[String: Any]] = []
         for natural in [false, true] {
             for run in 0..<5 {
-                let suite = "lcmp-promotion-profile-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-                defer { defaults.removePersistentDomain(forName: suite) }
+                let defaults = MemoryPreferences()
                 let worker = AudioPreprocessor(collectMeasurementTimings: true), refs = TestReferences()
                 let playback = PlaybackController(); playback.setVolume(0)
                 let model = LibraryController(playback: playback, store: MemoryStore(), references: refs,

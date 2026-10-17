@@ -41,8 +41,7 @@ import PreprocessingCore
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_PREPROCESS_SOAK"] == "1" || ProcessInfo.processInfo.environment["LCMP_NORMALIZATION_SOAK"] == "1"))
     func tenMinutePlaybackPreparationAndMeasurementRemainBounded() async throws {
         let directory = try #require(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_FIXTURES"])
-        let suite = "lcmp-soak-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         let refs = TestReferences(), playback = PlaybackController()
         playback.setVolume(0)
         playback.configureAnalysis(try .init(bandCount: 16, framesPerSecond: 30))
@@ -110,8 +109,7 @@ import PreprocessingCore
         let directory = try #require(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_FIXTURES"])
         var rows: [[String: Any]] = []
         for enabled in [false, true] {
-            let suite = "lcmp-level-profile-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-            defer { defaults.removePersistentDomain(forName: suite) }
+            let defaults = MemoryPreferences()
             let playback = PlaybackController(); playback.setVolume(0)
             let model = LibraryController(playback: playback, store: MemoryStore(), references: TestReferences(),
                                           preprocessingEnabled: true, preferences: defaults)
@@ -136,8 +134,7 @@ import PreprocessingCore
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_PLAYLIST_SOAK"] == "1"))
     func tenMinutePlaylistSweepWithPlaybackInterruptions() async throws {
         let root = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["LCMP_PREPROCESS_FIXTURES"]))
-        let suite = "lcmp-playlist-soak-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         defaults.set(true, forKey: "normalizeVolume"); defaults.set(true, forKey: "measureMaximumVolume")
         let processor = AudioPreprocessor(cache: .init(url: root.appendingPathComponent("cache-\(UUID())/measurements.sqlite"),
             program: .init(applicationVersion: "soak", build: "1", executableDigest: "playlist-soak", environment: "test")))

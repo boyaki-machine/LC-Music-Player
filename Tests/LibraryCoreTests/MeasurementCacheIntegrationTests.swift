@@ -41,8 +41,7 @@ import AudioProcessingCore
         let f = try Fixture(); defer { f.cleanup() }
         let config = MeasurementCacheConfiguration(url: f.root.appendingPathComponent("cache/measurements.sqlite"),
             program: .init(applicationVersion: "test", build: "1", executableDigest: "test", environment: "test"))
-        let suite = "lcmp-cache-library-\(UUID())", defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = MemoryPreferences()
         let store = MemoryStore(), refs = TestReferences(), playback = PlaybackController()
         playback.setVolume(0)
         let processor = AudioPreprocessor(cache: config)

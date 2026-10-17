@@ -39,4 +39,12 @@ distribution:
 test:
 	$(PYTHON) scripts/test_acknowledgements.py
 	$(PYTHON) scripts/test_distribution.py
-	LCMP_TEST_AUDIO_OUTPUT=0 ./scripts/swift.sh test --no-parallel
+	@# Tests must not leave UserDefaults suite plists behind.
+	@set -eu; \
+	  count() { find "$$HOME/Library/Preferences" -maxdepth 1 -name 'lcmp-*.plist' 2>/dev/null | wc -l | tr -d ' '; }; \
+	  before=$$(count); \
+	  LCMP_TEST_AUDIO_OUTPUT=0 ./scripts/swift.sh test --no-parallel; \
+	  after=$$(count); \
+	  if [ "$$after" -gt "$$before" ]; then \
+	    printf 'Tests left %s new lcmp-*.plist file(s) in ~/Library/Preferences.\n' "$$((after - before))" >&2; exit 1; \
+	  fi
