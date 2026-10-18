@@ -6,7 +6,8 @@ import LevelDSP
 public final class LoudnessMeter {
     private let meter: OpaquePointer
     private let fd: Int32
-    private let url: URL
+    /// Internal so tests can check this meter's own spool without counting other meters' files.
+    let url: URL
     private let limit: Int
     private var bytes = 0
     private var absoluteSum = 0.0

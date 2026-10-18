@@ -68,7 +68,8 @@ struct AudioOutputTests {
         controller.select(url)
         #expect(controller.error == nil)
         controller.togglePlayPause()
-        try await Task.sleep(for: .milliseconds(200))
+        // Wait for observed progress: a loaded parallel run can delay the MainActor well past a fixed sleep.
+        try await waitUntil { controller.currentTime > 0 && controller.analysisFrame != nil }
         #expect(controller.state == .playing)
         #expect(controller.currentTime > 0)
         let firstGeneration = try #require(controller.analysisFrame?.generation)
@@ -79,16 +80,17 @@ struct AudioOutputTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(abs(controller.currentTime - paused) < 0.03)
         controller.togglePlayPause()
-        try await Task.sleep(for: .milliseconds(100))
+        try await waitUntil { controller.currentTime > paused && controller.analysisFrame != nil }
         #expect(controller.state == .playing)
         #expect(controller.currentTime > paused)
-        #expect(controller.analysisFrame?.generation != firstGeneration)
+        #expect(controller.analysisFrame != nil && controller.analysisFrame?.generation != firstGeneration)
         let beforeSeekGeneration = controller.analysisFrame?.generation
         controller.seek(to: 1.2)
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(controller.state == .playing)
-        #expect(controller.currentTime >= 1.2 && controller.currentTime < 1.5)
-        #expect(controller.analysisFrame?.generation != beforeSeekGeneration)
+        // The position moves to the target at once; checking before any wait keeps this independent of load.
+        #expect(controller.currentTime >= 1.2 && controller.currentTime < 1.3)
+        try await waitUntil { controller.currentTime > 1.2 && controller.analysisFrame != nil }
+        #expect(controller.state == .playing && controller.currentTime >= 1.2)
+        #expect(controller.analysisFrame != nil && controller.analysisFrame?.generation != beforeSeekGeneration)
         controller.togglePlayPause()
         controller.seek(to: 0.7)
         #expect(controller.state == .paused)
@@ -112,10 +114,7 @@ struct AudioOutputTests {
         #expect(controller.currentTime == 0)
         #expect(controller.analysisFrame == nil)
         controller.togglePlayPause()
-        for _ in 0..<175 {
-            if controller.state != .playing { break }
-            try await Task.sleep(for: .milliseconds(20))
-        }
+        try await waitUntil(seconds: 10) { controller.state != .playing }
         #expect(controller.error == nil)
         #expect(controller.state == .finished)
         if let before, let after = systemOutputVolume() {
@@ -191,6 +190,11 @@ struct AudioOutputTests {
         controller.stop()
         try await Task.sleep(for: .milliseconds(100))
         #expect(controller.analysisFrame == nil && controller.state == .stopped)
+    }
+
+    private func waitUntil(seconds: Double = 2, _ predicate: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(seconds)
+        while !predicate(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
     }
 
     private func analysisFrame(_ controller: PlaybackController, bands: Int) async throws -> AnalysisFrame {

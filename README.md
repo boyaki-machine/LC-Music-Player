@@ -63,7 +63,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 ```
 
 - 1つ目は通常のテストで、音声を出力しません。scriptsのPythonのテスト（謝辞・配布物・バージョン・アイコン・DMG）も実行し、テストが`~/Library/Preferences`に設定ファイルを残していないことも確かめます。
-- 2つ目は、既定の出力先へ小さいテスト音を送る実再生のテストです。短い音源の観測が他のテストに妨げられないよう、全体を実行するときは`--no-parallel`を明示します。
+- 2つ目は、既定の出力先へ小さいテスト音を送る実再生のテストです。`--no-parallel`を外して並列に実行しても成功します。
 - 詳しくは[ビルド・配置手順のテスト](docs/build-and-deploy.md#テスト)を参照してください。
 - ファイル選択画面、聴感、デバイスの切替の手動確認の方法は[基本再生機能の実装設計](docs/design/02_playback-implementation.md)を参照してください。
 

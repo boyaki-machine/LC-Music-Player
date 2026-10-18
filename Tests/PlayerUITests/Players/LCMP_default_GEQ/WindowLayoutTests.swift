@@ -9,7 +9,9 @@ struct WindowLayoutTests {
         try await Task.sleep(for: .milliseconds(130))
         #expect(model.seekVisible)
         model.scheduleSeekHide()
-        try await Task.sleep(for: .milliseconds(130))
+        // The 80ms timer runs on the MainActor; a parallel run can hold it well past a fixed sleep.
+        let deadline = ContinuousClock.now + .seconds(2)
+        while model.seekVisible, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(5)) }
         #expect(!model.seekVisible)
         model.seekVisible = true
         model.closeOverlays()

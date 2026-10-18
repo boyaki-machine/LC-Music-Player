@@ -173,8 +173,12 @@ private func sample(_ id: UUID, _ sequence: UInt64, level: Float = 1,
         var driver: VisualizationDriver? = VisualizationDriver()
         weak let weakDriver = driver
         driver?.synchronize(activity: .playing, visible: true)
-        driver?.receive(frame(levels: Array(repeating: 0.6, count: 16)))
+        let generation = UUID()
+        driver?.receive(frame(levels: Array(repeating: 0.6, count: 16), generation: generation))
         try await Task.sleep(for: .milliseconds(80))
+        #expect(driver?.isRunning == true)
+        // A loaded run can stretch the sleep past the 250ms missing interval, which clears the display by design.
+        driver?.receive(frame(levels: Array(repeating: 0.6, count: 16), generation: generation, sequence: 2))
         #expect(driver?.snapshot.counts[0] == 12 && driver?.isRunning == true)
         driver?.synchronize(activity: .paused, visible: true)
         #expect(driver?.isRunning == false && driver?.snapshot.counts[0] == 12)

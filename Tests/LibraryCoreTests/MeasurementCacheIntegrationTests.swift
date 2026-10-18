@@ -74,16 +74,11 @@ private actor AuditedPreprocessor: AudioPreprocessing {
         playback.setVolume(0)
         let processor = AudioPreprocessor(cache: config)
         var model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true, preferences: defaults, preprocessor: processor)
-        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("PlaybackCoreTests/Fixtures/tone.wav")
-        var urls: [URL] = []
-        for n in 0..<2 {
-            let url = f.root.appendingPathComponent("\(n).wav"); try FileManager.default.copyItem(at: fixture, to: url); urls.append(url)
-        }
+        // Long enough that no natural finish advances playback while a loaded run waits.
+        let urls = try (0..<2).map { try audioFile(f.root, name: "\($0).wav", duration: 5) }
         let list = try #require(model.document.currentPlaylistID)
         await model.importFiles(urls, into: list)
         model.setNormalizesVolume(true)
-        // Pause promptly so a 0.25s original fixture doesn't finish before assertions.
         model.playPlaylist(list)
         try await cacheWait { model.currentTrackMetrics != nil && playback.state == .playing }
         let first = try #require(model.currentTrackMetrics)
