@@ -230,7 +230,7 @@ make test
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 ```
 
-- `--no-parallel`を外してスイートを並列に実行しても成功します。
+- `--filter LibraryCoreTests`に絞った場合は、`--no-parallel`を外してスイートを並列に実行しても成功します。ほかのターゲットを含む全体では、`--no-parallel`を外さないでください。
 - 実出力のテストを追加するときは、負荷が高くても待つ間に自然送りが起きない長さ（数秒以上）の音源を使います。共有の`AudioPreprocessor.shared`ではなく専用のインスタンスを渡し、LibraryControllerが裏で行うキャッシュの照合などは、完了を確かめてから次へ進みます。
 
 ## 謝辞情報の更新
