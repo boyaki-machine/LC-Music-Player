@@ -8,7 +8,7 @@
 
 画調は日本の手描きアニメ・漫画を基調とする。動きは、手で描いた原画を順に見せ、原画のあいだを中割りで埋める方式で作る。物理演算や連続関数による動きは使わない。
 
-画調と原画の最初の合意には[オコジョ合唱団のモック](../../prototypes/ermine-chorus.html)を使った。並び・連動・背景は、その後に実機で調整した本書と実装が正である。製品の仕様は[UI・UX設計](01_ui-ux-design.md#5-可視化デザインの構成)、Player UIへの組み込みは[開発ガイド](10_player-ui-developer-guide.md)に記載する。
+製品の仕様は[UI・UX設計](01_ui-ux-design.md#5-可視化デザインの構成)、Player UIへの組み込みは[開発ガイド](10_player-ui-developer-guide.md)に記載する。
 
 ## 2. 要件
 
@@ -161,6 +161,5 @@ LCMP_UI_SNAPSHOTS=build/ermine-qa \
 
 ## 6. 参照
 
-- [オコジョ合唱団のモック](../../prototypes/ermine-chorus.html)：原画・表情・演出の見本。`?t=秒`で模擬の再生を止めて表示する。
 - [可視化の実装設計](08_visualization-implementation.md)：解析結果の提示時刻と寿命の共通の考え方。
 - [Player UI・可視化の開発ガイド](10_player-ui-developer-guide.md)：可視化デザインの切り替えと配置。

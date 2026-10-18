@@ -64,7 +64,6 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 | `scripts/` | Swiftの実行、アプリの作成・署名、配布物の作成、テスト音源の生成 |
 | `docs/` | ビルド・配置手順と設計書（[文書一覧](docs/README.md)） |
 | `third-party/` | 第三者ライセンスの補完と、対応ソースの案内 |
-| `prototypes/` | 画面の外観の見本（HTML） |
 | `Makefile` | ビルド、ZIPの作成、対応ソース付き配布物、通常のテストの入口 |
 | `Package.swift`／`Package.resolved` | SwiftPMの定義と、固定した依存のバージョン |
 | `AGENTS.md`／`CLAUDE.md` | コーディングエージェント向けの作業指示 |

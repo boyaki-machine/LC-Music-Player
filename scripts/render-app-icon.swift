@@ -1,6 +1,6 @@
 // Renders the LCMP app icon (glowing play triangle over a level meter) into an .icns file.
 // Usage: swift scripts/render-app-icon.swift assets/AppIcon.icns
-// The drawing matches the B3 mockup in prototypes/app-icon.html, on a 1024 canvas with y pointing down.
+// The drawing is the chosen B3 design (see the app icon in the UI/UX design), on a 1024 canvas with y pointing down.
 import CoreGraphics
 import Foundation
 import ImageIO
