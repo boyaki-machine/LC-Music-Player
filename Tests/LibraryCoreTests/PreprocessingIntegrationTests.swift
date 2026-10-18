@@ -1,26 +1,12 @@
-import AVFAudio
 import Foundation
 import Testing
 import PlaybackCore
 @testable import LibraryCore
 
-@MainActor private func waitFor(_ predicate: () -> Bool, seconds: Double = 4) async throws {
+@MainActor private func waitFor(_ predicate: () -> Bool, seconds: Double = 10) async throws {
     let deadline = ContinuousClock.now + .seconds(seconds)
     while !predicate(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
     #expect(predicate())
-}
-@MainActor private func audioFile(_ root: URL, name: String, duration: Double = 3, peak: Float = 0.3) throws -> URL {
-    let url = root.appendingPathComponent(name)
-    let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2))
-    let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: UInt32(duration * 48000)))
-    buffer.frameLength = buffer.frameCapacity
-    for n in 0..<Int(buffer.frameLength) {
-        buffer.floatChannelData![0][n] = sin(Float(n) * 2 * .pi * 1000 / 48000) * 0.05
-        buffer.floatChannelData![1][n] = -buffer.floatChannelData![0][n]
-    }
-    buffer.floatChannelData![1][Int(buffer.frameLength) - 1] = peak
-    let file = try AVAudioFile(forWriting: url, settings: format.settings); try file.write(from: buffer)
-    return url
 }
 
 @Suite(.serialized) @MainActor struct PreprocessingIntegrationTests {
@@ -172,12 +158,15 @@ import PlaybackCore
         let store = MemoryStore(), refs = TestReferences()
         let defaults = MemoryPreferences()
         let playback = PlaybackController(); playback.setVolume(0)
-        let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true, preferences: defaults)
+        // A dedicated worker does not queue behind other suites using AudioPreprocessor.shared.
+        let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true, preferences: defaults,
+                                      preprocessor: AudioPreprocessor())
         defer { model.shutdown() }
         let list = try #require(model.document.currentPlaylistID)
-        let a = try audioFile(fixture.root, name: "a.wav", peak: 0.7)
-        let b = try audioFile(fixture.root, name: "b.wav", peak: 0.8)
-        let c = try audioFile(fixture.root, name: "c.wav", peak: 0.9)
+        // Entry a must still be playing when the failed commit is checked, even on a loaded run.
+        let a = try audioFile(fixture.root, name: "a.wav", duration: 10, peak: 0.7)
+        let b = try audioFile(fixture.root, name: "b.wav", duration: 10, peak: 0.8)
+        let c = try audioFile(fixture.root, name: "c.wav", duration: 10, peak: 0.9)
         await model.importFiles([a, b, c], into: list)
         let entries = try #require(model.playlist(list)?.entries)
         model.setMeasuresMaximumVolume(true); model.playPlaylist(list)

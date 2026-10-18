@@ -1,8 +1,32 @@
 import Foundation
 import Testing
 import PlaybackCore
+import PreprocessingCore
 import AudioProcessingCore
 @testable import LibraryCore
+
+/// Record completed cache-owner audits so a test can wait for LibraryController's background audit.
+private actor AuditedPreprocessor: AudioPreprocessing {
+    let worker: AudioPreprocessor
+    private(set) var audits: [Set<UUID>] = []
+    init(_ worker: AudioPreprocessor) { self.worker = worker }
+    func prepare(_ url: URL, cancellation: PreparationCancellation, seconds: Double, byteLimit: Int) async throws -> PreparedAudio {
+        try await worker.prepare(url, cancellation: cancellation, seconds: seconds, byteLimit: byteLimit)
+    }
+    func measure(_ url: URL, cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackPeak {
+        try await worker.measure(url, cancellation: cancellation, ownerID: ownerID)
+    }
+    func measureLevels(_ url: URL, profile: MeasurementProfile, cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackAudioMetrics {
+        try await worker.measureLevels(url, profile: profile, cancellation: cancellation, ownerID: ownerID)
+    }
+    func reconcileCacheOwners(_ owners: Set<UUID>) async { await worker.reconcileCacheOwners(owners); audits.append(owners) }
+    /// Wait for an audit of `owners` that completed after the first `after` audits.
+    func waitForAudit(of owners: Set<UUID>, after: Int) async throws {
+        let deadline = ContinuousClock.now + .seconds(5)
+        while !audits.dropFirst(after).contains(owners), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
+        #expect(audits.dropFirst(after).contains(owners))
+    }
+}
 
 @Suite(.serialized) @MainActor struct MeasurementCacheIntegrationTests {
     @Test func playlistRemovalRetainsCacheLibraryExclusionAuditsAfterSuccessfulSave() async throws {
@@ -10,15 +34,20 @@ import AudioProcessingCore
         let config = MeasurementCacheConfiguration(url: f.root.appendingPathComponent("cache/measurements.sqlite"),
             program: .init(applicationVersion: "test", build: "1", executableDigest: "test", environment: "test"))
         let processor = AudioPreprocessor(cache: config), store = MemoryStore(), refs = TestReferences()
+        let audited = AuditedPreprocessor(processor)
         let playback = PlaybackController(makeBackend: { _ in TestBackend() })
-        let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true, preprocessor: processor)
+        let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true,
+                                      preferences: MemoryPreferences(), preprocessor: audited)
         defer { model.shutdown() }
         let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("PlaybackCoreTests/Fixtures/tone.wav")
         let url = f.root.appendingPathComponent("tone.wav"); try FileManager.default.copyItem(at: source, to: url)
         let list = try #require(model.document.currentPlaylistID)
+        let beforeImport = await audited.audits.count
         await model.importFiles([url], into: list)
         let track = try #require(model.document.tracks.first?.id), entry = try #require(model.playlist(list)?.entries.first?.id)
+        // The cache saves only for audited owners; a loaded run may otherwise measure before the import's audit.
+        try await audited.waitForAudit(of: [track], after: beforeImport)
         _ = try await processor.measure(url, ownerID: track)
         model.removeEntry(entry, from: list)
         _ = try await processor.measure(url, ownerID: track)
@@ -27,10 +56,9 @@ import AudioProcessingCore
         #expect(model.track(track) != nil)
         _ = try await processor.measure(url, ownerID: track)
         #expect(await processor.statistics().peakScans == 1)
+        let beforeExclusion = await audited.audits.count
         store.fail = false; model.excludeTrack(track)
-        // Allow the successful-save audit Task to enqueue before the barrier.
-        await Task.yield()
-        await processor.reconcileCacheOwners(Set(model.document.tracks.map(\.id)))
+        try await audited.waitForAudit(of: [], after: beforeExclusion)
         let reopened = AudioPreprocessor(cache: config)
         _ = try await reopened.measure(url)
         #expect(await reopened.statistics().peakScans == 1)

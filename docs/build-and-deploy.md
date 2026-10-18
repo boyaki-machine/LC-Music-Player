@@ -230,6 +230,9 @@ make test
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 ```
 
+- `--no-parallel`を外してスイートを並列に実行しても成功します。
+- 実出力のテストを追加するときは、負荷が高くても待つ間に自然送りが起きない長さ（数秒以上）の音源を使います。共有の`AudioPreprocessor.shared`ではなく専用のインスタンスを渡し、LibraryControllerが裏で行うキャッシュの照合などは、完了を確かめてから次へ進みます。
+
 ## 謝辞情報の更新
 
 - 各ビルドは、現在の解決済みの依存から`Contents/Resources/ThirdPartyLicenses/index.json`と原文を再生成します。make経由とbuild-app.pyの直接実行で共通です。
