@@ -241,6 +241,9 @@ private actor PlaylistWorker: AudioPreprocessing {
     func completedIdleMeasurementsAreDisplayedOnPlayWithoutAnotherScan(_ normalize: Bool) async throws {
         let f = try Fixture(); defer { f.cleanup() }
         let doc = try playlistFixture(f.root, count: 1), store = MemoryStore(), refs = TestReferences()
+        // Replace the 0.25s fixture so playback is still running when the display toggles are checked.
+        try FileManager.default.removeItem(at: doc.tracks[0].reference.lastKnownURL)
+        _ = try audioFile(f.root, name: doc.tracks[0].reference.lastKnownURL.lastPathComponent, duration: 5)
         store.document = doc
         let processor = AudioPreprocessor(cache: .init(url: f.root.appendingPathComponent("cache/measurements.sqlite"),
             program: .init(applicationVersion: "test", build: "1", executableDigest: "display", environment: "test")))

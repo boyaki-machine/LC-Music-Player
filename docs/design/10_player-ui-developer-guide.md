@@ -259,7 +259,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 LCMP_UI_SNAPSHOTS=build/player-ui-qa \
 ./scripts/swift.sh test --disable-automatic-resolution --no-parallel
 ```
 
-- 全体の実出力の検証では`--no-parallel`を明示する。suiteの`.serialized`だけでは、別のsuiteのMainActorの処理による短い音源の観測漏れを防げない。
+- 全体の実出力の検証は、`--no-parallel`を外して並列に実行しても成功する。並列では別のsuiteの処理でMainActorが数百ms遅れることがあるので、テストは固定の待ち時間ではなく条件が成り立つまで待ち、表示の欠落（250ms）や短い音源の終了を前提にしない。
 - 可視化専用の生成音源はアプリ音量0で再生し、OS音量は変更しない。
 - 表示スケールでは、既知のdB値・無音・非数値・上限と、実PCMの振幅を変えたときの段数を検証する。寿命では、一時停止・再開・シーク・停止・自然終了・非表示・表示を確認する。ネイティブの画像では、色・二値のセル・残光・上下の余白・操作部と重ならないことを確認する。
 - 負荷・同期を変更した場合の短時間の比較と10分連続の測定は、[可視化の実装設計](08_visualization-implementation.md#負荷と同期の測定)に従う。物理的な出音と画面の提示の同期を主張する場合は、オフスクリーンの描画の時間とは別に測定する。

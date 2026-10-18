@@ -54,10 +54,13 @@ private func tone(_ seconds: Double, rate: Double = 48000, amplitude: Double, ch
         #expect(throws: (any Error).self) {
             for _ in 0..<5 { try data.withUnsafeBufferPointer { try capped.consume(left: $0.baseAddress!, right: nil, frames: 8192) } }
         }
+        // Other meters share the directory in a parallel run, so check only files this test owns.
         let active = try LoudnessMeter(profile: profile)
-        let before = try FileManager.default.contentsOfDirectory(atPath: LoudnessMeter.temporaryDirectory.path)
+        let abandoned = LoudnessMeter.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".energy")
+        try Data([0]).write(to: abandoned)
         LoudnessMeter.cleanAbandonedFiles()
-        #expect(try FileManager.default.contentsOfDirectory(atPath: LoudnessMeter.temporaryDirectory.path).count == before.count)
+        #expect(FileManager.default.fileExists(atPath: active.url.path))
+        #expect(!FileManager.default.fileExists(atPath: abandoned.path))
         withExtendedLifetime(active) {}
     }
     @Test func gainConstraintsAndInvalidData() throws {
