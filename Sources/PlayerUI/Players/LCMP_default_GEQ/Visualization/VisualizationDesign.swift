@@ -11,15 +11,17 @@ public enum VisualizationDesign: String, CaseIterable, Sendable {
 
     public var title: String {
         switch self {
-        case .fluorescentLED: "蛍光管LED"
-        case .ermineChorus: "オコジョ合唱団"
+        case .fluorescentLED: "Last Century イコライザー"
+        case .ermineChorus: "MICRIGAIKE コジョーズ"
         }
     }
 
-    public var summary: String {
+    /// The line under the title on the selection card (up to two lines).
+    public var tagline: String {
         switch self {
-        case .fluorescentLED: "16列の周波数レベルを、緑・黄・赤のLEDで表示します。セルごとに点灯し、消灯後は淡い残光が消えていきます。"
-        case .ermineChorus: "5匹のオコジョが、低音から高音までの音域を1つずつ受け持って歌います。曲ごとに感度を合わせるので、どの曲でも全員が歌います。"
+        case .fluorescentLED: "1990年代の懐かしさをお届け"
+        // Break after the comma rather than in the middle of a word.
+        case .ermineChorus: "山上の素敵な秘湯では、\n毎晩オコジョ達がステージを開くらしい..."
         }
     }
 
