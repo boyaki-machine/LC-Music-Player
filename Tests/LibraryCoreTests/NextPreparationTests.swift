@@ -50,10 +50,8 @@ private actor HeldPreprocessor: AudioPreprocessing {
           arguments: ["manual", "natural", "prefix", "stop", "saveFailure", "differentEntry", "removed", "settings", "measurementFailure", "sourceChanged", "repair", "off"])
     func transfersPendingWorkAndRetiresCancelledOwnership(_ action: String) async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("PlaybackCoreTests/Fixtures/tone.wav")
-        let a = fixture.root.appendingPathComponent("a.wav"), b = fixture.root.appendingPathComponent("b.wav")
-        try FileManager.default.copyItem(at: source, to: a); try FileManager.default.copyItem(at: source, to: b)
+        // Long enough that neither entry finishes naturally while a loaded run waits.
+        let a = try audioFile(fixture.root, name: "a.wav", duration: 5), b = try audioFile(fixture.root, name: "b.wav", duration: 5)
         let defaults = MemoryPreferences()
         let worker = HeldPreprocessor(b, prefix: action == "prefix")
         let playback = PlaybackController(); playback.setVolume(0)
@@ -122,10 +120,7 @@ private actor HeldPreprocessor: AudioPreprocessing {
           arguments: [false, true], ["play", "stop", "saveFailure", "removed", "settings", "repair"])
     func doubleClickUpgradesPendingSelectionWithoutAnotherPrefix(normalize: Bool, action: String) async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
-        let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("PlaybackCoreTests/Fixtures/tone.wav")
-        let url = fixture.root.appendingPathComponent("a.wav")
-        try FileManager.default.copyItem(at: source, to: url)
+        let url = try audioFile(fixture.root, name: "a.wav", duration: 5)
         let defaults = MemoryPreferences()
         let worker = HeldPreprocessor(url, prefix: true)
         let playback = PlaybackController(); playback.setVolume(0)
@@ -148,7 +143,7 @@ private actor HeldPreprocessor: AudioPreprocessing {
         if action == "settings" { model.setNormalizationTarget(-18) }
         if action == "repair" {
             let replacement = fixture.root.appendingPathComponent("replacement.wav")
-            try FileManager.default.copyItem(at: source, to: replacement)
+            try FileManager.default.copyItem(at: url, to: replacement)
             model.repairTrack(entry.trackID, using: replacement)
         }
         await worker.release()
