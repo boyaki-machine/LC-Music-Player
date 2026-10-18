@@ -9,10 +9,10 @@ import re
 import subprocess
 import sys
 
-MAJOR = 0
+MAJOR = 1
 # The commit where the current major version began; its merges are not counted.
 # None counts from the start of the history. Set both values together when raising MAJOR.
-MAJOR_START = None
+MAJOR_START = 'a11874b4f74ad2cec051ea5cf57b3ca4b41196f3'
 
 
 def _count(root, *arguments):
@@ -22,8 +22,9 @@ def _count(root, *arguments):
 
 
 def version(root, revision='HEAD', major=None, major_start=None):
-    major = MAJOR if major is None else major
+    # Decide the start before replacing major: omitting major means the configured MAJOR and MAJOR_START.
     major_start = MAJOR_START if major is None else major_start
+    major = MAJOR if major is None else major
     since = f'{major_start}..{revision}' if major_start else revision
     minor = _count(root, '--merges', '--first-parent', since)
     build = _count(root, revision)
