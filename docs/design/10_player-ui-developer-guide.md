@@ -33,13 +33,14 @@ Sources/
 │           ├── SourceFolderList.swift         音源のフォルダ一覧
 │           ├── QuickTooltip.swift             省略されたタイトルの表示
 │           └── Visualization/
-│               ├── VisualizationDesign.swift      デザインの種類・共通の解析設定・driverの契約
+│               ├── VisualizationDesign.swift      デザインの種類・表示名・共通の解析設定・driverの契約
+│               ├── VisualizationThumbnail.swift   表示タブのカードのサムネイル
 │               ├── PlaybackVisualization.swift    再生・解析と描画の接続、デザインの切り替え
 │               ├── LCMPDefaultGEQView.swift       蛍光管LEDのSwiftUI/Canvasとrenderer
 │               ├── LCMPDefaultGEQScale.swift      dBFSから表示感度への変換
 │               ├── SpectrumPresentation.swift     提示待ち・16×24セル・残光
 │               ├── VisualizationDriver.swift      蛍光管LEDのMainActorの受信・時計
-│               └── ErmineChorus/                  オコジョ合唱団（原画・キャラクタ・演出・描画・driver・View）
+│               └── ErmineChorus/                  オコジョ合唱団（原画・キャラクタ・演出・指揮役・描画・driver・View）
 ├── VisualizationKit/
 │   └── Shared/
 │       ├── SpectrumSample.swift       UIに依存しない表示用レベル・時刻の値型
@@ -229,7 +230,7 @@ PlayerUI/Players/
 
 1. `Visualization/<デザイン名>/`を作り、描画・状態・driver・Viewを置く。型名にはデザイン固有の接頭辞を付ける。
 2. driverは`PlayerVisualizationDriver`（`synchronize(activity:visible:)`、`receive(_:)`、`reset()`）に準拠させ、「寿命の管理と画面への組み込み」の表と同じく、表示中かつ再生中だけ時計を動かす。
-3. `VisualizationDesign`にケース・表示名・説明を足し、`PlayerPresentation`のdriverの所有と`driver(for:)`、`PlaybackVisualization`のViewの切り替えに加える。
+3. `VisualizationDesign`にケース・表示名・説明（カードの2行目）を足し、`VisualizationThumbnail`にサムネイルを描く。`PlayerPresentation`のdriverの所有と`driver(for:)`、`PlaybackVisualization`のViewの切り替えに加える。表示タブのカードは`allCases`から自動で並ぶ。
 4. 解析は`VisualizationDesign.configuration`を共有する。切り替えで解析の購読をやり直さないためである。別の帯域数が必要になったら、デザインごとの設定を`PlaybackVisualization`から渡すように変える。
 5. 寿命・描画・切り替えのテストを`Tests/PlayerUITests/Players/<ID>/Visualization/`に置く。
 

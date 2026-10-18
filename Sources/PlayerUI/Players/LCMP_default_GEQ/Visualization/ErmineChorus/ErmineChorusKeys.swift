@@ -24,17 +24,28 @@ struct ErmineKey: Equatable, Sendable {
     var armsBehind = false
     /// Smear frame: the right leg is stretched and trailed by speed lines.
     var smearRight = false
+    /// A pointing paw on the viewer's left (−1) or right (1), or 0.
+    var pointing: CGFloat = 0
 }
 
 enum ErmineKeyName: String, CaseIterable, Sendable {
-    case idleA, idleB, look, tilt, squash, up, singL, singR
+    case idleA, idleB, look, tilt, squash, dip, up, singL, singR
     case tallDip, tallA, tallB, reachAnt, reachSm, reach, reachBk // ermine 1
     case wigL, wigR, spin1, back, spin2                           // ermine 2
     case jumpAir, jumpAir2, armsUp, glanceR, glanceL              // ermine 3 (glances are shared)
     case kira                                                     // ermine 4
     case flex, flexL, flexR                                       // ermine 5
+    case hop, bow                                                 // everyone together
 
     var key: ErmineKey { ErmineKeys.table[self]! }
+
+    /// Keys whose front legs may be replaced by a held arm pose (`ErmineArms`): the plain singing and idle drawings.
+    var takesArmPose: Bool {
+        switch self {
+        case .idleA, .idleB, .look, .tilt, .squash, .dip, .up, .singL, .singR, .wigL, .wigR, .glanceL, .glanceR, .hop: true
+        default: false
+        }
+    }
 }
 
 private func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) }
@@ -49,6 +60,11 @@ enum ErmineKeys {
         .squash: k {
             $0.hipW = 18; $0.waistW = 13.5; $0.neck = p(0, -51); $0.neckW = 8.5; $0.head = p(0, -65); $0.headScale = CGSize(width: 1.1, height: 0.9)
             $0.pawL = p(-8, -29); $0.pawR = p(8, -29); $0.tail = [p(12, -6), p(28, -3), p(36, -16), p(33, -30)]
+        },
+        // A small bob on each beat; `squash` is kept for accents.
+        .dip: k {
+            $0.hipW = 16; $0.waistW = 11.5; $0.neck = p(0, -57); $0.neckW = 7.8; $0.head = p(0, -72); $0.headScale = CGSize(width: 1.03, height: 0.97)
+            $0.pawL = p(-7.5, -34); $0.pawR = p(7.5, -34); $0.tail = [p(12, -6), p(27, -4), p(35, -18), p(31, -34)]
         },
         .up: k {
             $0.hipW = 13; $0.waistW = 8.5; $0.neck = p(0, -69); $0.neckW = 6.8; $0.head = p(0, -85); $0.headScale = CGSize(width: 0.94, height: 1.06)
@@ -113,6 +129,15 @@ enum ErmineKeys {
         },
         .flexL: k { $0.neck = p(-1, -60); $0.head = p(-1.5, -75); $0.rot = -3; $0.turn = -0.08; $0.pawL = p(-27, -81); $0.pawR = p(8, -38); $0.elbowL = 11; $0.shoulderL = -1.5; $0.shoulderR = 0.5; $0.armsBehind = true },
         .flexR: k { $0.neck = p(1, -60); $0.head = p(1.5, -75); $0.rot = 3; $0.turn = 0.08; $0.pawL = p(-8, -38); $0.pawR = p(27, -81); $0.elbowR = 11; $0.shoulderL = 0.5; $0.shoulderR = -1.5; $0.armsBehind = true },
+        // Everyone: a small hop together, and a bow at the end of a song.
+        .hop: k {
+            $0.lift = 9; $0.hipW = 13.5; $0.waistW = 9; $0.neck = p(0, -67); $0.neckW = 7; $0.head = p(0, -82); $0.headScale = CGSize(width: 0.95, height: 1.05)
+            $0.pawL = p(-9, -47); $0.pawR = p(9, -47); $0.tail = [p(12, -6), p(24, -12), p(26, -28), p(20, -40)]
+        },
+        .bow: k {
+            $0.hipW = 15.5; $0.waistW = 11; $0.neck = p(0, -55); $0.neckW = 7.8; $0.head = p(0, -65); $0.headScale = CGSize(width: 1.04, height: 0.9)
+            $0.pawL = p(-5, -31); $0.pawR = p(5, -31); $0.tail = [p(12, -6), p(28, -3), p(35, -17), p(31, -31)]
+        },
     ]
 }
 
@@ -129,6 +154,7 @@ struct ErmineInbetweener: Sendable {
         let trembles: Set<ErmineKeyName> = [.tallA, .tallB]
         if trembles.contains(from) && trembles.contains(to) { return 0 }
         if to == .reachSm || to == .back || from == .back { return 0 }
+        if to == .bow || from == .bow { return 0.25 } // a slow, polite bow
         if [.idleA, .idleB].contains(from) && [.idleA, .idleB].contains(to) { return 0.5 }
         return 0.1
     }
@@ -170,5 +196,79 @@ struct ErmineInbetweener: Sendable {
         o.hipX = v(a.hipX, b.hipX); o.lift = v(a.lift, b.lift)
         o.armsBehind = b.armsBehind || (a.armsBehind && e < 0.5)
         return o
+    }
+}
+
+/// A held arm pose for a phrase, like a singer's: hands together at the chest, a hand offered forward,
+/// both hands open, one arm raised to lead, or pointing at the audience. Paws are placed relative to the neck,
+/// so they ride along with the bob and sway of the body keys.
+enum ErmineArmPose: Sendable, Equatable, CaseIterable {
+    case rest, pray, offer, embrace, raise, point
+
+    /// Paw offsets from the neck for the right leg (mirrored for the left), elbows, and whether the legs pass behind the head.
+    struct Shape: Equatable { var left: CGVector; var right: CGVector; var elbowL: CGFloat; var elbowR: CGFloat; var behind = false; var pointing = false }
+
+    /// The shape with the active hand on `side` (1 = viewer's right).
+    func shape(side: CGFloat) -> Shape? {
+        let rest = CGVector(dx: -7, dy: 24)
+        func mirror(_ v: CGVector) -> CGVector { CGVector(dx: -v.dx, dy: v.dy) }
+        var s: Shape
+        switch self {
+        case .rest: return nil
+        case .pray: return Shape(left: CGVector(dx: -2.2, dy: 9), right: CGVector(dx: 2.2, dy: 9), elbowL: 3.5, elbowR: 3.5)
+        case .embrace: return Shape(left: CGVector(dx: -16, dy: 11), right: CGVector(dx: 16, dy: 11), elbowL: 2.5, elbowR: 2.5)
+        case .offer: s = Shape(left: rest, right: CGVector(dx: 15, dy: 13), elbowL: 1.6, elbowR: 2)
+        // Raised only to beside the cheek, a little above pointing: a natural call to sing along.
+        case .raise: s = Shape(left: rest, right: CGVector(dx: 24, dy: -11), elbowL: 1.6, elbowR: 4)
+        case .point: s = Shape(left: rest, right: CGVector(dx: 19, dy: 6), elbowL: 1.6, elbowR: 0.6, pointing: true)
+        }
+        if side < 0 { s = Shape(left: mirror(s.right), right: mirror(s.left), elbowL: s.elbowR, elbowR: s.elbowL, behind: s.behind, pointing: s.pointing) }
+        return s
+    }
+}
+
+struct ErmineArms: Sendable, Equatable {
+    var pose = ErmineArmPose.rest
+    /// Which hand leads (1 = the viewer's right).
+    var side: CGFloat = 1
+}
+
+/// Eases the arms from one held pose to the next, separately from the body keys.
+struct ErmineArmTween: Sendable {
+    static let duration = 0.25
+    private var fromWeight = 0.0, from: ErmineArmPose.Shape?, to: ErmineArmPose.Shape?, target = ErmineArms(), start = 0.0
+
+    /// Lays the arm pose over a body pose that takes one; other keys keep their own legs.
+    mutating func apply(_ arms: ErmineArms, to key: ErmineKeyName, pose: ErmineKey, at now: Double) -> ErmineKey {
+        if arms != target {
+            from = current(at: now, base: pose); target = arms; to = arms.pose.shape(side: arms.side); start = now
+        }
+        guard key.takesArmPose else { return pose }
+        let e = CGFloat(ErmineInbetweener.ease(min(1, max(0, (now - start) / Self.duration))))
+        let restShape = ErmineArmPose.Shape(left: CGVector(dx: pose.pawL.x - pose.neck.x, dy: pose.pawL.y - pose.neck.y),
+                                            right: CGVector(dx: pose.pawR.x - pose.neck.x, dy: pose.pawR.y - pose.neck.y),
+                                            elbowL: pose.elbowL, elbowR: pose.elbowR)
+        let a = from ?? restShape, b = to ?? restShape
+        func mix(_ x: CGVector, _ y: CGVector) -> CGPoint {
+            CGPoint(x: pose.neck.x + x.dx + (y.dx - x.dx) * e, y: pose.neck.y + x.dy + (y.dy - x.dy) * e)
+        }
+        var out = pose
+        out.pawL = mix(a.left, b.left); out.pawR = mix(a.right, b.right)
+        out.elbowL = a.elbowL + (b.elbowL - a.elbowL) * e; out.elbowR = a.elbowR + (b.elbowR - a.elbowR) * e
+        out.armsBehind = (e < 0.5 ? a.behind : b.behind)
+        out.pointing = e >= 0.5 && b.pointing ? (target.side < 0 ? -1 : 1) : 0
+        return out
+    }
+
+    private func current(at now: Double, base: ErmineKey) -> ErmineArmPose.Shape? {
+        // Starting a new tween from wherever the last one reached keeps the motion continuous.
+        let e = min(1, max(0, (now - start) / Self.duration))
+        if e >= 1 { return to }
+        guard let a = from ?? to, let b = to ?? from else { return nil }
+        let t = CGFloat(ErmineInbetweener.ease(e))
+        func m(_ x: CGVector, _ y: CGVector) -> CGVector { CGVector(dx: x.dx + (y.dx - x.dx) * t, dy: x.dy + (y.dy - x.dy) * t) }
+        return ErmineArmPose.Shape(left: m(a.left, b.left), right: m(a.right, b.right),
+                                   elbowL: a.elbowL + (b.elbowL - a.elbowL) * t, elbowR: a.elbowR + (b.elbowR - a.elbowR) * t,
+                                   behind: t < 0.5 ? a.behind : b.behind, pointing: false)
     }
 }

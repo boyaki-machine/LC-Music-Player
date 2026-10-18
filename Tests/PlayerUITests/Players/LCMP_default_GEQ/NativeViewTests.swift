@@ -478,3 +478,41 @@ extension LibraryNativeViewTests {
         #expect(store.document == library.document)
     }
 }
+
+@Suite(.serialized) @MainActor struct VisualizationDesignCardTests {
+    @Test func displayTabShowsDesignCardsAndOutlinesTheChosenOne() async throws {
+        let library = LibraryController(playback: PlaybackController(), store: UIStore(LibraryDocument()), references: UIReferences())
+        let presentation = PlayerPresentation(preferences: MemoryPreferences())
+        presentation.toggleExtension(); presentation.section = .visualization
+        let actions = LibraryActions(files: { _ in }, folder: {}, repair: { _ in }, importPlaylist: {}, exportPlaylist: { _ in })
+        let host = NSHostingView(rootView: ExtensionView(playback: library.playback, presentation: presentation, library: library, actions: actions))
+        host.frame = CGRect(origin: .zero, size: WindowLayout.extensionSize)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host; window.setFrameOrigin(CGPoint(x: -10000, y: -10000)); window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        /// Average height (from the top) of the green outline of the chosen card.
+        func accentCenter(_ name: String) async throws -> Double {
+            host.layoutSubtreeIfNeeded(); host.display()
+            try await Task.sleep(for: .milliseconds(150))
+            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
+                try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                try #require(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: directory).appendingPathComponent("design-cards-\(name).png"))
+            }
+            var rows: [Int] = []
+            for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+                for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+                    guard let c = rep.colorAt(x: x, y: y) else { continue }
+                    if c.greenComponent > 0.8 && c.redComponent < 0.6 && c.blueComponent < 0.5 { rows.append(y) }
+                }
+            }
+            try #require(rows.count > 40, "no green outline in \(name)")
+            return Double(rows.reduce(0, +)) / Double(rows.count) / Double(rep.pixelsHigh)
+        }
+        let led = try await accentCenter("led")
+        presentation.setVisualizationDesign(.ermineChorus)
+        let ermine = try await accentCenter("ermine")
+        #expect(ermine > led + 0.1, "led \(led), ermine \(ermine)")
+    }
+}

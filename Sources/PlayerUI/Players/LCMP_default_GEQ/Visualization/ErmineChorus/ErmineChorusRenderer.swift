@@ -6,7 +6,8 @@ enum ErmineChorusRenderer {
     static let background = Color(red: 5 / 255, green: 8 / 255, blue: 7 / 255)
     static let stageSize = CGSize(width: 360, height: 144)
 
-    static func draw(context original: GraphicsContext, size: CGSize, drawings: [ErmineDrawing]) {
+    static func draw(context original: GraphicsContext, size: CGSize, drawings: [ErmineDrawing],
+                     stage: ErmineStage = ErmineStage(), reduceMotion: Bool = false) {
         var context = original
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(background))
         // Fit the 360×144 stage into the given size.
@@ -16,13 +17,160 @@ enum ErmineChorusRenderer {
         context.fill(Path(CGRect(origin: .zero, size: stageSize)), with: .radialGradient(
             Gradient(colors: [Color(red: 0.25, green: 0.26, blue: 0.22).opacity(0.85), background.opacity(0)]),
             center: CGPoint(x: 180, y: 124), startRadius: 10, endRadius: 215))
+        // With reduced motion the lamps hold a steady brightness and the sign does not flicker.
+        let lamps = reduceMotion ? ErmineStage(light: 0.4, topLight: 0.4, spotSlot: nil) : stage
+        drawHungLamps(context, light: lamps.topLight)
+        drawBeam(context)
+        drawNeon(context, brightness: lamps.neon)
+        drawFloorLamps(context, stage: lamps)
+        for x in ErmineCast.slotX { drawCrate(context, centerX: x, top: ErmineCast.feetY) }
+        drawFloorLight(context, stage: lamps)
         for (member, drawing) in zip(ErmineCast.members, drawings) {
             let x = ErmineCast.slotX[member.slot]
-            drawCrate(context, centerX: x, top: ErmineCast.feetY)
             var c = context
             c.translateBy(x: x, y: ErmineCast.feetY)
             c.scaleBy(x: ErmineCast.stageScale, y: ErmineCast.stageScale)
             drawErmine(c, drawing: drawing, member: member)
+        }
+    }
+
+    // MARK: Backdrop
+
+    private static let wood = Color(red: 0.55, green: 0.36, blue: 0.19), woodLight = Color(red: 0.68, green: 0.47, blue: 0.27)
+    private static let rope = Color(red: 0.78, green: 0.7, blue: 0.55)
+    private static let neonPink = Color(red: 1, green: 0.27, blue: 0.68), neonCore = Color(red: 1, green: 0.74, blue: 0.91)
+    /// The sign hangs a little crooked, as if the ermines built the stage themselves.
+    static let neonTilt = Angle.degrees(-2.5), neonCenter = CGPoint(x: 180, y: 22)
+
+    /// A hand-made wooden beam across the top, with lamps and the sign hung from it by rope.
+    static func drawBeam(_ context: GraphicsContext) {
+        let beam = Path(roundedRect: CGRect(x: 18, y: -1, width: 324, height: 6), cornerRadius: 1.5)
+        context.fill(beam, with: .color(wood))
+        context.fill(Path(CGRect(x: 19, y: 0, width: 322, height: 1.8)), with: .color(woodLight))
+        var grain = Path()
+        for x: CGFloat in [70, 150, 236, 300] { grain.move(to: CGPoint(x: x, y: 1)); grain.addLine(to: CGPoint(x: x + 9, y: 3.5)) }
+        context.stroke(grain, with: .color(ErminePalette.ink.opacity(0.35)), lineWidth: 0.6)
+        context.stroke(beam, with: .color(ErminePalette.ink), lineWidth: 1)
+    }
+
+    /// The band's name in pink neon tubes, hung from the beam. A letter flickers only on a high note.
+    static func drawNeon(_ context: GraphicsContext, brightness: [Double]) {
+        var c = context
+        c.translateBy(x: neonCenter.x, y: neonCenter.y); c.rotate(by: neonTilt)
+        let font = Font.system(size: 14, weight: .heavy, design: .rounded)
+        let letters = ErmineStage.neonText.map { c.resolve(Text(String($0)).font(font)) }
+        let widths = letters.map { $0.measure(in: CGSize(width: 100, height: 100)).width }
+        let total = widths.reduce(0, +)
+        // Strings to the beam and the tube lines above and below the letters.
+        var strings = Path()
+        for x in [-total * 0.36, total * 0.36] { strings.move(to: CGPoint(x: x, y: -11)); strings.addLine(to: CGPoint(x: x + 1.5, y: -20)) }
+        c.stroke(strings, with: .color(rope.opacity(0.8)), lineWidth: 0.7)
+        var tubes = Path()
+        tubes.move(to: CGPoint(x: -total / 2 - 2, y: -11)); tubes.addLine(to: CGPoint(x: total / 2 + 2, y: -11.5))
+        tubes.move(to: CGPoint(x: -total / 2 - 5, y: 10.5)); tubes.addLine(to: CGPoint(x: total / 2 + 5, y: 10))
+        var x = -total / 2
+        var centers: [CGFloat] = []
+        for w in widths { centers.append(x + w / 2); x += w }
+        for (radius, opacity) in [(CGFloat(6), 0.55), (CGFloat(2.5), 0.8)] {
+            c.drawLayer { glow in
+                glow.addFilter(.blur(radius: radius))
+                glow.stroke(tubes, with: .color(neonPink.opacity(opacity)), lineWidth: 2)
+                for (i, letter) in ErmineStage.neonText.enumerated() where letter != " " {
+                    let level = i < brightness.count ? brightness[i] : 1
+                    glow.draw(Text(String(letter)).font(font).foregroundColor(neonPink.opacity(opacity * level)), at: CGPoint(x: centers[i], y: 0))
+                }
+            }
+        }
+        c.stroke(tubes, with: .color(neonCore), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+        for (i, letter) in ErmineStage.neonText.enumerated() where letter != " " {
+            let level = i < brightness.count ? brightness[i] : 1
+            // An unlit tube still shows as a dull pink glass letter.
+            let color = level > 0.5 ? neonCore : Color(red: 0.45, green: 0.2, blue: 0.33)
+            c.draw(Text(String(letter)).font(font).foregroundColor(color), at: CGPoint(x: centers[i], y: 0))
+        }
+    }
+
+    /// A small can lamp tied to the beam, shining down on the singers with the voice.
+    static func drawHungLamps(_ context: GraphicsContext, light rawLight: Double) {
+        let light = min(1, max(0, rawLight))
+        for (x, target) in [(CGFloat(40), CGFloat(150)), (CGFloat(320), CGFloat(210))] {
+            let lens = CGPoint(x: x + (target > x ? 3 : -3), y: 16)
+            var cone = Path()
+            cone.move(to: lens)
+            cone.addLine(to: CGPoint(x: target - 38, y: 118)); cone.addLine(to: CGPoint(x: target + 38, y: 118)); cone.closeSubpath()
+            context.fill(cone, with: .linearGradient(Gradient(colors: [Color(red: 1, green: 0.86, blue: 0.6).opacity(0.26 * light), .clear]),
+                                                     startPoint: lens, endPoint: CGPoint(x: target, y: 118)))
+            var ropes = Path(); ropes.move(to: CGPoint(x: x, y: 4)); ropes.addLine(to: CGPoint(x: x, y: 8))
+            context.stroke(ropes, with: .color(rope), lineWidth: 0.9)
+            var lamp = context
+            lamp.translateBy(x: x, y: 12); lamp.rotate(by: .degrees(target > x ? -28 : 28))
+            let can = Path(roundedRect: CGRect(x: -4.5, y: -4.5, width: 9, height: 10), cornerRadius: 1.5)
+            lamp.fill(can, with: .color(Color(red: 0.27, green: 0.26, blue: 0.27)))
+            lamp.fill(Path(CGRect(x: -4.5, y: -4.5, width: 3, height: 10)), with: .color(Color(red: 0.4, green: 0.39, blue: 0.4)))
+            lamp.stroke(can, with: .color(ErminePalette.ink), lineWidth: 1)
+            let face = Path(ellipseIn: CGRect(x: -4, y: 3.5, width: 8, height: 3))
+            lamp.fill(face, with: .color(Color(red: 1, green: 0.9, blue: 0.62).opacity(0.45 + 0.55 * light)))
+            lamp.stroke(face, with: .color(ErminePalette.ink), lineWidth: 0.8)
+        }
+    }
+
+    /// Two can lamps (PAR) on short stands at the front corners, lighting the ermines up from below.
+    /// The beams brighten on the bass and turn to a soloist.
+    static func drawFloorLamps(_ context: GraphicsContext, stage: ErmineStage) {
+        let light = min(1, max(0, stage.light))
+        let lamps = [CGPoint(x: 14, y: 128), CGPoint(x: 346, y: 128)]
+        let targets: [CGFloat] = stage.spotSlot.map { [ErmineCast.slotX[$0], ErmineCast.slotX[$0]] } ?? [130, 230]
+        let beam = Color(red: 0.84, green: 0.92, blue: 1)
+        for (lamp, targetX) in zip(lamps, targets) {
+            let target = CGPoint(x: targetX, y: 52)
+            let dx = target.x - lamp.x, dy = target.y - lamp.y, length = max(1, hypot(dx, dy))
+            let spread = CGVector(dx: -dy / length * 34, dy: dx / length * 34)
+            let lens = CGPoint(x: lamp.x + dx / length * 6, y: lamp.y + dy / length * 6)
+            var cone = Path()
+            cone.move(to: lens)
+            cone.addLine(to: CGPoint(x: target.x + spread.dx, y: target.y + spread.dy))
+            cone.addLine(to: CGPoint(x: target.x - spread.dx, y: target.y - spread.dy))
+            cone.closeSubpath()
+            context.fill(cone, with: .linearGradient(Gradient(colors: [beam.opacity(0.34 * light), beam.opacity(0)]), startPoint: lens, endPoint: target))
+            drawParCan(context, at: lamp, angle: atan2(dy, dx), light: light)
+        }
+    }
+
+    /// A stage can lamp: a short stand, a yoke and a can with a glowing lens, inked like the ermines.
+    private static func drawParCan(_ context: GraphicsContext, at base: CGPoint, angle: Double, light: Double) {
+        let ink = ErminePalette.ink, metal = Color(red: 0.25, green: 0.24, blue: 0.26), metalLight = Color(red: 0.42, green: 0.41, blue: 0.44)
+        var stand = Path()
+        stand.move(to: CGPoint(x: base.x - 6, y: base.y + 10)); stand.addLine(to: CGPoint(x: base.x + 6, y: base.y + 10))
+        stand.move(to: CGPoint(x: base.x, y: base.y + 10)); stand.addLine(to: CGPoint(x: base.x, y: base.y + 2))
+        context.stroke(stand, with: .color(ink), style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+        context.stroke(stand, with: .color(metalLight), style: StrokeStyle(lineWidth: 0.9, lineCap: .round))
+        var yoke = Path()
+        yoke.addArc(center: base, radius: 6.5, startAngle: .degrees(20), endAngle: .degrees(160), clockwise: false)
+        context.stroke(yoke, with: .color(ink), lineWidth: 2.4)
+        context.stroke(yoke, with: .color(metalLight), lineWidth: 1)
+        var can = context
+        can.translateBy(x: base.x, y: base.y); can.rotate(by: .radians(angle))
+        let body = Path(roundedRect: CGRect(x: -6, y: -5, width: 13, height: 10), cornerRadius: 2)
+        can.fill(body, with: .color(metal))
+        can.fill(Path(CGRect(x: -6, y: -5, width: 13, height: 3)), with: .color(metalLight))
+        can.stroke(body, with: .color(ink), lineWidth: 1)
+        let lens = Path(ellipseIn: CGRect(x: 5.5, y: -5.5, width: 4, height: 11))
+        can.drawLayer { glow in
+            glow.addFilter(.blur(radius: 3))
+            glow.fill(lens, with: .color(Color(red: 0.8, green: 0.9, blue: 1).opacity(0.9 * light)))
+        }
+        can.fill(lens, with: .color(Color(red: 0.75 + 0.25 * light, green: 0.85 + 0.15 * light, blue: 1)))
+        can.stroke(lens, with: .color(ink), lineWidth: 0.9)
+    }
+
+    /// Where the floor lamps' beams land on the crates, drawn over the crates and under the ermines.
+    static func drawFloorLight(_ context: GraphicsContext, stage: ErmineStage) {
+        let light = min(1, max(0, stage.light))
+        let targets: [CGFloat] = stage.spotSlot.map { [ErmineCast.slotX[$0]] } ?? [130, 230]
+        for x in targets {
+            context.fill(Path(ellipseIn: CGRect(x: x - 30, y: 114, width: 60, height: 12)), with: .radialGradient(
+                Gradient(colors: [Color(red: 0.86, green: 0.93, blue: 1).opacity((stage.spotSlot == nil ? 0.16 : 0.5) * light), .clear]),
+                center: CGPoint(x: x, y: 120), startRadius: 0, endRadius: 30))
         }
     }
 
@@ -188,6 +336,12 @@ enum ErmineChorusRenderer {
                     context.stroke(lines, with: .color(palette.ink.opacity(0.6)), lineWidth: 0.8)
                 }
                 let leg = legPaths(edge: edge, paw: paw, side: side, tipRadius: smeared ? 1.5 : 1.9, elbow: elbow)
+                if k.pointing == side { // A little pointing digit beyond the paw.
+                    let dx = paw.x - edge.x, dy = paw.y - edge.y, l = max(1, hypot(dx, dy))
+                    var digit = Path(); digit.move(to: paw); digit.addLine(to: CGPoint(x: paw.x + dx / l * 4.5, y: paw.y + dy / l * 4.5))
+                    context.stroke(digit, with: .color(palette.ink), style: StrokeStyle(lineWidth: 2.6, lineCap: .round))
+                    context.stroke(digit, with: .color(palette.fill), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+                }
                 context.fill(leg.fill, with: .color(palette.fill)) // same paint as the body, so the root disappears into it
                 context.stroke(leg.ink, with: .color(palette.ink), style: StrokeStyle(lineWidth: palette.line * 0.9, lineCap: .round, lineJoin: .round))
             }
@@ -242,9 +396,11 @@ enum ErmineChorusRenderer {
         let eyeLine = StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
         for s in sides {
             let ex = s * 10.5 + look
-            switch face.eye {
+            var eye = face.eye
+            if case let .wink(side) = face.eye { eye = s == side ? .happy : .open } // the eye over the pointing hand closes
+            switch eye {
             case .open, .surprise:
-                let (rx, ry): (CGFloat, CGFloat) = face.eye == .surprise ? (2.6, 2.8) : (2.9, 2.3)
+                let (rx, ry): (CGFloat, CGFloat) = eye == .surprise ? (2.6, 2.8) : (2.9, 2.3)
                 c.fill(Path(ellipseIn: CGRect(x: ex - rx, y: -ry, width: 2 * rx, height: 2 * ry)), with: .color(palette.eye))
                 c.fill(Path(ellipseIn: CGRect(x: ex + 0.9 - 0.85, y: -0.8 - 0.85, width: 1.7, height: 1.7)), with: .color(.white))
                 if features.sparkle { c.fill(Path(ellipseIn: CGRect(x: ex - 1.5, y: 0.4, width: 1, height: 1)), with: .color(.white)) }
@@ -268,6 +424,7 @@ enum ErmineChorusRenderer {
                 let d = -s
                 var p = Path(); p.move(to: CGPoint(x: ex - d * 2.8, y: -2.4)); p.addLine(to: CGPoint(x: ex + d * 2.2, y: 0)); p.addLine(to: CGPoint(x: ex - d * 2.8, y: 2.4))
                 c.stroke(p, with: .color(palette.eye), style: eyeLine)
+            case .wink: break
             }
         }
         if features.thickBrows || face.troubledBrows { // Thick for the strongman, raised inner ends when troubled.
@@ -365,12 +522,6 @@ enum ErmineChorusRenderer {
                 }
             }
             context.stroke(marks, with: .color(Color(red: 0.91, green: 0.89, blue: 0.85)), style: StrokeStyle(lineWidth: 1.1, lineCap: .round))
-        }
-        if let laugh = effects.laugh { // Drawn sound effect, jittering on alternate drawings.
-            var c = context
-            let j = CGFloat(laugh % 2)
-            c.translateBy(x: k.head.x + 6 + j, y: k.head.y - 24 - j); c.rotate(by: .radians(-0.12))
-            outlinedText(c, "ワハハ", at: .zero, size: 10, fill: Color(red: 1, green: 0.95, blue: 0.72), bold: true)
         }
         for note in effects.notes {
             outlinedText(context, note.glyph, at: note.position, size: note.size, fill: Color(red: 1, green: 0.88, blue: 0.54))

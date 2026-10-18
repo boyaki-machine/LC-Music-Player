@@ -60,9 +60,10 @@ struct ErmineCastMember: Sendable {
 }
 
 enum ErmineCast {
-    /// Left to right: 2, 3, 1, 4, 5. Ermine 4 stands next to 1 to look after him; 3 peeks at 4 over 1.
+    /// Left to right from low to high like a keyboard: 5, 3, 1, 4, 2.
+    /// Ermine 4 stands next to 1 to look after him; 3 peeks at 4 over 1.
     static let members: [ErmineCastMember] = [
-        ErmineCastMember(id: 2, slot: 0, palette: .light, scale: CGSize(width: 0.97, height: 0.98), features: ErmineFeatures(sparkle: true),
+        ErmineCastMember(id: 2, slot: 4, palette: .light, scale: CGSize(width: 0.97, height: 0.98), features: ErmineFeatures(sparkle: true, tailSide: -1),
                          range: .high, expressions: (0.4, 0.5, 0.1)),
         ErmineCastMember(id: 3, slot: 1, palette: .brown, scale: CGSize(width: 1, height: 1), features: ErmineFeatures(glasses: true),
                          range: .lowMid, expressions: (0.7, 0.1, 0.2)),
@@ -70,7 +71,7 @@ enum ErmineCast {
                          range: .mid, expressions: (0.5, 0.3, 0.2)),
         ErmineCastMember(id: 4, slot: 3, palette: .cream, scale: CGSize(width: 0.94, height: 0.94), features: ErmineFeatures(lashes: true, flower: true),
                          range: .highMid, expressions: (0.3, 0.35, 0.35)),
-        ErmineCastMember(id: 5, slot: 4, palette: .dark, scale: CGSize(width: 1.1, height: 1.03), features: ErmineFeatures(thickBrows: true, tailSide: -1),
+        ErmineCastMember(id: 5, slot: 0, palette: .dark, scale: CGSize(width: 1.1, height: 1.03), features: ErmineFeatures(thickBrows: true),
                          range: .bass, expressions: (0.4, 0.6, 0)),
     ]
     /// Stage layout in points of the 360×144 animation area.
@@ -81,7 +82,11 @@ enum ErmineCast {
 
 // MARK: - Face and effect cels
 
-enum ErmineEye: Sendable { case open, surprise, half, closed, happy, squeeze }
+enum ErmineEye: Sendable, Equatable {
+    case open, surprise, half, closed, happy, squeeze
+    /// One eye closed in a smile, on the side of the pointing hand.
+    case wink(side: CGFloat)
+}
 enum ErmineMouth: Sendable, Equatable { case closed, small, medium, large, round }
 
 struct ErmineFace: Sendable, Equatable {
@@ -103,9 +108,21 @@ struct ErmineNote: Sendable, Equatable {
 struct ErmineEffects: Sendable, Equatable {
     /// Alternating vibration marks, or nil.
     var shake: Int?
-    /// The drawn "ワハハ", jittering on alternate drawings, or nil.
-    var laugh: Int?
     var notes: [ErmineNote] = []
+}
+
+/// The stage around the ermines: floor lamps follow the bass and turn to a soloist,
+/// lamps hung from the beam follow the voice, and letters of the neon sign flicker on high notes.
+struct ErmineStage: Sendable, Equatable {
+    /// 0…1 brightness of the floor lamps' beams.
+    var light: Double = 0
+    /// 0…1 brightness of the lamps hung from the beam.
+    var topLight: Double = 0
+    /// The slot the lamps point at during a solo, or nil for the usual crossed beams.
+    var spotSlot: Int?
+    /// Brightness of each letter of the neon sign (1 = steady).
+    var neon: [Double] = Array(repeating: 1, count: ErmineStage.neonText.count)
+    static let neonText = Array("MICRIGAIKE KOJOES")
 }
 
 /// What the director decided for one ermine: the key to show and the cels laid over it.
@@ -115,6 +132,8 @@ struct ErmineFrame: Sendable {
     var effects = ErmineEffects()
     /// Tail wag (−1, 0, 1) drawn as a separate tail cel.
     var wag: CGFloat = 0
+    /// The arm pose held for the current phrase.
+    var arms = ErmineArms()
 }
 
 /// One ermine ready to draw: the (possibly in-between) body pose plus the cels.

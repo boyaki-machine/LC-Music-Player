@@ -5,9 +5,9 @@ public struct ErmineChorusView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     public init(driver: ErmineChorusDriver) { self.driver = driver }
     public var body: some View {
-        let drawings = driver.drawings
+        let drawings = driver.drawings, stage = driver.stage
         Canvas { context, size in
-            ErmineChorusRenderer.draw(context: context, size: size, drawings: drawings)
+            ErmineChorusRenderer.draw(context: context, size: size, drawings: drawings, stage: stage, reduceMotion: reduceMotion)
         }
         .overlay(alignment: .topLeading) {
             if driver.waitingForData {

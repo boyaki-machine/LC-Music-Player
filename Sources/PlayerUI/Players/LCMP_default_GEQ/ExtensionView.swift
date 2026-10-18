@@ -41,6 +41,31 @@ public struct ExtensionView: View {
         self.resizeExtension = resizeExtension
         self.showAcknowledgements = showAcknowledgements
     }
+    /// One card per visualization design: thumbnail, title and tagline. The chosen card is outlined in green.
+    private func designCard(_ design: VisualizationDesign) -> some View {
+        let selected = presentation.visualizationDesign == design
+        let accent = Color(red: 0.45, green: 0.95, blue: 0.36)
+        return Button { presentation.setVisualizationDesign(design) } label: {
+            HStack(spacing: 10) {
+                VisualizationThumbnail(design: design).frame(width: 64, height: 48).clipShape(RoundedRectangle(cornerRadius: 3))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(design.title).font(.system(size: 14, weight: .bold)).lineLimit(1).minimumScaleFactor(0.8)
+                        .foregroundStyle(selected ? accent : Color.white.opacity(0.92))
+                    // The tagline may wrap to a second line.
+                    Text(design.tagline).font(.system(size: 11)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(selected ? accent.opacity(0.9) : Color.white.opacity(0.72))
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(8)
+            .background(RoundedRectangle(cornerRadius: 10).fill(Color(red: 0.16, green: 0.28, blue: 0.38)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? accent : Color.white.opacity(0.1), lineWidth: selected ? 2.5 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(design.title).accessibilityValue(design.tagline)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
     private var viewed: MusicPlaylist? { library.playlist(browsingID) ?? library.currentPlaylist ?? library.document.playlists.first }
     private var indicator: Color {
         playback.state == .playing ? Color(red: 0.62, green: 0.91, blue: 0.74) : playback.state == .paused ? Color(red: 0.88, green: 0.76, blue: 0.55) : Color(white: 0.7)
@@ -67,16 +92,11 @@ public struct ExtensionView: View {
                 case .playlist: playlistContent
                 case .source: sourceContent
                 case .visualization:
-                    VStack(alignment: .leading, spacing: 10) {
-                        Picker("表示するデザイン", selection: Binding(get: { presentation.visualizationDesign },
-                            set: { presentation.setVisualizationDesign($0) })) {
-                            ForEach(VisualizationDesign.allCases, id: \.self) { Text($0.title).tag($0) }
-                        }.pickerStyle(.radioGroup).accessibilityIdentifier("visualizationDesign")
-                        Text(presentation.visualizationDesign.summary).fixedSize(horizontal: false, vertical: true)
-                        Text("音量やミュートを変えても、表示は音源のレベルに反応します。切り替えても再生と音量は変わりません。")
-                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                        Spacer()
-                    }
+                    ScrollView {
+                        VStack(spacing: 8) {
+                            ForEach(VisualizationDesign.allCases, id: \.self) { designCard($0) }
+                        }.padding(.vertical, 2).padding(.horizontal, 1)
+                    }.accessibilityIdentifier("visualizationDesign")
                 case .settings:
                     ScrollView {
                         VStack(alignment: .leading, spacing: 10) {

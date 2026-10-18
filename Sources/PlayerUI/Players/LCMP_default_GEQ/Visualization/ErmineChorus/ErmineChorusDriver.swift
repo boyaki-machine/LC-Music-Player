@@ -15,6 +15,7 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
     static let maxPending = 64
 
     private(set) var drawings: [ErmineDrawing] = ErmineChorusDriver.idleDrawings()
+    private(set) var stage = ErmineStage()
     public private(set) var waitingForData = false
     @ObservationIgnored public private(set) var activity: VisualizationActivity = .inactive
     @ObservationIgnored public private(set) var isVisible = false
@@ -23,6 +24,9 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
     }
     @ObservationIgnored private(set) var directors: [ErmineDirector] = ErmineChorusDriver.makeDirectors()
     @ObservationIgnored private var tweens = Array(repeating: ErmineInbetweener(), count: ErmineCast.members.count)
+    @ObservationIgnored private(set) var ensemble = ErmineEnsemble()
+    @ObservationIgnored private var armTweens = Array(repeating: ErmineArmTween(), count: ErmineCast.members.count)
+    @ObservationIgnored private(set) var beats = ErmineBeatTracker()
     @ObservationIgnored private var bands = ErmineBandLevels()
     @ObservationIgnored private(set) var levels = Array(repeating: 0.0, count: ErmineRange.allCases.count)
     @ObservationIgnored private var pending: [(at: Double, levels: [Double])] = []
@@ -59,7 +63,7 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
 
     /// Seek, new analysis and similar: drop queued data and the register sensitivity; the ermines keep their places.
     public func reset() {
-        pending.removeAll(); bands.reset(); generation = nil; lastSequence = nil; lastProduced = nil
+        pending.removeAll(); bands.reset(); beats.reset(); generation = nil; lastSequence = nil; lastProduced = nil
         levels = Array(repeating: 0, count: levels.count)
         lastData = VisualizationClock.now()
         updateTicker()
@@ -68,18 +72,20 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
     public func receive(_ frame: AnalysisFrame) {
         guard isVisible, activity == .playing else { return }
         if frame.generation != generation {
-            generation = frame.generation; lastSequence = nil; lastProduced = nil; pending.removeAll(); bands.reset()
+            generation = frame.generation; lastSequence = nil; lastProduced = nil; pending.removeAll(); bands.reset(); beats.reset()
         }
         if let lastSequence, frame.sequence <= lastSequence { return }
         let produced = frame.timing.producedHostTime
         let dt = lastProduced.map { min(0.5, max(0, produced - $0)) } ?? 0
-        guard let next = bands.levels(bandDBFS: frame.bandDBFS, edgesHz: frame.bandEdgesHz, dt: dt) else { return }
+        guard let next = bands.levels(bandDBFS: frame.bandDBFS, edgesHz: frame.bandEdgesHz, dt: dt),
+              let registers = ErmineBandLevels.registerDB(bandDBFS: frame.bandDBFS, edgesHz: frame.bandEdgesHz) else { return }
         lastSequence = frame.sequence; lastProduced = produced
         let now = VisualizationClock.now()
         // Wait for the estimated presentation time, as the LED design does; invalid times show at once.
         var at = frame.timing.estimatedPresentationHostTime ?? now
         if !at.isFinite || at > now + 2 || at < now - 2 { at = now }
         pending.append((at, next))
+        beats.feed(registerDB: registers, at: at)
         if pending.count > Self.maxPending { pending.removeFirst(pending.count - Self.maxPending) }
         updateTicker()
     }
@@ -95,15 +101,19 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
         if waiting || !playing { levels = Array(repeating: 0, count: levels.count) }
         if waitingForData != waiting { waitingForData = waiting }
         let dt = min(0.1, max(0, now - (lastStep ?? now))); lastStep = now
-        let world = ErmineWorld(ermine1Intense: directors.first { $0.member.id == 1 }?.intense ?? false)
+        ensemble.follow(playing && !waiting ? beats.beat(at: now) : nil)
+        ensemble.update(&directors, dt: dt, playing: playing)
+        let world = ErmineWorld(ermine1Intense: directors.first { $0.member.id == 1 }?.intense ?? false, beat: ensemble.beat)
         var next: [ErmineDrawing] = []
         for i in directors.indices {
             directors[i].step(dt: dt, level: levels[directors[i].member.range.rawValue], playing: playing, world: world)
             var frame = directors[i].frame
             frame.effects.notes = directors[i].notes(at: now)
-            next.append(ErmineDrawing(pose: tweens[i].pose(for: frame.key, at: now), frame: frame))
+            let body = tweens[i].pose(for: frame.key, at: now)
+            next.append(ErmineDrawing(pose: armTweens[i].apply(frame.arms, to: frame.key, pose: body, at: now), frame: frame))
         }
         drawings = next
+        if stage != ensemble.stage { stage = ensemble.stage }
     }
 
     private func stop() {
@@ -112,6 +122,8 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
         levels = Array(repeating: 0, count: levels.count)
         directors = Self.makeDirectors().map { var d = $0; d.reduceMotion = reduceMotion; return d }
         tweens = Array(repeating: ErmineInbetweener(), count: tweens.count)
+        ensemble = ErmineEnsemble(); stage = ErmineStage(); beats.reset()
+        armTweens = Array(repeating: ErmineArmTween(), count: armTweens.count)
         drawings = Self.idleDrawings(); waitingForData = false; lastStep = nil
     }
 
