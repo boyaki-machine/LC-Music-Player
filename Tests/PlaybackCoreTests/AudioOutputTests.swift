@@ -46,6 +46,31 @@ struct AudioOutputTests {
         print("Analysis \(filename): observed=\(computations.count), maxCompute=\(computations.max() ?? 0)s, maxWindowAge=\(ages.max() ?? 0)s")
     }
 
+    /// The end is reported after the whole track has played, not when decoding finishes,
+    /// and the reported position runs up to the duration without passing it.
+    @Test(arguments: ["gapless-vbr-44k-stereo.mp3", "gapless-cbr-48k-mono.mp3"])
+    func finishesAfterTheWholeTrackHasPlayed(_ filename: String) async throws {
+        let url = try #require(Bundle.module.url(forResource: filename, withExtension: nil, subdirectory: "Fixtures"))
+        let backend = try AudioEngineBackend(url: url)
+        defer { backend.stop() }
+        backend.volume = 0
+        var finishedAt: ContinuousClock.Instant?
+        backend.onEvent = { if case .finished = $0 { finishedAt = .now } }
+        let started = ContinuousClock.now
+        try backend.play()
+        var last = 0.0
+        while finishedAt == nil, started.duration(to: .now) < .seconds(backend.duration + 3) {
+            let time = backend.currentTime
+            #expect(time >= last && time <= backend.duration)
+            last = time
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let elapsed = started.duration(to: try #require(finishedAt))
+        #expect(elapsed >= .seconds(backend.duration))
+        #expect(elapsed < .seconds(backend.duration + 1))
+        #expect(last > backend.duration - 0.1)
+    }
+
     @Test func actualPauseResumeStopAndRestartPreserveSystemVolume() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-output-\(UUID()).wav")
         defer { try? FileManager.default.removeItem(at: url) }

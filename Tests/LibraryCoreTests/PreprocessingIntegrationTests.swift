@@ -16,7 +16,7 @@ import PlaybackCore
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("PlaybackCoreTests/Fixtures/\(name)")
         let prepared = try await AudioPreprocessor.shared.prepare(url)
-        let metrics = try await AudioPreprocessor.shared.measureLevels(url, profile: SFBAudioBackend.measurementProfile())
+        let metrics = try await AudioPreprocessor.shared.measureLevels(url, profile: AudioEngineBackend.measurementProfile())
         let playback = PlaybackController(); playback.setVolume(0); playback.requireNormalization(true)
         #expect(playback.selectPrepared(prepared, using: FileLease {}, metrics: metrics))
         playback.togglePlayPause()

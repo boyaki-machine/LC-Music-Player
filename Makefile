@@ -1,25 +1,22 @@
 .DEFAULT_GOAL := help
 # SwiftPM products are shared by these targets, even with make -j.
 .NOTPARALLEL:
-.PHONY: help release debug archive distribution dmg test
+.PHONY: help release debug archive dmg test
 
 PYTHON ?= python3
 RELEASE_OUTPUT ?= build/release/LCMP.app
 DEBUG_OUTPUT ?= build/debug/LCMP.app
 ARCHIVE ?= build/dist/LCMP.zip
-DISTRIBUTION_OUTPUT ?= build/distribution
 DMG_OUTPUT ?=
 DMG_APP ?=
-AUDIO_SOURCE ?=
 
 help:
 	@printf '%s\n' 'make release  Release app: $(RELEASE_OUTPUT)' \
 	  'make debug    Debug app: $(DEBUG_OUTPUT)' \
 	  'make archive  Build Release and ZIP: $(ARCHIVE)' \
-	  'make distribution  Source-built app, corresponding source and relink kit: $(DISTRIBUTION_OUTPUT)' \
-	  'make dmg      Installer DMG of the source distribution: build/dmg/LCMP-<version>.dmg' \
+	  'make dmg      Installer DMG of a release app built for distribution: build/dmg/LCMP-<version>.dmg' \
 	  'make test     Tests without audio output' \
-	  'Overrides: PYTHON, RELEASE_OUTPUT, DEBUG_OUTPUT, ARCHIVE, DISTRIBUTION_OUTPUT, AUDIO_SOURCE, DMG_OUTPUT, DMG_APP'
+	  'Overrides: PYTHON, RELEASE_OUTPUT, DEBUG_OUTPUT, ARCHIVE, DMG_OUTPUT, DMG_APP'
 
 release:
 	$(PYTHON) scripts/build-app.py --configuration release --output "$(RELEASE_OUTPUT)"
@@ -36,15 +33,11 @@ archive: release
 	  mv -f "$$temporary" "$(ARCHIVE)"; \
 	  printf '%s\n' "$(ARCHIVE)"
 
-distribution:
-	$(PYTHON) scripts/distribution.py --output "$(DISTRIBUTION_OUTPUT)" $(if $(AUDIO_SOURCE),--audio-source "$(AUDIO_SOURCE)",)
-
 dmg:
-	$(PYTHON) scripts/build-dmg.py $(if $(DMG_OUTPUT),--output "$(DMG_OUTPUT)",) $(if $(DMG_APP),--app "$(DMG_APP)",) $(if $(AUDIO_SOURCE),--audio-source "$(AUDIO_SOURCE)",)
+	$(PYTHON) scripts/build-dmg.py $(if $(DMG_OUTPUT),--output "$(DMG_OUTPUT)",) $(if $(DMG_APP),--app "$(DMG_APP)",)
 
 test:
 	$(PYTHON) scripts/test_acknowledgements.py
-	$(PYTHON) scripts/test_distribution.py
 	$(PYTHON) scripts/test_app_version.py
 	$(PYTHON) scripts/test_app_icon.py
 	$(PYTHON) scripts/test_build_dmg.py

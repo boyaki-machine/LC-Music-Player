@@ -1,12 +1,12 @@
 LC Music Player (LCMP)
-Copyright 2026 LCMP contributors
+Copyright 2026 Boyaki Machine
 
 Licensed under the Apache License, Version 2.0.
 See LICENSE for the full license text.
 
-Third-party code, materials, dependencies and their notices retain their
-respective copyrights and licenses; they are not relicensed by this notice.
-See third-party/README.md and docs/design/11_third-party-dependencies.md
+The app bundles no third-party library: audio is decoded and played by
+macOS (Core Audio and AVFoundation). Any third-party code or materials
+added later retain their respective copyrights and licenses; they are not
+relicensed by this notice. See docs/design/11_third-party-dependencies.md
 in the source repository, and Contents/Resources/ThirdPartyLicenses in
-the app bundle. Corresponding sources and relinking materials are bundled
-in Contents/Resources/CorrespondingSource for source-built distributions.
+the app bundle.

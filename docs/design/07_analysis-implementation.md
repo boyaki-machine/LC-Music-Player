@@ -16,10 +16,10 @@
 
 ## 3. 方式
 
-`PlaybackCore`のSFBAudioBackendが、音声の取得と解析セッションの寿命を所有する。`AnalysisTransport`は、Cの固定容量SPSCキューとAudio Unitのレンダー通知を実装する。
+`PlaybackCore`のAudioEngineBackendが、音声の取得と解析セッションの寿命を所有する。`AnalysisTransport`は、Cの固定容量SPSCキューとAudio Unitのレンダー通知を実装する。
 
 ```text
-SFBAudioEngine source
+PCMFeeder → AVAudioPlayerNode
     → 形式変換mixer → 観測ノード ──→ PCMコピー → 有界キュー → FFTワーカー → 最新結果 → 表示側
     → 音量自動調整gain → 将来の同期遅延段
     → mainMixer（アプリ音量）→ OS出力
@@ -27,7 +27,7 @@ SFBAudioEngine source
 
 - 観測ノードは`AVAudioUnitEQ(numberOfBands: 0)`である。フィルターはなく、globalGainは0dBとする。公開AudioUnitへのレンダー通知を使うために置くもので、利用者向けの音声イコライザー機能は提供しない。
 - 観測側の形式は、mainMixerの出力レート・チャンネル数に対応する標準Float32 PCMである。前段のmixerが音源から出力形式へ変換し、後段のmainMixerと同じ形式を使って不要なレート変換を避ける。
-- SFBの初期source形式は変更せず、デコーダと内部ring bufferの形式変更をSFB自身へ委ねる。SFBAudioEngineの`modifyProcessingGraph`内で、sourceとmainMixerの間だけを変更し、engineを直接開始・停止しない。
+- グラフは再生開始ごとに、エンジンを開始する前に組み立てる。再生中にグラフを組み替えない。
 - [音量自動調整](06_volume-normalization-implementation.md)では、この観測ノードの後に専用のgain段を置く。観測用EQのgainは変更せず、解析の購読を解除しても自動補正は続ける。自動調整ONでは、共通の形式変換を行うProfileDecoderの出力を観測する。
 - 可視化の解析値と、LUFS/true peakによる出力補正の測定値・状態は別のデータとして扱う。
 
@@ -97,7 +97,7 @@ render側は次のように実装する。
 - 音声の取得を遅延段の前に保ち、同じPCM時刻から解析と音声を分岐する。
 - FFTの計算だけでなく、窓の中央からデータが揃うまでと、取得、配信、描画までの時間を計測する。描画側も同じhost clockで実際の描画時刻を記録する。
 - 出力先・形式・補償量の変更時は、時刻の基準と解析の世代を更新する。値をフレームごとに変えて音声を伸縮させない。
-- 遅延中のPCMは固定の上限を持ち、停止・シークで破棄する。自然終了では最終サンプルの出力まで排出を待つ。SFBAudioEngineのsource終了通知だけで音声エンジンを停止しない。
+- 遅延中のPCMは固定の上限を持ち、停止・シークで破棄する。自然終了では最終サンプルの出力まで排出を待つ。供給の終了（最後のバッファの消費）だけで音声エンジンを停止しない。
 - 再生位置の表示・一時停止・再開・次曲送りも、デコーダの位置と実際の提示位置を区別する。
 
 推定提示時刻は、物理的な発音を測定した値ではない。OSが報告する遅延、Bluetooth内部のバッファ、ディスプレイの描画遅延を含む実際の同期は、同じインパルスの出音と画面を別に測定して評価する。

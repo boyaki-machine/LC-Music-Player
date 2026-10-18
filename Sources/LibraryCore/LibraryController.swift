@@ -60,7 +60,7 @@ import AudioProcessingCore
         self.preprocessor = preprocessor; self.random = AnyRandomNumberGenerator(random)
         self.preprocessingEnabled = preprocessingEnabled; self.preferences = preferences
         if preprocessingEnabled && playlistPreprocessingEnabled {
-            playlistPreprocessing = PlaylistPreprocessing(references: references, worker: preprocessor, profile: { try SFBAudioBackend.measurementProfile() })
+            playlistPreprocessing = PlaylistPreprocessing(references: references, worker: preprocessor, profile: { try AudioEngineBackend.measurementProfile() })
             playlistPreprocessing?.onMeasured = { [weak self] id, metrics in
                 guard let self, self.currentTrack?.id == id, self.playback.selectedURL == metrics.source.url else { return }
                 self.measuredLevels = metrics
@@ -610,7 +610,7 @@ extension LibraryController {
                     resolved = access; prepared = audio
                 } else if sweepTransfer != nil, let cached, cached.audio == nil,
                           let access = cached.resolved, cached.reference == track.reference,
-                          cached.levels?.profile == (try? SFBAudioBackend.measurementProfile()),
+                          cached.levels?.profile == (try? AudioEngineBackend.measurementProfile()),
                           (try? cached.levels?.source.validate()) != nil {
                     resolved = access
                     prepared = try await self.preprocessor.prepare(access.url, cancellation: cancellation, seconds: 2, byteLimit: 32 * 1024 * 1024)
@@ -626,7 +626,7 @@ extension LibraryController {
                 }
                 var levels: TrackAudioMetrics?
                 if intent.autoPlay, self.normalizesVolume {
-                    let profile = try SFBAudioBackend.measurementProfile()
+                    let profile = try AudioEngineBackend.measurementProfile()
                     let candidate = cached?.levels ?? previousLevels
                     if let candidate, candidate.source == prepared.source, candidate.profile == profile,
                        (try? candidate.source.validate()) != nil { levels = candidate }
@@ -634,7 +634,7 @@ extension LibraryController {
                         self.preparationStage = "曲全体の音量を測定しています…"
                         levels = try await self.preprocessor.measureLevels(resolved.url, profile: profile, cancellation: cancellation, ownerID: track.id)
                     }
-                    guard try SFBAudioBackend.measurementProfile() == profile else { throw AudioProcessingFailure.outputChanged }
+                    guard try AudioEngineBackend.measurementProfile() == profile else { throw AudioProcessingFailure.outputChanged }
                 }
                 try cancellation.check()
                 guard self.preparationID == id, self.editsEnabled,
@@ -728,7 +728,7 @@ extension LibraryController {
                 try cancellation.check()
                 request.audio = prepared
                 if normalize {
-                    let profile = try SFBAudioBackend.measurementProfile()
+                    let profile = try AudioEngineBackend.measurementProfile()
                     let levels = try await preprocessor.measureLevels(resolved.url, profile: profile,
                                                                       cancellation: cancellation, ownerID: track.id)
                     try cancellation.check()

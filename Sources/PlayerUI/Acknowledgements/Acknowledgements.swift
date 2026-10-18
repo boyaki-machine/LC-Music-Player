@@ -11,8 +11,26 @@ struct AcknowledgementPackage: Codable, Identifiable, Sendable {
     let name: String
     let version: String?
     let revision: String
-    let url: String
+    let url: String?
     let documents: [AcknowledgementDocument]
+}
+/// One row of the license window: LCMP itself, then any third-party package.
+/// Each row reads its documents from its own bundled directory.
+struct LicenseEntry: Identifiable, Sendable {
+    let package: AcknowledgementPackage
+    let root: URL
+    var id: String { package.id }
+
+    /// LCMP's own LICENSE and NOTICE, bundled in Resources/LCMPLicense by the app build.
+    static func lcmp(root: URL, version: String = AppVersion.text()) throws -> Self {
+        let documents = ["LICENSE", "NOTICE"].map { AcknowledgementDocument(title: $0, path: $0) }
+        for document in documents {
+            let url = try AcknowledgementCatalogue.documentURL(document, root: root)
+            guard FileManager.default.isReadableFile(atPath: url.path) else { throw CocoaError(.fileReadNoSuchFile) }
+        }
+        return Self(package: AcknowledgementPackage(id: "lcmp", name: AppVersion.displayName, version: version,
+                                                    revision: "", url: nil, documents: documents), root: root)
+    }
 }
 struct AcknowledgementCatalogue: Codable, Sendable {
     let schemaVersion: Int
@@ -20,10 +38,11 @@ struct AcknowledgementCatalogue: Codable, Sendable {
 
     static func load(from root: URL) throws -> Self {
         let value = try JSONDecoder().decode(Self.self, from: Data(contentsOf: root.appendingPathComponent("index.json")))
-        guard value.schemaVersion == 1, !value.packages.isEmpty,
+        // An empty list is valid: the app currently bundles no third-party library.
+        guard value.schemaVersion == 1,
               Set(value.packages.map(\.id)).count == value.packages.count else { throw CocoaError(.fileReadCorruptFile) }
         for package in value.packages {
-            guard !package.documents.isEmpty, URL(string: package.url)?.scheme == "https" else { throw CocoaError(.fileReadCorruptFile) }
+            guard !package.documents.isEmpty, URL(string: package.url ?? "")?.scheme == "https" else { throw CocoaError(.fileReadCorruptFile) }
             for document in package.documents { _ = try documentURL(document, root: root) }
         }
         return value
@@ -46,46 +65,57 @@ struct AcknowledgementCatalogue: Codable, Sendable {
 
 struct AcknowledgementsView: View {
     let root: URL
-    @State private var catalogue: AcknowledgementCatalogue?
+    let licenseRoot: URL
+    @State private var entries: [LicenseEntry]?
     @State private var error: String?
     @State private var selected: String?
     @State private var document: AcknowledgementDocument?
     @State private var text = ""
-    private var package: AcknowledgementPackage? { catalogue?.packages.first { $0.id == selected } }
+    private var entry: LicenseEntry? { entries?.first { $0.id == selected } }
+    private var package: AcknowledgementPackage? { entry?.package }
+
+    @ViewBuilder private func documentView(_ package: AcknowledgementPackage) -> some View {
+        HStack {
+            Text("収録文書")
+            NoticeDocumentPicker(documents: package.documents, selection: $document)
+                .frame(height: 24)
+        }
+        NoticeText(text: text).accessibilityLabel("ライセンス原文")
+            .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.07)))
+    }
 
     var body: some View {
         GeometryReader { _ in
         VStack(alignment: .leading, spacing: 12) {
-            Text("謝辞とライセンス").font(.title2)
-            Text("LCMPは次のオープンソースソフトウェアに支えられています。開発と公開に携わる皆さまに感謝します。")
-                .fixedSize(horizontal: false, vertical: true)
-            if let error { Text(error).foregroundStyle(.secondary) }
-            if let catalogue {
+            // Only LCMP's own documents: one page, no list. Third-party rows bring the list back.
+            if let entries, entries.count > 1 {
+                Text("ライセンス").font(.title2)
+                Text("LCMPは次のオープンソースソフトウェアも利用しています。開発と公開に携わる皆さまに感謝します。")
+                    .fixedSize(horizontal: false, vertical: true)
                 HSplitView {
-                    List(catalogue.packages, selection: $selected) { item in
+                    List(entries, selection: $selected) { entry in
+                        let item = entry.package
                         Text(item.name).tag(item.id)
                             .listRowBackground(selected == item.id
                                 ? Color(red: 0.62, green: 0.91, blue: 0.74).opacity(0.12) : Color.clear)
                     }.scrollContentBackground(.hidden)
                     .frame(minWidth: 150, idealWidth: 200, maxWidth: 260)
-                        .accessibilityLabel("利用しているOSS")
+                        .accessibilityLabel("ライセンスの対象")
                     VStack(alignment: .leading, spacing: 8) {
                         if let package {
                             Text(package.name).font(.headline).textSelection(.enabled)
                             Text("バージョン：\(package.version ?? package.revision)").textSelection(.enabled)
-                            if let url = URL(string: package.url) { Link(package.url, destination: url).lineLimit(2) }
-                            HStack {
-                                Text("収録文書")
-                                NoticeDocumentPicker(documents: package.documents, selection: $document)
-                                    .frame(height: 24)
-                            }
-                            NoticeText(text: text).accessibilityLabel("ライセンス原文")
-                                .background(.black.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
-                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.white.opacity(0.07)))
+                            if let link = package.url, let url = URL(string: link) { Link(link, destination: url).lineLimit(2) }
+                            documentView(package)
                         }
                     }.frame(minWidth: 300, maxWidth: .infinity, maxHeight: .infinity)
                 }
+            } else {
+                Text("LC Music Playerのライセンス").font(.title2)
+                if let package { documentView(package) }
             }
+            if let error { Text(error).foregroundStyle(.secondary) }
         }.padding(16)
         }
         .background(PlayerGlassBackground())
@@ -94,18 +124,21 @@ struct AcknowledgementsView: View {
         .preferredColorScheme(.dark)
         .task {
             do {
-                let root = root
-                let result = try await Task.detached { try AcknowledgementCatalogue.load(from: root) }.value
-                catalogue = result
-                selected = result.packages.first?.id
+                let root = root, licenseRoot = licenseRoot, version = AppVersion.text()
+                let result = try await Task.detached {
+                    let own = try LicenseEntry.lcmp(root: licenseRoot, version: version)
+                    let others = try AcknowledgementCatalogue.load(from: root).packages.map { LicenseEntry(package: $0, root: root) }
+                    return [own] + others
+                }.value
+                entries = result
+                selected = result.first?.id
             } catch { self.error = "同梱のライセンス情報を読み込めません。アプリのビルド・同梱内容を確認してください。" }
         }
         .onChange(of: selected) { _, _ in document = package?.documents.first }
         .task(id: document) {
             text = ""
-            guard let document else { return }
+            guard let document, let root = entry?.root else { return }
             do {
-                let root = root
                 let result = try await Task.detached { try AcknowledgementCatalogue.text(document, root: root) }.value
                 guard !Task.isCancelled else { return }
                 text = result
@@ -151,14 +184,17 @@ struct NoticeText: NSViewRepresentable {
 @MainActor public final class AcknowledgementsWindowController {
     public private(set) var window: NSWindow?
     private let root: URL
-    public init(resourceRoot: URL? = nil) {
-        root = resourceRoot ?? (Bundle.main.resourceURL ?? Bundle.main.bundleURL).appendingPathComponent("ThirdPartyLicenses")
+    private let licenseRoot: URL
+    public init(resourceRoot: URL? = nil, licenseRoot: URL? = nil) {
+        let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
+        root = resourceRoot ?? resources.appendingPathComponent("ThirdPartyLicenses")
+        self.licenseRoot = licenseRoot ?? resources.appendingPathComponent("LCMPLicense")
     }
     public func show() {
         if window == nil {
             let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 760, height: 520),
                                   styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "LCMP — 謝辞とライセンス"
+            window.title = "LCMP — ライセンス"
             window.appearance = NSAppearance(named: .darkAqua)
             window.titlebarAppearsTransparent = false
             window.titleVisibility = .visible
@@ -166,7 +202,7 @@ struct NoticeText: NSViewRepresentable {
             window.backgroundColor = NSColor(srgbRed: 0.12, green: 0.13, blue: 0.14, alpha: 1)
             window.contentMinSize = NSSize(width: 560, height: 360)
             window.isReleasedWhenClosed = false
-            let host = NSHostingView(rootView: AcknowledgementsView(root: root).frame(minWidth: 560, minHeight: 360))
+            let host = NSHostingView(rootView: AcknowledgementsView(root: root, licenseRoot: licenseRoot).frame(minWidth: 560, minHeight: 360))
             host.sizingOptions = [.minSize]
             host.frame = CGRect(x: 0, y: 0, width: 760, height: 520)
             window.contentView = host
@@ -183,7 +219,7 @@ struct AcknowledgementsButton: NSViewRepresentable {
     let action: () -> Void
     func makeCoordinator() -> Coordinator { Coordinator(action) }
     func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(title: "謝辞とライセンス…", target: context.coordinator, action: #selector(Coordinator.clicked(_:)))
+        let button = NSButton(title: "ライセンス…", target: context.coordinator, action: #selector(Coordinator.clicked(_:)))
         button.bezelStyle = .rounded
         button.controlSize = .small
         button.setAccessibilityIdentifier("showAcknowledgements")

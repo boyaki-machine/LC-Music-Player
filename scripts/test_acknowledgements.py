@@ -59,6 +59,15 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(len(self.run_generator()['packages']), 1)
         self.assertFalse((self.output / 'other').exists())
 
+    def test_no_resolved_file_means_no_dependencies(self):
+        self.run_generator()
+        self.resolved.unlink()
+        generate(self.resolved, {'dependencies': []}, self.artifacts, self.output)
+        self.assertEqual(json.loads((self.output / 'index.json').read_text())['packages'], [])
+        self.assertFalse((self.output / 'example').exists())
+        with self.assertRaises(ValueError):
+            generate(self.resolved, self.graph, self.artifacts, self.output)
+
     def test_missing_notices_or_checkout_fail(self):
         (self.source / 'LICENSE').unlink()
         with self.assertRaises(ValueError): self.run_generator()

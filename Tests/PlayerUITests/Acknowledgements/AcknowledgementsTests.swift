@@ -14,6 +14,14 @@ private func fixture() throws -> URL {
     try json.write(to: root.appendingPathComponent("index.json"), atomically: true, encoding: .utf8)
     return root
 }
+/// LCMP's own documents, as the app build bundles them in Resources/LCMPLicense.
+private func licenseFixture() throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-license-\(UUID())")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try "Copyright Own\nApache License text.\n".write(to: root.appendingPathComponent("LICENSE"), atomically: true, encoding: .utf8)
+    try "Own NOTICE\n".write(to: root.appendingPathComponent("NOTICE"), atomically: true, encoding: .utf8)
+    return root
+}
 
 @Suite(.serialized) @MainActor struct AcknowledgementsTests {
     @Test func catalogueAndTextRejectMissingCorruptAndEscapingDocuments() throws {
@@ -29,15 +37,25 @@ private func fixture() throws -> URL {
         #expect(throws: (any Error).self) { try AcknowledgementCatalogue.documentURL(.init(title: "bad", path: "escape/other"), root: root) }
         try FileManager.default.removeItem(at: root.appendingPathComponent("example/LICENSE"))
         #expect(throws: (any Error).self) { try AcknowledgementCatalogue.text(doc, root: root) }
+        // No third-party library is a valid catalogue; a malformed one is not.
+        try Data(#"{"schemaVersion":1,"packages":[]}"#.utf8).write(to: root.appendingPathComponent("index.json"))
+        #expect(try AcknowledgementCatalogue.load(from: root).packages.isEmpty)
         try Data("{}".utf8).write(to: root.appendingPathComponent("index.json"))
         #expect(throws: (any Error).self) { try AcknowledgementCatalogue.load(from: root) }
+        let own = try licenseFixture(); defer { try? FileManager.default.removeItem(at: own) }
+        let entry = try LicenseEntry.lcmp(root: own, version: "1.2.3")
+        #expect(entry.package.name == "LC Music Player (LCMP)" && entry.package.version == "1.2.3")
+        #expect(try entry.package.documents.map { try AcknowledgementCatalogue.text($0, root: own) } == ["Copyright Own\nApache License text.\n", "Own NOTICE\n"])
+        try FileManager.default.removeItem(at: own.appendingPathComponent("NOTICE"))
+        #expect(throws: (any Error).self) { try LicenseEntry.lcmp(root: own) }
         try FileManager.default.removeItem(at: root.appendingPathComponent("index.json"))
         #expect(throws: (any Error).self) { try AcknowledgementCatalogue.load(from: root) }
     }
 
     @Test func singleWindowReopensAndSelectableTextFitsMinimumSize() async throws {
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
-        let controller = AcknowledgementsWindowController(resourceRoot: root)
+        let own = try licenseFixture(); defer { try? FileManager.default.removeItem(at: own) }
+        let controller = AcknowledgementsWindowController(resourceRoot: root, licenseRoot: own)
         controller.show()
         let window = try #require(controller.window)
         defer { window.orderOut(nil); window.contentView = nil }
@@ -48,16 +66,16 @@ private func fixture() throws -> URL {
         }
         for _ in 0..<100 {
             host.layoutSubtreeIfNeeded()
-            if textViews(host).contains(where: { $0.string.contains("Copyright Example") }) { break }
+            if textViews(host).contains(where: { $0.string.contains("Copyright Own") }) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        var text = try #require(textViews(host).first { $0.string.contains("Copyright Example") })
+        var text = try #require(textViews(host).first { $0.string.contains("Copyright Own") })
         #expect(text.isSelectable && !text.isEditable && !text.isRichText)
         #expect(window.contentMinSize == NSSize(width: 560, height: 360))
         window.setContentSize(window.contentMinSize); host.layoutSubtreeIfNeeded()
         try await Task.sleep(for: .milliseconds(80))
         host.layoutSubtreeIfNeeded(); host.display()
-        text = try #require(textViews(host).first { $0.string.contains("Copyright Example") })
+        text = try #require(textViews(host).first { $0.string.contains("Copyright Own") })
         #expect(host.fittingSize.width <= 560 && host.fittingSize.height <= 360)
         #expect(text.bounds.width > 100)
         text.setSelectedRange(NSRange(location: 0, length: 9))
@@ -65,6 +83,16 @@ private func fixture() throws -> URL {
         defer { clipboard.releaseGlobally() }
         #expect(text.writeSelection(to: clipboard, types: text.writablePasteboardTypes))
         #expect(clipboard.string(forType: .string) == "Copyright")
+        // LCMP comes first; the third-party rows follow it.
+        func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
+        let table = try #require(all(host).compactMap { $0 as? NSTableView }.first)
+        #expect(table.numberOfRows == 2)
+        table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        for _ in 0..<100 {
+            if textViews(host).contains(where: { $0.string.contains("Copyright Example") }) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(textViews(host).contains { $0.string.contains("Copyright Example") })
         if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
             try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
             let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
@@ -75,84 +103,71 @@ private func fixture() throws -> URL {
         controller.show(); #expect(controller.window === window && window.isVisible)
     }
 
+    /// LCMP_NOTICE_RESOURCES is a built app's Contents/Resources directory.
     @Test func builtCatalogueRendersOriginalsAndLongText() async throws {
         guard let directory = ProcessInfo.processInfo.environment["LCMP_NOTICE_RESOURCES"] else { return }
-        let root = URL(fileURLWithPath: directory)
+        let resources = URL(fileURLWithPath: directory)
+        let root = resources.appendingPathComponent("ThirdPartyLicenses"), own = resources.appendingPathComponent("LCMPLicense")
         let catalogue = try AcknowledgementCatalogue.load(from: root)
-        let expected = try AcknowledgementCatalogue.text(#require(catalogue.packages.first?.documents.first), root: root)
-        let controller = AcknowledgementsWindowController(resourceRoot: root)
+        // The index lists exactly the resolved dependencies: none while Package.resolved is absent.
+        let resolved = root.appendingPathComponent("Package.resolved")
+        if FileManager.default.fileExists(atPath: resolved.path) {
+            let json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: resolved)) as? [String: Any])
+            let pins = try #require(json["pins"] as? [[String: Any]])
+            #expect(Set(catalogue.packages.map(\.id)) == Set(pins.compactMap { $0["identity"] as? String }))
+        } else {
+            #expect(catalogue.packages.isEmpty)
+        }
+        let entry = try LicenseEntry.lcmp(root: own)
+        let license = try AcknowledgementCatalogue.text(entry.package.documents[0], root: own)
+        let notice = try AcknowledgementCatalogue.text(entry.package.documents[1], root: own)
+        #expect(license.contains("Apache License") && license.count > 10000)
+        let controller = AcknowledgementsWindowController(resourceRoot: root, licenseRoot: own)
         controller.show()
         let window = try #require(controller.window), host = try #require(window.contentView)
         defer { window.orderOut(nil); window.contentView = nil }
         func all(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(all) }
-        for _ in 0..<100 {
-            host.layoutSubtreeIfNeeded()
-            if all(host).compactMap({ $0 as? NSTextView }).contains(where: { $0.string == expected }) { break }
-            try await Task.sleep(for: .milliseconds(20))
+        func shows(_ text: String) async throws -> Bool {
+            for _ in 0..<100 {
+                host.layoutSubtreeIfNeeded()
+                if all(host).compactMap({ $0 as? NSTextView }).contains(where: { $0.string == text }) { return true }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            return false
         }
-        let original = try #require(all(host).compactMap { $0 as? NSTextView }.first { $0.string == expected })
-        #expect(original.isSelectable && original.string == expected)
-        let resolved = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("Package.resolved"))) as? [String: Any])
-        let pins = try #require(resolved["pins"] as? [[String: Any]])
-        #expect(Set(catalogue.packages.map(\.id)) == Set(pins.compactMap { $0["identity"] as? String }))
+        #expect(try await shows(license))
+        // Only LCMP's own documents: one page without the list.
+        let tables = all(host).compactMap { $0 as? NSTableView }
+        if catalogue.packages.isEmpty { #expect(tables.isEmpty) } else { #expect(tables.first?.numberOfRows == 1 + catalogue.packages.count) }
+        let picker = try #require(all(host).compactMap { $0 as? NSPopUpButton }.first)
+        picker.selectItem(at: 1)
+        #expect(picker.sendAction(picker.action, to: picker.target))
+        #expect(try await shows(notice))
         if let output = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
-            window.displayIfNeeded(); host.display(); original.display()
+            picker.selectItem(at: 0)
+            _ = picker.sendAction(picker.action, to: picker.target)
+            _ = try await shows(license)
+            window.displayIfNeeded(); host.display()
             CATransaction.flush()
-            try await Task.sleep(for: .milliseconds(100))
-            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: rep)
-            try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output).appendingPathComponent("acknowledgements-bundled.png"))
+            try FileManager.default.createDirectory(atPath: output, withIntermediateDirectories: true)
             if let frame = host.superview {
                 frame.display()
-                let frameRep = try #require(frame.bitmapImageRepForCachingDisplay(in: frame.bounds))
-                frame.cacheDisplay(in: frame.bounds, to: frameRep)
-                try frameRep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output).appendingPathComponent("acknowledgements-window.png"))
-            }
-            let textRep = try #require(original.bitmapImageRepForCachingDisplay(in: original.visibleRect))
-            original.cacheDisplay(in: original.visibleRect, to: textRep)
-            try textRep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output).appendingPathComponent("acknowledgements-original.png"))
-        }
-        if let table = all(host).compactMap({ $0 as? NSTableView }).first,
-           let row = catalogue.packages.firstIndex(where: { $0.id == "sfbaudioengine" }) {
-            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
-            let selected = catalogue.packages[row]
-            let firstText = try AcknowledgementCatalogue.text(#require(selected.documents.first), root: root)
-            for _ in 0..<100 {
-                if all(host).compactMap({ $0 as? NSTextView }).contains(where: { $0.string == firstText }) { break }
-                try await Task.sleep(for: .milliseconds(20))
-            }
-            #expect(all(host).compactMap { $0 as? NSTextView }.contains { $0.string == firstText })
-            let picker = try #require(all(host).compactMap { $0 as? NSPopUpButton }.first)
-            picker.selectItem(at: 1)
-            #expect(picker.sendAction(picker.action, to: picker.target))
-            let nextText = try AcknowledgementCatalogue.text(selected.documents[1], root: root)
-            for _ in 0..<100 {
-                if all(host).compactMap({ $0 as? NSTextView }).contains(where: { $0.string == nextText }) { break }
-                try await Task.sleep(for: .milliseconds(20))
-            }
-            #expect(all(host).compactMap { $0 as? NSTextView }.contains { $0.string == nextText })
-        } else {
-            Issue.record("Native dependency table was not found")
-        }
-        // Every indexed original is readable offline, including nested acknowledgements.
-        var longest = ""
-        for package in catalogue.packages {
-            for document in package.documents {
-                let text = try AcknowledgementCatalogue.text(document, root: root)
-                if text.count > longest.count { longest = text }
+                let rep = try #require(frame.bitmapImageRepForCachingDisplay(in: frame.bounds))
+                frame.cacheDisplay(in: frame.bounds, to: rep)
+                try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: output).appendingPathComponent("acknowledgements-window.png"))
             }
         }
-        let longView = try #require(all(host).compactMap { $0 as? NSTextView }.first { $0.isEditable == false && $0.enclosingScrollView != nil })
-        longView.string = longest
+        // The full license text scrolls in the plain-text viewer.
+        let longView = try #require(all(host).compactMap { $0 as? NSTextView }.first { $0.string == license })
         longView.layoutManager?.ensureLayout(for: try #require(longView.textContainer))
-        #expect(longView.string == longest && longest.count > 10000)
         longView.scrollToEndOfDocument(nil)
         #expect(longView.visibleRect.minY > 0)
     }
 
     @Test func settingsButtonOpensWindowWithoutChangingPlaybackOrLibrary() async throws {
         let root = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
-        let controller = AcknowledgementsWindowController(resourceRoot: root)
+        let own = try licenseFixture(); defer { try? FileManager.default.removeItem(at: own) }
+        let controller = AcknowledgementsWindowController(resourceRoot: root, licenseRoot: own)
         defer { controller.window?.orderOut(nil); controller.window?.contentView = nil }
         let playback = PlaybackController(), store = NoticeTestStore()
         let library = LibraryController(playback: playback, store: store)

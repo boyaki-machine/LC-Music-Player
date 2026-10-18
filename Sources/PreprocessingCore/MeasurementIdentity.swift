@@ -60,7 +60,7 @@ public struct MeasurementProgramIdentity: Codable, Equatable, Sendable {
         return Self(applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development",
             build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development",
             executableDigest: hash.finalize().map { String(format: "%02x", $0) }.joined(),
-            environment: ProcessInfo.processInfo.operatingSystemVersionString + "/SFBAudioEngine-0.14.0")
+            environment: ProcessInfo.processInfo.operatingSystemVersionString + "/CoreAudio")
     }
 }
 

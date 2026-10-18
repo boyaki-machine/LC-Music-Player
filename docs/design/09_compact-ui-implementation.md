@@ -4,7 +4,7 @@
 
 ## 1. 概要
 
-本書は、`LCMP_default_GEQ`のメイン画面・拡張画面・謝辞ウィンドウのウィンドウ操作、シーク、音量、キーボードと支援技術への対応を記述する。画面の要件は[UI・UX設計](01_ui-ux-design.md)、再生制御は[基本再生の実装設計](02_playback-implementation.md)、拡張画面のリスト表示は[ライブラリ・プレイリストの実装設計](03_library-implementation.md)に記載する。
+本書は、`LCMP_default_GEQ`のメイン画面・拡張画面・ライセンスウィンドウのウィンドウ操作、シーク、音量、キーボードと支援技術への対応を記述する。画面の要件は[UI・UX設計](01_ui-ux-design.md)、再生制御は[基本再生の実装設計](02_playback-implementation.md)、拡張画面のリスト表示は[ライブラリ・プレイリストの実装設計](03_library-implementation.md)に記載する。
 
 ## 2. 要件
 
@@ -109,11 +109,11 @@
 - 音量自動調整のToggleと目標LUFSのPickerも置き、`setNormalizesVolume`／`setNormalizationTarget`へ操作を渡す。`levelMeasurement`に基づくLUFS/true peak、`playback.normalizationPlan`の補正dBと制限の理由を表示し、`preparationStage`で全曲測定中を案内する。
 - 自動調整の設定変更による一時停止と、再生を続ける手動音量の操作を区別する。測定・補正の契約は[音量自動調整の実装設計](06_volume-normalization-implementation.md)に記載する。
 
-### 謝辞ウィンドウ
+### ライセンスウィンドウ
 
 - ExtensionViewの`showAcknowledgements`コールバックを設定のボタンから呼ぶ。AppDelegateは`AcknowledgementsWindowController`を1つ所有し、メイン・拡張のdelegateを情報ウィンドウへ設定しない。
 - 760×520ptで開き、最小560×360ptのリサイズと閉じる操作に対応する。情報ウィンドウがkeyのときの⌘Wはそのウィンドウを閉じる。原文のコピー・全選択は、標準の編集メニューとNSTextViewのresponderへ渡す。
-- 表示モデルとViewは`Sources/PlayerUI/Acknowledgements/`に置き、再生制御・ライブラリへのコールバックを持たない。
+- 表示モデルとViewは`Sources/PlayerUI/Acknowledgements/`に置き、再生制御・ライブラリへのコールバックを持たない。対象はLCMP本体（`Contents/Resources/LCMPLicense`）と依存の索引（`ThirdPartyLicenses/index.json`）の各項目で、文書はそれぞれの同梱領域から読む。対象がLCMP本体だけなら一覧を置かず1枚で表示し、依存があるときだけ`HSplitView`で一覧を出す。
 - `PlayerGlassBackground`を再利用し、darkAquaの不透明なタイトルバー（`titleVisibility = .visible`、`titlebarAppearsTransparent = false`）・文書の選択欄と暗い一覧を組み合わせる。
 - 本文のNSScrollView/NSTextViewは背景を透過し、白85%の文字と低彩度の緑の選択範囲を使う。透明度を下げるOSの設定は、共通の背景の不透明色へ反映される。
 

@@ -40,7 +40,7 @@ public final class PlaybackController {
 
     public init(
         fileAccess: any FileAccess = LocalFileAccess(),
-        makeBackend: @escaping @MainActor (URL) throws -> any PlaybackBackend = { try SFBAudioBackend(url: $0) }
+        makeBackend: @escaping @MainActor (URL) throws -> any PlaybackBackend = { try AudioEngineBackend(url: $0) }
     ) {
         self.fileAccess = fileAccess
         self.makeBackend = makeBackend
@@ -92,7 +92,7 @@ public final class PlaybackController {
             guard duration.isFinite, duration > 0 else { throw PlaybackError.inaccessibleFile }
             try committing()
             endRun()
-            backend = SFBAudioBackend(url: url, duration: duration, supportsSeeking: supportsSeeking)
+            backend = AudioEngineBackend(url: url, duration: duration, supportsSeeking: supportsSeeking)
             backend?.volume = volume
             selectedURL = url; self.duration = duration; state = .ready
             error = nil; message = "再生できます。"; connectAnalysis()
@@ -107,7 +107,7 @@ public final class PlaybackController {
                                committing: () throws -> Void = {}) -> Bool {
         do {
             guard !normalizationRequired || metrics != nil else { throw AudioProcessingFailure.missingPlan }
-            let next = try SFBAudioBackend(prepared: prepared, metrics: metrics, settings: settings)
+            let next = try AudioEngineBackend(prepared: prepared, metrics: metrics, settings: settings)
             do { try committing() } catch { next.stop(); throw error }
             endRun()
             backend = next

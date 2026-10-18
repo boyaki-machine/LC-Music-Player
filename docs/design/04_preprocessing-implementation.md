@@ -25,12 +25,12 @@
 ```text
 LibraryCore（参照解決・再生順序・設定・取消）
     ├─ PreprocessingCore（utilityキュー、デコーダ、先頭PCM、全曲測定）
-    └─ PlaybackCore（準備結果の受領、SFBAudioEngine、音声出力）
+    └─ PlaybackCore（準備結果の受領、AVAudioEngine、音声出力）
            └─ AnalysisCore → Player UI内の可視化
 ```
 
-- `PreprocessingCore`はFoundation、AVFAudio、固定版のSFBAudioEngineに依存し、LibraryCore、PlaybackCore、UIには依存しない。
-- `AudioDecoderFactory`はここで共有し、PlaybackCoreからも参照する。拡張子ごとのデコーダの固定と、短い音源の互換デコーダは[基本再生の実装設計](02_playback-implementation.md)に記載する。互換デコーダは、既知の末尾位置では長さ0の正常な読み取りを返す。
+- `PreprocessingCore`はFoundation、AVFAudio、CryptoKit、OSのSQLiteに依存し、LibraryCore、PlaybackCore、UIには依存しない。
+- `PCMDecoding`と`AudioDecoderFactory`はここで定義し、PlaybackCoreからも参照する。拡張子ごとに受け付ける符号化方式は[基本再生の実装設計](02_playback-implementation.md)に記載する。デコーダは、末尾では長さ0の正常な読み取りを返す。
 - `AudioPreprocessing`は先頭準備・測定・Auditの非同期の境界である。取消を確認して戻るまで、呼出側がファイルアクセスを保持する。
 - アプリは永続キャッシュを設定したAudioPreprocessorを、`LibraryController(preprocessingEnabled: true, playlistPreprocessingEnabled: true, preprocessor: ...)`へ注入する。
 - `playlistPreprocessingEnabled`の既定はfalseである。独立した呼出元や単曲・次曲の検証に、出力形式に依存する全リストの巡回を暗黙に追加しないためである。`preprocessingEnabled: false`は同期操作の経路で、注入した再生バックエンドの単体検証等に使う。アプリのリスト選択・再生開始は背景準備を経由する。
@@ -51,7 +51,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 - `AudioPreprocessor.prepare`はデコーダを背景で開き、最大2秒または32MiBの先に達した量まで、元のprocessingFormatでPCMを読む。上限は先頭PCMの確保量であり、デコーダ内部と最大8192フレームの作業バッファは別に必要になる。
 - `PreparedAudio`は、ファイル識別情報、時間、シーク可否、確保量と、一度だけ取得できるデコーダを持つ。ロックは所有権の移譲に使い、同じデコーダを複数スレッドで操作する許可にはしない。
 - `PrefixDecoder`は外向きのpositionを0から開始する。キャッシュ済みPCMを返した後、その直後から同じデコーダの読み取りを続ける。再openと再走査を挟まない。
-- SFBAudioEngineは、要求より短い読み取りをEOFと解釈する。そのためキャッシュの境界では、同じ呼び出しのバッファをファイル本体のPCMで満たし、境界を途中の短い読み取りとして返さない。波形・順番・フレーム数は変更しない。
+- `PCMDecoding`では、要求より短い読み取りがEOFを意味する。そのためキャッシュの境界では、同じ呼び出しのバッファをファイル本体のPCMで満たし、境界を途中の短い読み取りとして返さない。波形・順番・フレーム数は変更しない。
 
 選択から再生までは次のように扱う。
 
@@ -133,9 +133,9 @@ mono/stereo変換、短い曲、gatingの対象がない曲、true-peak補間の
 
 - 曲を繰り返し変更しても解析のキューを安全に解放できるよう、観測callbackはエンジン単位の`AnalysisRenderSource`を通す。キューの取消時は、実行中の読み取りが終わってからメモリを解放する（[解析の実装設計](07_analysis-implementation.md)）。
 - バックエンドのisolated deinitで停止・解除を行うため、ビルドにはSwift 6.2以降を使用する。
-- 再生時の解析と可視化の時計・PCMの取得位置・OS音量は、前処理から変更しない。エンジンの作成・グラフの接続は、MainActor上のSFBAudioBackendが担当する。
+- 再生時の解析と可視化の時計・PCMの取得位置・OS音量は、前処理から変更しない。エンジンの作成・グラフの接続は、MainActor上のAudioEngineBackendが担当する。
 - 先頭準備は、初回の曲のI/O時間や、デバイスの開始時間をなくすことを保証しない。
-- SFBのringと供給chunk、PrefixDecoder／ProfileDecoderの有界バッファによる逐次供給を維持し、全曲PCMの保持や別のFIFOを追加しない。
+- `PCMFeeder`の4つの再利用バッファと、PrefixDecoder／ProfileDecoderの有界バッファによる逐次供給を維持し、全曲PCMの保持や別のFIFOを追加しない。
 
 ## 5. 検証
 

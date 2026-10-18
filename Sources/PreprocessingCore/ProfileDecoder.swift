@@ -1,6 +1,5 @@
 import AVFAudio
 import Foundation
-import SFBAudioEngine
 import AudioProcessingCore
 
 enum ProfileConversion {
@@ -14,9 +13,9 @@ enum ProfileConversion {
     }
 }
 
-/// Uses exactly the measurement conversion before SFB owns/render-converts PCM.
-/// The native prefix remains unchanged. All work is on SFB's decoder thread, not render.
-public final class ProfileDecoder: NSObject, PCMDecoding {
+/// Uses exactly the measurement conversion before playback owns/render-converts PCM.
+/// The native prefix remains unchanged. All work is on the playback feeder queue, not render.
+public final class ProfileDecoder: PCMDecoding {
     private let base: any PCMDecoding
     private let converter: AVAudioConverter
     private let input: AVAudioPCMBuffer
@@ -27,10 +26,6 @@ public final class ProfileDecoder: NSObject, PCMDecoding {
     public let processingFormat: AVAudioFormat
     public let length: Int64
     public private(set) var position: Int64 = 0
-    public var inputSource: InputSource { base.inputSource }
-    public var sourceFormat: AVAudioFormat { base.sourceFormat }
-    public var decodingIsLossless: Bool { base.decodingIsLossless }
-    public var properties: [AudioDecodingPropertiesKey: Any] { base.properties }
     public var supportsSeeking: Bool { base.supportsSeeking }
     public var isOpen: Bool { base.isOpen }
     public init(base: any PCMDecoding, profile: MeasurementProfile, frameLength: UInt64) throws {
@@ -41,13 +36,8 @@ public final class ProfileDecoder: NSObject, PCMDecoding {
         converter = try ProfileConversion.make(from: base.processingFormat, profile: profile)
         processingFormat = profile.format; length = Int64(frameLength)
     }
-    public func open() throws { guard isOpen else { throw PreprocessingFailure.consumed } }
     public func close() throws { try base.close() }
     deinit { try? base.close() }
-    public func decode(into buffer: AVAudioBuffer) throws {
-        guard let pcm = buffer as? AVAudioPCMBuffer else { throw PreprocessingFailure.invalidAudio }
-        try decode(into: pcm, length: pcm.frameCapacity)
-    }
     public func decode(into buffer: AVAudioPCMBuffer, length requested: UInt32) throws {
         guard buffer.format == processingFormat, isOpen else { throw PreprocessingFailure.invalidAudio }
         buffer.frameLength = 0

@@ -59,7 +59,7 @@ private func measure(_ samples: [[Float]], profile: MeasurementProfile) throws -
         defer { try? FileManager.default.removeItem(at: url) }
         do { let file = try AVAudioFile(forWriting: url, settings: format.settings); try file.write(from: buffer) }
         let metrics = try await AudioPreprocessor.shared.measureLevels(url, profile: profile)
-        // SFB receives ProfileDecoder PCM; the mixer no longer chooses an implicit mono map.
+        // Playback receives ProfileDecoder PCM; the mixer no longer chooses an implicit mono map.
         let source = try AudioDecoderFactory.open(url)
         let decoder = try ProfileDecoder(base: source, profile: profile, frameLength: metrics.levels.frameCount)
         defer { try? decoder.close() }
