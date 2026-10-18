@@ -23,7 +23,7 @@ open build/release/LCMP.app
 ```
 
 - 起動中のアプリと同じ出力先を置き換えないでください。終了してから再ビルドするか、`make release RELEASE_OUTPUT=build/preview/LCMP.app`のように別の出力先を指定します。
-- 開発用は`make debug`、ローカル検証用のZIPは`make archive`、コーデックをソースから構築し対応ソースと再リンクの材料を含める配布準備用のZIPは`make distribution`です。
+- 開発用は`make debug`、ローカル検証用のZIPは`make archive`、コーデックをソースから構築し対応ソースと再リンクの材料を含める配布準備用のZIPは`make distribution`、その配布物を入れたインストーラー（DMG）は`make dmg`です。
 - ビルドスクリプトは、公開依存を取得するときのキーチェーン・netrcの検索を無効にします。Gitの設定やキーチェーンは変更しません。
 
 前提環境、出力先の変更、配置・更新、署名と配布の範囲は[ビルド・配置手順](docs/build-and-deploy.md)を参照してください。

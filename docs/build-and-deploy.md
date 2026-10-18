@@ -11,7 +11,7 @@
 | Python 3.9以降 | `python3 --version` |
 | make | `make --version` |
 
-`codesign`、`otool`、`install_name_tool`、`ditto`はmacOSの開発ツールを使用します。iPhone向けの成果物は作成しません。
+`codesign`、`otool`、`install_name_tool`、`ditto`、`hdiutil`、`osascript`はmacOSの開発ツール・標準のコマンドを使用します。iPhone向けの成果物は作成しません。
 
 以下のコマンドはリポジトリの直下で実行します。初回はネットワーク接続が必要で、SwiftPMが`Package.resolved`に基づいて公開依存を取得します。`scripts/swift.sh`は、そのコマンドの中だけキーチェーン・netrc・Gitの認証ヘルパーの参照を無効にします。保存済みの認証やグローバル設定は変更しません。
 
@@ -24,6 +24,7 @@
 | `make debug` | `build/debug/LCMP.app` | デバッガーを使う開発用 |
 | `make archive` | `build/dist/LCMP.zip` | Releaseを再ビルドしてZIP化 |
 | `make distribution` | `build/distribution/LCMP-distribution.zip` | ソースから構築したコーデック・対応ソース・再リンク材料付き |
+| `make dmg` | `build/dmg/LCMP-<バージョン>.dmg` | 対応ソース付きのアプリを入れたインストーラー |
 | `make test` | ターミナルの結果 | 音声出力なしの通常の回帰テスト |
 
 - 各ビルドは、実行ファイル、動的framework、本体のApache 2.0のLICENSE/NOTICE、依存のライセンス、解決済みのパッケージ情報をアプリ内へまとめます。hardened runtimeとApp Sandboxを付けたad-hoc署名と、署名の検証を行います。署名鍵は使いません。同梱の仕様は[依存ライブラリ](design/11_third-party-dependencies.md)を参照してください。
@@ -155,6 +156,63 @@ codesign -d --entitlements - build/relink-check/LCMP.app
 - このコマンドも、公開・アップロード・Developer ID署名・公証は実行しません。
 - 本体のApache 2.0のLICENSE/NOTICEを、`Contents/Resources/LCMPLicense`と対応ソース内の`LCMP/`へ同梱します。
 - 依存のソース提供・再リンクの材料、署名・ストア等の配布条件をそれぞれ確認します。通常の`make archive`だけでは、対応ソース付きの配布物にはなりません。
+
+## インストーラー（DMG）を作る
+
+```sh
+make dmg
+# 固定コミットの上流checkoutを既に持っている場合
+make dmg AUDIO_SOURCE=path/to/AudioXCFrameworks
+# 出力先を変える場合
+make dmg DMG_OUTPUT=build/package/LCMP.dmg
+```
+
+- 対応ソース付きの配布物（`make distribution`と同じ手順）を作業用の一時ディレクトリに作り、その`LCMP.app`をDMGに入れます。前提は[対応ソース付きの配布物を作る](#対応ソース付きの配布物を作る)と同じで、完全なXcodeが必要です。
+- 既定の出力先は`build/dmg/LCMP-<バージョン>.dmg`で、バージョンはアプリのInfo.plistから取ります。同じ名前のDMGは、検証まで成功した後に置き換えます。
+- バージョンを上げて配布し直すときも、同じ`make dmg`を実行します。
+- DMGのウィンドウは、Finderに配置を設定させて作ります。ログイン中のGUIセッションで実行してください。初回は、ターミナル（またはエディタ）がFinderを操作する許可を求められるので、許可します。
+- 同じボリューム名（`LC Music Player <バージョン>`）のディスクをマウントしていると失敗します。先に取り出してください。
+- 外観の仕様は[UI・UX設計](design/01_ui-ux-design.md#インストーラー)に従います。
+
+作る手順は次のとおりです（`scripts/build-dmg.py`）。
+
+1. アプリ、`/Applications`へのシンボリックリンク、`.background/background.tiff`を一時フォルダに並べ、読み書きできるDMG（HFS+）を作ります。
+2. DMGをマウントし、AppleScriptでFinderにウィンドウの大きさ・アイコンの大きさと位置・背景を設定させます。Finderは設定をボリュームの`.DS_Store`に保存します。
+3. 取り出して、圧縮した読み出し専用のDMG（UDZO）に変換します。
+4. 圧縮したDMGを検証します。チェックサム、アプリの署名（`codesign --verify --deep --strict`）、Applicationsのリンク先、背景と`.DS_Store`の有無、見える項目がアプリとApplicationsだけであることを確かめます。
+
+既存のDMGだけを検証することもできます。
+
+```sh
+python3 scripts/build-dmg.py --verify build/dmg/LCMP-0.22.57.dmg
+```
+
+### 手元で確かめるだけのDMG
+
+既にあるアプリでDMGの見た目を確かめるときは、`DMG_APP`でアプリを指定します。対応ソースを含まないアプリでは警告を表示します。このDMGは配布に使いません。
+
+```sh
+make release
+make dmg DMG_APP=build/release/LCMP.app DMG_OUTPUT=build/dmg-check/LCMP.dmg
+```
+
+### 背景を描き直す
+
+背景はリポジトリにある`assets/DMGBackground.tiff`を使い、ビルドのたびには描き直しません。外観やアイコンの位置を変えたときは、`scripts/render-dmg-background.swift`と`scripts/build-dmg.py`の配置の値をそろえて直し、次のコマンドで描き直します。640×400と1280×800の画像を図形から描き、`tiffutil`で1つのTIFFにまとめます。
+
+```sh
+swift scripts/render-dmg-background.swift assets/DMGBackground.tiff
+```
+
+- `make test`は、TIFFの2つの画像の大きさと、描画スクリプト・Finderの設定の配置の値が一致することを確かめます（`scripts/test_build_dmg.py`）。
+- Finderのタイトルバーの高さ（`TITLE_BAR`）は、ウィンドウの外枠から内容領域を640×400にするための値です。macOSの更新で背景の下端が欠けたり余白が出たりしたら、実際のウィンドウで測り直します。
+
+### 署名と公証について
+
+DMGの中のアプリはad-hoc署名で、Developer ID署名・公証は行っていません。別のMacでは、初めて開くときにGatekeeperの確認が出ます。DMGのウィンドウには、システム設定の「プライバシーとセキュリティ」から「このまま開く」を選ぶ手順を表示しています。
+
+- `make dmg`も、公開・アップロード・Developer ID署名・公証は実行しません。
+- DMGには配布物の`SHA256SUMS.json`を入れません。対応ソースと再リンクの材料は、アプリ内の`Contents/Resources/CorrespondingSource`に含まれます。
 
 ## テスト
 
