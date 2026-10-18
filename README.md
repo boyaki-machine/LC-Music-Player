@@ -2,7 +2,8 @@
 
 LC Music Player（LCMP）は、落ち着いた音楽鑑賞体験を目指すmacOSのネイティブ音楽プレイヤーです。前世紀（Last Century：LC）の楽曲プレイヤーのように情報を控えめに表示し、グラフィックイコライザーなどの可視化で再生を楽しめるようにします。
 
-![「Last Century イコライザー」で再生しているメイン画面。16列の蛍光管LEDが周波数ごとのレベルを表示している](docs/images/lcmp-player.png)
+<!-- The screenshot is a 2x (Retina) capture of the 360x210pt main window; width keeps it at actual size. -->
+<img src="docs/images/lcmp-player.png" width="360" alt="「Last Century イコライザー」で再生しているメイン画面。16列の蛍光管LEDが周波数ごとのレベルを表示している">
 
 ## 主な機能
 
@@ -82,7 +83,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 
 ## 開発の運用
 
-このリポジトリではGitflowを基にブランチを運用します。現在、リモートリポジトリは設定していません。
+このリポジトリではGitflowを基にブランチを運用します。リモートリポジトリ（`origin`）はGitHubのリポジトリで、`main`・`develop`とバージョンタグを置きます。
 
 | ブランチ | 用途 |
 | --- | --- |
@@ -99,7 +100,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 
 - `main`にマージコミットを作らない理由：バージョンのマイナーは、ビルドしたコミットから第1親をたどったマージの数で決まります。`main`にマージコミットを作ると、そのコミットのバージョンが`develop`と食い違います。
 - fast-forwardできないとき（`main`に`develop`にないコミットがあるとき）は、統合せずに開発者へ相談します。`hotfix/`を急いで出したいのに、`develop`にまだリリースしない変更があるときも同じです。
-- `main`への統合、タグ付け、pushは、開発者の指示があるときだけ行います。
+- `main`への統合、タグ付け、pushは、開発者の指示があるときだけ行います。pushするときは、`main`・`develop`とタグを`origin`へ送ります。
 
 設計書には合意した仕様と実装済みの設計を記載します。作業の進め方と記録の扱いは[AGENTS.md](AGENTS.md)に定めています。
 
