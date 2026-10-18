@@ -491,11 +491,35 @@ import Testing
     }
 }
 
+@Suite struct ErmineChorusDustTests {
+    @Test func dustDriftsSlowlyAndStaysInTheAir() {
+        var dust = ErmineDust(seed: 5)
+        let start = dust.motes
+        for _ in 0..<(10 * 30) { dust.step(dt: 1.0 / 30) }
+        #expect(dust.motes.count == ErmineDust.count)
+        #expect(dust.motes.allSatisfy { ErmineDust.area.insetBy(dx: -0.01, dy: -0.01).contains($0.position) })
+        #expect(dust.motes.allSatisfy { $0.size < 1 }) // really small specks
+        // Slow: in one thirtieth of a second no speck moves more than a tenth of a point.
+        var next = dust; next.step(dt: 1.0 / 30)
+        #expect(zip(dust.motes, next.motes).allSatisfy { abs($0.position.x - $1.position.x) < 0.1 || abs($0.position.x - $1.position.x) > 300 })
+        #expect(zip(start, dust.motes).contains { $0.position != $1.position })
+    }
+
+    @Test func onlySpecksInsideABeamAreLit() {
+        let beams = ErmineChorusRenderer.floorBeams(stage: ErmineStage(light: 1))
+        let inside = CGPoint(x: 60, y: 98), outside = CGPoint(x: 180, y: 110)
+        #expect(beams.reduce(0) { $0 + $1.light(at: inside) } > 0.4)
+        #expect(beams.reduce(0) { $0 + $1.light(at: outside) } == 0)
+        #expect(ErmineChorusRenderer.floorBeams(stage: ErmineStage(light: 0)).allSatisfy { $0.light(at: inside) == 0 })
+    }
+}
+
 @Suite @MainActor struct ErmineChorusRenderingTests {
     /// Renders the stage at 2× and returns the bitmap.
-    private func render(_ drawings: [ErmineDrawing], stage: ErmineStage = ErmineStage()) throws -> NSBitmapImageRep {
+    private func render(_ drawings: [ErmineDrawing], stage: ErmineStage = ErmineStage(), dust: [ErmineMote] = [],
+                        reduceMotion: Bool = false) throws -> NSBitmapImageRep {
         let renderer = ImageRenderer(content: Canvas { context, size in
-            ErmineChorusRenderer.draw(context: context, size: size, drawings: drawings, stage: stage)
+            ErmineChorusRenderer.draw(context: context, size: size, drawings: drawings, stage: stage, dust: dust, reduceMotion: reduceMotion)
         }.frame(width: 360, height: 144))
         renderer.scale = 2
         let image = try #require(renderer.cgImage)
@@ -591,13 +615,34 @@ import Testing
         #expect(driver.drawings.contains { $0.frame.face.mouth != .closed })
     }
 
-    @Test func drawingFiveErminesFitsInAFrameBudget() throws {
+    @Test func dustGlittersInTheBeamsOnly() throws {
         let drawings = ErmineChorusDriver().drawings
+        // In the left floor beam, over the dark background beside ermine 5.
+        let speck = ErmineMote(position: CGPoint(x: 36, y: 112), velocity: CGVector(dx: 0, dy: 0), size: 0.9, phase: .pi / 2, speed: 1)
+        func brightness(_ rep: NSBitmapImageRep) -> CGFloat { rep.colorAt(x: 72, y: 224)!.brightnessComponent }
+        let lit = try render(drawings, stage: ErmineStage(light: 1), dust: [speck])
+        let plain = try render(drawings, stage: ErmineStage(light: 1))
+        let dark = try render(drawings, stage: ErmineStage(light: 0), dust: [speck])
+        let calm = try render(drawings, stage: ErmineStage(light: 1), dust: [speck], reduceMotion: true)
+        #expect(brightness(lit) > brightness(plain) + 0.1, "\(brightness(lit)) vs \(brightness(plain))")
+        #expect(brightness(dark) < 0.2)
+        #expect(brightness(calm) < brightness(lit) - 0.1)
+        if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
+            let driver = ErmineChorusDriver()
+            var field = ErmineDust()
+            for _ in 0..<90 { field.step(dt: 1.0 / 30) }
+            let scene = try render(driver.drawings, stage: ErmineStage(light: 0.9, topLight: 0.8, spotSlot: nil), dust: field.motes)
+            try scene.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: directory).appendingPathComponent("ermine-chorus-dust.png"))
+        }
+    }
+
+    @Test func drawingFiveErminesFitsInAFrameBudget() throws {
+        let drawings = ErmineChorusDriver().drawings, dust = ErmineDust().motes
         var durations: [Double] = []
         for _ in 0..<40 {
             let renderer = ImageRenderer(content: Canvas { context, size in
                 let began = VisualizationClock.now()
-                ErmineChorusRenderer.draw(context: context, size: size, drawings: drawings)
+                ErmineChorusRenderer.draw(context: context, size: size, drawings: drawings, stage: ErmineStage(light: 1, topLight: 1), dust: dust)
                 durations.append(VisualizationClock.now() - began)
             }.frame(width: 360, height: 144))
             renderer.scale = 2

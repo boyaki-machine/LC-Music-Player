@@ -7,7 +7,7 @@ enum ErmineChorusRenderer {
     static let stageSize = CGSize(width: 360, height: 144)
 
     static func draw(context original: GraphicsContext, size: CGSize, drawings: [ErmineDrawing],
-                     stage: ErmineStage = ErmineStage(), reduceMotion: Bool = false) {
+                     stage: ErmineStage = ErmineStage(), dust: [ErmineMote] = [], reduceMotion: Bool = false) {
         var context = original
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(background))
         // Fit the 360×144 stage into the given size.
@@ -23,6 +23,7 @@ enum ErmineChorusRenderer {
         drawBeam(context)
         drawNeon(context, brightness: lamps.neon)
         drawFloorLamps(context, stage: lamps)
+        if !reduceMotion { drawDust(context, motes: dust, beams: hungBeams(light: lamps.topLight) + floorBeams(stage: lamps)) }
         for x in ErmineCast.slotX { drawCrate(context, centerX: x, top: ErmineCast.feetY) }
         drawFloorLight(context, stage: lamps)
         for (member, drawing) in zip(ErmineCast.members, drawings) {
@@ -91,15 +92,67 @@ enum ErmineChorusRenderer {
     }
 
     /// A small can lamp tied to the beam, shining down on the singers with the voice.
+    /// A beam of light as a triangle from the lens, fading toward its far end.
+    struct Beam {
+        var lens: CGPoint, edgeA: CGPoint, edgeB: CGPoint, end: CGPoint
+        var strength: Double
+        var path: Path { var p = Path(); p.move(to: lens); p.addLine(to: edgeA); p.addLine(to: edgeB); p.closeSubpath(); return p }
+
+        /// How much of this beam lights the point (0…1): full near the lens, fading along the beam, nothing outside it.
+        func light(at point: CGPoint) -> Double {
+            func cross(_ o: CGPoint, _ a: CGPoint, _ b: CGPoint) -> CGFloat { (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x) }
+            let d1 = cross(lens, edgeA, point), d2 = cross(edgeA, edgeB, point), d3 = cross(edgeB, lens, point)
+            let inside = !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))
+            guard inside else { return 0 }
+            let along = hypot(point.x - lens.x, point.y - lens.y) / max(1, hypot(end.x - lens.x, end.y - lens.y))
+            return strength * max(0, 1 - 0.8 * Double(along))
+        }
+    }
+
+    static let hungLamps: [(x: CGFloat, target: CGFloat)] = [(40, 150), (320, 210)]
+    static func hungBeams(light: Double) -> [Beam] {
+        hungLamps.map { x, target in
+            Beam(lens: CGPoint(x: x + (target > x ? 3 : -3), y: 16), edgeA: CGPoint(x: target - 38, y: 118), edgeB: CGPoint(x: target + 38, y: 118),
+                 end: CGPoint(x: target, y: 118), strength: min(1, max(0, light)))
+        }
+    }
+
+    static let floorLamps = [CGPoint(x: 14, y: 128), CGPoint(x: 346, y: 128)]
+    static func floorBeams(stage: ErmineStage) -> [Beam] {
+        let targets: [CGFloat] = stage.spotSlot.map { [ErmineCast.slotX[$0], ErmineCast.slotX[$0]] } ?? [130, 230]
+        return zip(floorLamps, targets).map { lamp, targetX in
+            let target = CGPoint(x: targetX, y: 52)
+            let dx = target.x - lamp.x, dy = target.y - lamp.y, length = max(1, hypot(dx, dy))
+            let spread = CGVector(dx: -dy / length * 34, dy: dx / length * 34)
+            return Beam(lens: CGPoint(x: lamp.x + dx / length * 6, y: lamp.y + dy / length * 6),
+                        edgeA: CGPoint(x: target.x + spread.dx, y: target.y + spread.dy),
+                        edgeB: CGPoint(x: target.x - spread.dx, y: target.y - spread.dy), end: target, strength: min(1, max(0, stage.light)))
+        }
+    }
+
+    /// Dust glitters only where a beam passes through it; it is drawn behind the crates and the ermines,
+    /// so it shows against the dark background and inside the beams.
+    static func drawDust(_ context: GraphicsContext, motes: [ErmineMote], beams: [Beam]) {
+        let speck = Color(red: 1, green: 0.97, blue: 0.9)
+        for mote in motes {
+            let light = min(1, beams.reduce(0) { $0 + $1.light(at: mote.position) })
+            let alpha = light * mote.twinkle
+            guard alpha > 0.03 else { continue }
+            let r = mote.size / 2
+            if alpha > 0.5 { // A glint: a faint halo around the brightest specks.
+                context.fill(Path(ellipseIn: CGRect(x: mote.position.x - r * 3, y: mote.position.y - r * 3, width: r * 6, height: r * 6)),
+                             with: .color(speck.opacity(0.18 * alpha)))
+            }
+            context.fill(Path(ellipseIn: CGRect(x: mote.position.x - r, y: mote.position.y - r, width: 2 * r, height: 2 * r)),
+                         with: .color(speck.opacity(0.95 * alpha)))
+        }
+    }
+
     static func drawHungLamps(_ context: GraphicsContext, light rawLight: Double) {
         let light = min(1, max(0, rawLight))
-        for (x, target) in [(CGFloat(40), CGFloat(150)), (CGFloat(320), CGFloat(210))] {
-            let lens = CGPoint(x: x + (target > x ? 3 : -3), y: 16)
-            var cone = Path()
-            cone.move(to: lens)
-            cone.addLine(to: CGPoint(x: target - 38, y: 118)); cone.addLine(to: CGPoint(x: target + 38, y: 118)); cone.closeSubpath()
-            context.fill(cone, with: .linearGradient(Gradient(colors: [Color(red: 1, green: 0.86, blue: 0.6).opacity(0.26 * light), .clear]),
-                                                     startPoint: lens, endPoint: CGPoint(x: target, y: 118)))
+        for ((x, target), beam) in zip(hungLamps, hungBeams(light: light)) {
+            context.fill(beam.path, with: .linearGradient(Gradient(colors: [Color(red: 1, green: 0.86, blue: 0.6).opacity(0.26 * light), .clear]),
+                                                          startPoint: beam.lens, endPoint: beam.end))
             var ropes = Path(); ropes.move(to: CGPoint(x: x, y: 4)); ropes.addLine(to: CGPoint(x: x, y: 8))
             context.stroke(ropes, with: .color(rope), lineWidth: 0.9)
             var lamp = context
@@ -118,21 +171,11 @@ enum ErmineChorusRenderer {
     /// The beams brighten on the bass and turn to a soloist.
     static func drawFloorLamps(_ context: GraphicsContext, stage: ErmineStage) {
         let light = min(1, max(0, stage.light))
-        let lamps = [CGPoint(x: 14, y: 128), CGPoint(x: 346, y: 128)]
-        let targets: [CGFloat] = stage.spotSlot.map { [ErmineCast.slotX[$0], ErmineCast.slotX[$0]] } ?? [130, 230]
-        let beam = Color(red: 0.84, green: 0.92, blue: 1)
-        for (lamp, targetX) in zip(lamps, targets) {
-            let target = CGPoint(x: targetX, y: 52)
-            let dx = target.x - lamp.x, dy = target.y - lamp.y, length = max(1, hypot(dx, dy))
-            let spread = CGVector(dx: -dy / length * 34, dy: dx / length * 34)
-            let lens = CGPoint(x: lamp.x + dx / length * 6, y: lamp.y + dy / length * 6)
-            var cone = Path()
-            cone.move(to: lens)
-            cone.addLine(to: CGPoint(x: target.x + spread.dx, y: target.y + spread.dy))
-            cone.addLine(to: CGPoint(x: target.x - spread.dx, y: target.y - spread.dy))
-            cone.closeSubpath()
-            context.fill(cone, with: .linearGradient(Gradient(colors: [beam.opacity(0.34 * light), beam.opacity(0)]), startPoint: lens, endPoint: target))
-            drawParCan(context, at: lamp, angle: atan2(dy, dx), light: light)
+        let color = Color(red: 0.84, green: 0.92, blue: 1)
+        for (lamp, beam) in zip(floorLamps, floorBeams(stage: stage)) {
+            context.fill(beam.path, with: .linearGradient(Gradient(colors: [color.opacity(0.34 * light), color.opacity(0)]),
+                                                          startPoint: beam.lens, endPoint: beam.end))
+            drawParCan(context, at: lamp, angle: atan2(beam.end.y - lamp.y, beam.end.x - lamp.x), light: light)
         }
     }
 

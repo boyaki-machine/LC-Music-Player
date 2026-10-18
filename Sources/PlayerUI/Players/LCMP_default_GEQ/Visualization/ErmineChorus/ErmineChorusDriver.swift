@@ -16,6 +16,7 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
 
     private(set) var drawings: [ErmineDrawing] = ErmineChorusDriver.idleDrawings()
     private(set) var stage = ErmineStage()
+    private(set) var dust = ErmineDust().motes
     public private(set) var waitingForData = false
     @ObservationIgnored public private(set) var activity: VisualizationActivity = .inactive
     @ObservationIgnored public private(set) var isVisible = false
@@ -27,6 +28,7 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
     @ObservationIgnored private(set) var ensemble = ErmineEnsemble()
     @ObservationIgnored private var armTweens = Array(repeating: ErmineArmTween(), count: ErmineCast.members.count)
     @ObservationIgnored private(set) var beats = ErmineBeatTracker()
+    @ObservationIgnored private var dustField = ErmineDust()
     @ObservationIgnored private var bands = ErmineBandLevels()
     @ObservationIgnored private(set) var levels = Array(repeating: 0.0, count: ErmineRange.allCases.count)
     @ObservationIgnored private var pending: [(at: Double, levels: [Double])] = []
@@ -114,6 +116,7 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
         }
         drawings = next
         if stage != ensemble.stage { stage = ensemble.stage }
+        dustField.step(dt: dt); dust = dustField.motes
     }
 
     private func stop() {
