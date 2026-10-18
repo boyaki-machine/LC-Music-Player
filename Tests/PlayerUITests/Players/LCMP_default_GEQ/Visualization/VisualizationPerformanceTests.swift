@@ -41,7 +41,7 @@ import PlayerUI
         }
         let driver = VisualizationDriver()
         driver.synchronize(activity: .playing, visible: true)
-        let backend = try SFBAudioBackend(url: url)
+        let backend = try AudioEngineBackend(url: url)
         backend.volume = 0
         var inputs = 0, missing = 0, drops: UInt64 = 0
         var rate = 0.0, earlyEnd = false

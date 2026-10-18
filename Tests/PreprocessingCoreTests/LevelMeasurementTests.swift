@@ -31,6 +31,18 @@ import AudioProcessingCore
         #expect(buffer.frameLength > 0)
         #expect(try Data(contentsOf: url) == data)
     }
+    /// Reference values were measured with the previous MP3 decoder (mpg123). The accepted
+    /// tolerance for a decoder change is ±0.05 LU and ±0.1 dB.
+    @Test(arguments: [("gapless-vbr-44k-stereo.mp3", -14.463, -3.386, -3.456), ("gapless-cbr-48k-mono.mp3", -15.199, -4.139, -4.320)])
+    func mp3MeasurementStaysWithinTolerance(_ reference: (String, Double, Double, Double)) async throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("PlaybackCoreTests/Fixtures/\(reference.0)")
+        let result = try await AudioPreprocessor.shared.measureLevels(url, profile: MeasurementProfile(sampleRate: 48000, channels: 2))
+        let loudness = try #require(result.levels.loudness.value)
+        #expect(abs(loudness - reference.1) <= 0.05)
+        #expect(abs(result.levels.truePeakDBTP - reference.2) <= 0.1)
+        #expect(abs(result.sourcePeak.peakDBFS - reference.3) <= 0.1)
+    }
     @Test func fullTrackMeasurementCancelsAndInvalidatesSource() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-level-\(UUID()).wav")
         defer { try? FileManager.default.removeItem(at: url) }

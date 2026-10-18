@@ -48,9 +48,6 @@ class BuildDMGTests(unittest.TestCase):
             version = build_dmg.app_version(app)
             self.assertEqual(build_dmg.default_output(version), ROOT / 'build/dmg/LCMP-0.22.58.dmg')
             self.assertEqual(build_dmg.volume_name(version), 'LC Music Player 0.22.58')
-            self.assertFalse(build_dmg.is_distribution(app))
-            (app / 'Contents/Resources/CorrespondingSource').mkdir()
-            self.assertTrue(build_dmg.is_distribution(app))
 
     def test_make_target_builds_the_dmg(self):
         makefile = (ROOT / 'Makefile').read_text()

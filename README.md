@@ -6,7 +6,7 @@ LC Music Player（LCMP）は、落ち着いた音楽鑑賞体験を目指すmacO
 
 ## 主な機能
 
-- **ローカル音源の再生**：ファイルやフォルダを登録して再生します。音楽ファイル自体はアプリへコピーしません。対応形式はMP3、M4A（AAC・ALAC）、WAV、AIFF、FLACです。
+- **ローカル音源の再生**：ファイルやフォルダを登録して再生します。音楽ファイル自体はアプリへコピーしません。対応形式はMP3、M4A（AAC・ALAC）、WAV、AIFF、FLACです。読み込みと再生はmacOSの機能（Core Audio）で行い、第三者のライブラリは使いません。
 - **複数のプレイリスト**：リストの作成・改名・削除と、M3U8の読み込み・書き出しができます。曲はドラッグで並べ替えられます。ライブラリ・リスト・現在の対象は保存され、次の起動時は自動再生せずに復元します。
 - **ランダム再生**：リストの全曲を重複なしの順序で1巡します。オン・オフは次の起動でも使います。
 - **音源の管理**：登録した音源をフォルダごとにまとめて表示し、フォルダ単位でライブラリから除外できます。元のファイルは削除しません。
@@ -28,8 +28,8 @@ open build/release/LCMP.app
 ```
 
 - 起動中のアプリと同じ出力先を置き換えないでください。終了してから再ビルドするか、`make release RELEASE_OUTPUT=build/preview/LCMP.app`のように別の出力先を指定します。
-- 開発用は`make debug`、ローカル検証用のZIPは`make archive`、コーデックをソースから構築し対応ソースと再リンクの材料を含める配布準備用のZIPは`make distribution`、その配布物を入れたインストーラー（DMG）は`make dmg`です。
-- ビルドスクリプトは、公開依存を取得するときのキーチェーン・netrcの検索を無効にします。Gitの設定やキーチェーンは変更しません。
+- 開発用は`make debug`、ローカル検証用のZIPは`make archive`、配布用に作り直したアプリを入れたインストーラー（DMG）は`make dmg`です。
+- パッケージの依存はなく、ビルドにネットワーク接続は要りません。
 - アプリのバージョンは`<メジャー>.<マイナー>.<ビルド番号>`の形で、ビルド時にGitの履歴から決まります。決め方は[バージョン](docs/build-and-deploy.md#バージョン)を参照してください。
 
 前提環境、出力先の変更、配置・更新、署名と配布の範囲は[ビルド・配置手順](docs/build-and-deploy.md)を参照してください。
@@ -62,7 +62,7 @@ make test
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 ```
 
-- 1つ目は通常のテストで、音声を出力しません。scriptsのPythonのテスト（謝辞・配布物・バージョン・アイコン・DMG）も実行し、テストが`~/Library/Preferences`に設定ファイルを残していないことも確かめます。
+- 1つ目は通常のテストで、音声を出力しません。scriptsのPythonのテスト（ライセンス索引・バージョン・アイコン・DMG）も実行し、テストが`~/Library/Preferences`に設定ファイルを残していないことも確かめます。
 - 2つ目は、既定の出力先へ小さいテスト音を送る実再生のテストです。`--no-parallel`を外して並列に実行しても成功します。
 - 詳しくは[ビルド・配置手順のテスト](docs/build-and-deploy.md#テスト)を参照してください。
 - ファイル選択画面、聴感、デバイスの切替の手動確認の方法は[基本再生機能の実装設計](docs/design/02_playback-implementation.md)を参照してください。
@@ -74,11 +74,10 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 | `Sources/` | アプリ、画面、再生・ライブラリ・前処理・解析・音声処理のモジュール |
 | `Tests/` | 各モジュールの検証と独自のテスト音源 |
 | `assets/` | アプリのアイコンとインストーラーの背景（scriptsで図形から描いた生成物） |
-| `scripts/` | Swiftの実行、アプリの作成・署名、バージョンの決定、配布物・インストーラーの作成、アイコンと背景の描画、テスト音源の生成と、それらのテスト |
+| `scripts/` | Swiftの実行、アプリの作成・署名、バージョンの決定、インストーラーの作成、アイコンと背景の描画、テスト音源の生成と、それらのテスト |
 | `docs/` | ビルド・配置手順と設計書（[文書一覧](docs/README.md)）、READMEの画像 |
-| `third-party/` | 第三者ライセンスの補完と、対応ソースの案内 |
-| `Makefile` | ビルド、ZIPの作成、対応ソース付き配布物、インストーラー、通常のテストの入口 |
-| `Package.swift`／`Package.resolved` | SwiftPMの定義と、固定した依存のバージョン |
+| `Makefile` | ビルド、ZIPの作成、インストーラー、通常のテストの入口 |
+| `Package.swift` | SwiftPMの定義（パッケージの依存はありません） |
 | `AGENTS.md`／`CLAUDE.md` | コーディングエージェント向けの作業指示 |
 
 ## 開発の運用
@@ -108,6 +107,6 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 
 LCMPのオリジナル成果物（ソースコード、テスト、スクリプト、文書、画像）は、Apache License, Version 2.0（Apache-2.0）の下で提供します。[LICENSE](LICENSE)と[NOTICE](NOTICE)を参照してください。
 
-第三者のコード・素材・依存ライブラリ・引用等には、それぞれに付された著作権表示とライセンスが適用されます。依存OSSをApache 2.0へ変更するものではありません。[依存ライブラリと同梱構成](docs/design/11_third-party-dependencies.md)に従い、原文・対応ソース・再リンクの材料を提供します。
+アプリは第三者のライブラリを含みません。第三者のコード・素材・引用等を加える場合は、それぞれに付された著作権表示とライセンスが適用されます（[依存ライブラリと同梱構成](docs/design/11_third-party-dependencies.md)）。
 
-ビルドしたアプリには、本体のLICENSEとNOTICEを`Contents/Resources/LCMPLicense`へ同梱します。依存OSSの原文は`Contents/Resources/ThirdPartyLicenses`、対応ソース付き配布物のソースと再リンクの手順は`Contents/Resources/CorrespondingSource`にあります。
+ビルドしたアプリには、本体のLICENSEとNOTICEを`Contents/Resources/LCMPLicense`へ同梱し、設定の「ライセンス…」で表示します。

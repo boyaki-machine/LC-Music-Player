@@ -1,6 +1,5 @@
 import AVFAudio
 import Foundation
-import SFBAudioEngine
 
 /// The lock transfers exclusive ownership, never makes a decoder safe for concurrent use.
 public final class PreparedAudio: @unchecked Sendable {
@@ -32,18 +31,14 @@ public final class PreparedAudio: @unchecked Sendable {
 }
 
 /// First replays native-format PCM verbatim, then continues the same already-open decoder.
-final class PrefixDecoder: NSObject, PCMDecoding {
+final class PrefixDecoder: PCMDecoding {
     let base: any PCMDecoding
     private var prefix: AVAudioPCMBuffer?
     private let scratch: AVAudioPCMBuffer
     let prefixFrames: UInt32
     private(set) var position: Int64 = 0
-    var inputSource: InputSource { base.inputSource }
-    var sourceFormat: AVAudioFormat { base.sourceFormat }
     var processingFormat: AVAudioFormat { base.processingFormat }
     var length: Int64 { base.length }
-    var decodingIsLossless: Bool { base.decodingIsLossless }
-    var properties: [AudioDecodingPropertiesKey: Any] { base.properties }
     var supportsSeeking: Bool { base.supportsSeeking }
     var isOpen: Bool { base.isOpen }
     init(base: any PCMDecoding, prefix: AVAudioPCMBuffer) throws {
@@ -53,13 +48,8 @@ final class PrefixDecoder: NSObject, PCMDecoding {
         }
         self.scratch = scratch
     }
-    func open() throws { guard isOpen else { throw PreprocessingFailure.consumed } }
     func close() throws { prefix = nil; try base.close() }
     deinit { try? base.close() }
-    func decode(into buffer: AVAudioBuffer) throws {
-        guard let pcm = buffer as? AVAudioPCMBuffer else { throw PreprocessingFailure.invalidAudio }
-        try decode(into: pcm, length: pcm.frameCapacity)
-    }
     func decode(into buffer: AVAudioPCMBuffer, length requested: UInt32) throws {
         guard isOpen, buffer.format == processingFormat else { throw PreprocessingFailure.invalidAudio }
         let count = min(requested, buffer.frameCapacity)
@@ -71,7 +61,7 @@ final class PrefixDecoder: NSObject, PCMDecoding {
             filled = copied
             position += Int64(copied)
         }
-        // SFB treats any short read as EOF. Fill the same caller buffer across the
+        // A short read means EOF. Fill the same caller buffer across the
         // prefix boundary, rather than reporting an intermediate short read.
         while filled < count {
             try base.decode(into: scratch, length: min(scratch.frameCapacity, count - filled))

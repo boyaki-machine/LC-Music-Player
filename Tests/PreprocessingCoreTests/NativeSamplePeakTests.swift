@@ -39,7 +39,7 @@ import Testing
 
     struct Packed: Sendable { let bits: UInt32; let width: UInt32; let flags: AudioFormatFlags; let interleaved: Bool }
     /// Layouts decoders deliver as .otherFormat: Core Audio AIFF (big-endian packed 24-bit),
-    /// SFB FLAC (16 bits aligned high in 32-bit words, non-interleaved) and less common variants.
+    /// Integer layouts such as 16 bits aligned high in 32-bit words, and less common variants.
     private static let packed = [
         Packed(bits: 24, width: 3, flags: kAudioFormatFlagIsPacked, interleaved: true),
         Packed(bits: 24, width: 3, flags: kAudioFormatFlagIsPacked | kAudioFormatFlagIsBigEndian, interleaved: true),

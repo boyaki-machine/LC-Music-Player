@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the drag-to-install DMG for macOS from the source distribution app."""
+"""Build the drag-to-install DMG for macOS from a release app built for distribution."""
 import argparse
 import os
 from pathlib import Path
@@ -34,10 +34,6 @@ def default_output(version):
 
 def volume_name(version):
     return f'LC Music Player {version}'
-
-
-def is_distribution(app):
-    return (app / 'Contents/Resources/CorrespondingSource').is_dir()
 
 
 def applescript(volume):
@@ -162,37 +158,28 @@ def verify(image):
             detach(mount_point)
 
 
-def distribution_app(work, audio_source):
-    """Build the source distribution and return its app, which carries the corresponding source."""
-    output = work / 'distribution'
-    command = [sys.executable, str(ROOT / 'scripts/distribution.py'), '--output', str(output)]
-    if audio_source:
-        command += ['--audio-source', str(audio_source)]
-    subprocess.run(command, check=True)
-    return output / 'LCMP-distribution/LCMP.app'
+def release_app(work):
+    """Build the release app without this checkout's path in the executable."""
+    app = work / 'release' / APP_NAME
+    subprocess.run([sys.executable, str(ROOT / 'scripts/build-app.py'), '--configuration', 'release',
+                    '--prefix-map', '--output', str(app)], check=True)
+    return app
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, help='DMG path (default: build/dmg/LCMP-<version>.dmg)')
-    parser.add_argument('--app', type=Path,
-                        help='Package an existing app instead of building the source distribution')
-    parser.add_argument('--audio-source', type=Path, help='Passed to distribution.py')
+    parser.add_argument('--app', type=Path, help='Package an existing app instead of building one')
     parser.add_argument('--verify', type=Path, help='Verify an existing DMG only')
     args = parser.parse_args()
     if args.verify:
         verify(args.verify.resolve())
         print(f'Verified {args.verify}')
         return
-    if args.app and args.audio_source:
-        parser.error('--audio-source applies only when the distribution is built')
     (ROOT / 'build').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.lcmp-dmg-', dir=ROOT / 'build') as temporary:
         work = Path(temporary)
-        app = args.app.resolve(strict=True) if args.app else distribution_app(work, args.audio_source)
-        if not is_distribution(app):
-            print('warning: the app has no CorrespondingSource; this DMG is for local checks, not for distribution',
-                  file=sys.stderr)
+        app = args.app.resolve(strict=True) if args.app else release_app(work)
         output = (args.output or default_output(app_version(app))).resolve()
         print(build(app, output, work))
 

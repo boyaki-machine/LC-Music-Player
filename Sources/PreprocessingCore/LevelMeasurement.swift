@@ -1,7 +1,6 @@
 import AVFAudio
 import Foundation
 import AudioProcessingCore
-import SFBAudioEngine
 
 public struct TrackAudioMetrics: Equatable, Sendable {
     public let source: SourceFingerprint

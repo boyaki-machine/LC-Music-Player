@@ -18,7 +18,7 @@ Sources/
 │   ├── PlayerView.swift               アプリ向けのメイン画面の入口
 │   ├── AppVersion.swift               正式名称とInfo.plistからのバージョン表示
 │   ├── Acknowledgements/
-│   │   └── Acknowledgements.swift     謝辞とライセンスの表示モデル・View
+│   │   └── Acknowledgements.swift     ライセンスの表示モデル・View
 │   └── Players/
 │       └── LCMP_default_GEQ/          このPlayer UIの実装一式
 │           ├── LCMPDefaultGEQ.swift   ID・名前・解析設定・表示データへの変換

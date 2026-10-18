@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a local macOS .app with dynamically linked audio frameworks and notices."""
+"""Build a macOS .app with LCMP's license and the third-party notices of the resolved dependencies."""
 import argparse
 import json
 from acknowledgements import generate
@@ -20,10 +20,8 @@ def main():
     parser.add_argument("--configuration", choices=["debug", "release"], default="release")
     parser.add_argument("--output", type=Path, default=ROOT / "build/LCMP.app",
                         help="Output .app path; use a different path while the current app is running")
-    parser.add_argument("--frameworks-dir", type=Path,
-                        help="Source-built framework overrides (distribution builder)")
     parser.add_argument("--prefix-map", action="store_true",
-                        help="Remove this checkout's path from compiled file/debug locations")
+                        help="Remove this checkout's path from compiled file/debug locations (apps for distribution)")
     args = parser.parse_args()
     documents(ROOT)
     command = [str(ROOT / "scripts/swift.sh"), "build", "-c", args.configuration]
@@ -38,32 +36,32 @@ def main():
     if app.exists():
         shutil.rmtree(app)
     contents = app / "Contents"
-    for directory in ["MacOS", "Frameworks", "Resources/ThirdPartyLicenses"]:
+    for directory in ["MacOS", "Resources/ThirdPartyLicenses"]:
         (contents / directory).mkdir(parents=True)
     binary = contents / "MacOS/LCMP"
     shutil.copy2(products / "LCMP", binary)
-    if args.prefix_map:
-        subprocess.run(["strip", "-S", str(binary)], check=True)
     commands = subprocess.check_output(["otool", "-l", str(binary)], text=True)
     for rpath in re.findall(r"cmd LC_RPATH\s+cmdsize \d+\s+path (.*?) \(offset", commands):
         if rpath.startswith(str(ROOT / ".build")):
             subprocess.run(["install_name_tool", "-delete_rpath", rpath, str(binary)], check=True)
-    subprocess.run(["install_name_tool", "-add_rpath", "@executable_path/../Frameworks", str(binary)], check=True)
-    for framework in sorted(products.glob("*.framework")):
-        destination = contents / "Frameworks" / framework.name
-        override = args.frameworks_dir / framework.name if args.frameworks_dir else None
-        shutil.copytree(override if override and override.exists() else framework,
-                        destination, symlinks=True)
-        subprocess.run(["codesign", "--force", "--sign", "-", str(destination)], check=True)
+    # All audio decoding is in macOS; the app links only system libraries and bundles none.
+    libraries = subprocess.check_output(["otool", "-L", str(binary)], text=True).splitlines()[1:]
+    linked = [line.split()[0] for line in libraries if line.strip()]
+    if any(not path.startswith(("/System/Library/", "/usr/lib/")) for path in linked):
+        raise RuntimeError("The app links a non-system library; review the dependencies and their licenses")
+    if args.prefix_map:
+        subprocess.run(["strip", "-S", str(binary)], check=True)
+        if str(ROOT).encode() in binary.read_bytes():
+            raise RuntimeError("Build-machine path remains in the executable")
 
     # Regenerate from the currently resolved graph, not every cached checkout.
     graph = json.loads(subprocess.check_output(
         [str(ROOT / "scripts/swift.sh"), "package", "show-dependencies", "--format", "json"],
         text=True, cwd=ROOT))
     notices = contents / "Resources/ThirdPartyLicenses"
-    generate(ROOT / "Package.resolved", graph, ROOT / ".build/artifacts", notices,
-             ROOT / "third-party/notices.json")
-    shutil.copy2(ROOT / "Package.resolved", notices / "Package.resolved")
+    generate(ROOT / "Package.resolved", graph, ROOT / ".build/artifacts", notices)
+    if (ROOT / "Package.resolved").exists():
+        shutil.copy2(ROOT / "Package.resolved", notices / "Package.resolved")
     shutil.copy2(ROOT / "docs/design/11_third-party-dependencies.md", notices / "dependency-notes.md")
     bundle(ROOT, contents / "Resources/LCMPLicense")
     # Rendered by scripts/render-app-icon.swift; committed so builds do not redraw it.

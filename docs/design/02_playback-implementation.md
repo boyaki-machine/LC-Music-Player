@@ -37,7 +37,7 @@
 
 ## 3. 方式
 
-対象はmacOS 14以降である。画面はSwiftUI、ファイル選択はNSOpenPanel、再生はSFBAudioEngine 0.14.0を使用する。依存バージョンは`Package.resolved`で固定する。
+対象はmacOS 14以降である。画面はSwiftUI、ファイル選択はNSOpenPanel、デコードはAVAudioFile（Core Audio）、再生はAVAudioEngineを使用する。第三者のライブラリは使わない。
 
 | 構成要素 | 担当 |
 | --- | --- |
@@ -46,12 +46,13 @@
 | `PlaybackController` | 選択と再生状態、操作、音量、エラーの管理 |
 | `LocalFileAccess`／`FileLease` | 通常ファイルの読み取り確認と、security-scoped accessの保持・解放 |
 | `PlaybackBackend` | 再生ライブラリに依存しない操作と通知のインターフェース |
-| `SFBAudioBackend` | SFBAudioEngineによる再生、アプリ内音量、delegate通知の受け渡し |
-| `PreprocessingCore.AudioDecoderFactory` | 拡張子に固定したPCMデコーダの生成・読み込みと、短い音源の互換処理 |
+| `AudioEngineBackend` | AVAudioEngineによる再生グラフ、アプリ内音量、再生位置、終了・失敗・出力変更の通知 |
+| `PCMFeeder` | 再生中のデコーダを専有し、有界のバッファでプレイヤーノードへPCMを供給する |
+| `PreprocessingCore.AudioDecoderFactory` | 拡張子ごとに受け付ける符号化方式を限ったPCMデコーダ（`PCMDecoding`）の生成 |
 
 - UIは再生ライブラリを直接操作しない。`PlaybackController`が`PlaybackBackend`を通じて再生を制御する。
 - OS依存のファイルアクセスもUIと再生制御から分離する。PlaybackCore自体は保存先やプレイリスト形式へ依存しない。
-- UIに渡す状態とイベントはmain actorで処理する。SFBAudioEngineのdelegateからは、デコーダオブジェクトを渡さず、終了・失敗・出力変更のイベントを受け渡す。
+- UIに渡す状態とイベントはmain actorで処理する。供給キューとエンジンの通知からは、デコーダオブジェクトを渡さず、終了・失敗・出力変更のイベントだけを受け渡す。
 
 ## 4. 実装
 
@@ -92,9 +93,24 @@
 - 再生失敗では再生を停止し、理由を表示する。選択音源は保持して再試行を受け付ける。
 - 音声出力の設定変更通知では停止し、利用者の再生操作で先頭から再開する。
 
-再生開始ごとにプレイヤーを生成し、デコーダは準備済みのものを一度だけ引き継ぐか、新たに生成する。停止時にその再生世代を無効化し、選択・停止・シーク・再再生をまたいだ古い通知が新しい状態を上書きしないようにする。プレイヤーへ渡したデコーダの所有権は再生ライブラリへ移し、アプリから変更しない。
+再生開始ごとにエンジンとプレイヤーノードを生成し、デコーダは準備済みのものを一度だけ引き継ぐか、新たに生成する。停止時にその再生世代を無効化し、選択・停止・シーク・再再生をまたいだ古い通知が新しい状態を上書きしないようにする。供給へ渡したデコーダの所有権は`PCMFeeder`へ移し、main actorから操作しない。
 
-音量自動調整がONのときは、前処理が確定した測定profileへ`ProfileDecoder`で変換し、そのFloat32 PCMをSFBAudioEngineへ渡す。再生開始・再開時は音源fingerprintと出力profileを再照合し、補正計画のない再生を拒否する。
+音量自動調整がONのときは、前処理が確定した測定profileへ`ProfileDecoder`で変換し、そのFloat32 PCMを供給する。再生開始・再開時は音源fingerprintと出力profileを再照合し、補正計画のない再生を拒否する。
+
+### PCMの供給と再生グラフ
+
+```text
+PCMFeeder（専用キュー）→ AVAudioPlayerNode → AVAudioMixerNode（出力形式へ変換）
+  → 解析用のAVAudioUnitEQ（素通し）→ 音量自動調整の段 → mainMixer → 既定出力
+```
+
+- `PCMFeeder`は、約0.2秒（最小4096フレーム）のバッファ4つを使い回し、専用のシリアルキューでデコードして`scheduleBuffer`する。メモリは曲の長さに比例しない。レンダースレッドではデコードしない。
+- 再生開始前に、最初のバッファを同期的に供給してからエンジンを開始する。
+- バッファが消費された（`.dataConsumed`）時点で、同じバッファへ次のPCMを読み込む。読み取りが要求より短いか、位置が長さに達したら最後のバッファとし、その再生が出力の遅延まで終わった（`.dataPlayedBack`）時点で自然終了を通知する。
+- 再生位置は、開始位置にプレイヤーノードの`playerTime`のサンプル時刻を足し、音源の長さを上限とする。一時停止中は一時停止した時点の位置を返す。
+- 一時停止はプレイヤーノードとエンジンを止め、再開で両方を再開する。
+- エンジンの構成変更通知（`AVAudioEngineConfigurationChange`）を出力変更として扱う。
+- 停止は、供給を取り消してからプレイヤーノードとエンジンを止め、デコーダを供給キューで閉じる。停止後に届く完了通知は無視する。
 
 ### シーク
 
@@ -111,7 +127,7 @@
 - 末尾へ確定した場合は再生を終了し、`finished`と音源長の表示に揃える。
 - 停止・出力変更・再生失敗では準備位置も先頭へ戻す。
 - シーク失敗は、再生失敗と同じ回復可能な停止とする。
-- 再生中のシークはデコーダを新しく開き、所有権を移す前にPCMフレームへシークしてからSFBAudioEngineへ渡す。一時停止・未再生では位置だけ保持し、再開時に同じ処理を行う。
+- 再生中のシークはデコーダを新しく開き、所有権を移す前にPCMフレームへシークしてから新しい再生世代へ渡す。一時停止・未再生では位置だけ保持し、再開時に同じ処理を行う。
 - 所有権を移したデコーダは操作せず、古い終了通知や失敗通知は世代IDで無視する。
 - シークによる再生成で短い再生の切れ目が生じ得るため、連続したスクラブ再生は提供しない。圧縮形式の位置精度はデコーダのフレーム解像度に従う。
 
@@ -122,28 +138,25 @@
 - ミュート中は再生音量を0とし、解除時はミュート前の値を復元する。スライダーを変更するとミュートを解除する。音源選択は音量とミュート状態を維持する。
 - 単曲再生の音量値はアプリの実行中に保持し、永続化しない。
 
-手動音量はPlaybackCoreが担当する。PlayerUIが操作を受け、`PlaybackController.setVolume`／`toggleMute`が値と状態を管理し、SFBAudioBackendが`mainMixerNode.outputVolume`へ反映する。音量・ミュートの変更は再生を続けたまま行う。PlayerUIは音量バーの操作位置を小音量側の曲線から実倍率へ変換してこのAPIへ渡し、再生層は非線形の操作位置を保持しない。
+手動音量はPlaybackCoreが担当する。PlayerUIが操作を受け、`PlaybackController.setVolume`／`toggleMute`が値と状態を管理し、AudioEngineBackendが`mainMixerNode.outputVolume`へ反映する。音量・ミュートの変更は再生を続けたまま行う。PlayerUIは音量バーの操作位置を小音量側の曲線から実倍率へ変換してこのAPIへ渡し、再生層は非線形の操作位置を保持しない。
 
 自動補正の固定ゲインはmainMixerより前の専用段で適用し、手動音量とは別の倍率として管理する。詳細は[音量自動調整の実装設計](06_volume-normalization-implementation.md)に記載する。
 
-### デコーダの選択と読み込みの互換処理
+### デコーダの選択
 
-`AudioDecoderFactory`は拡張子ごとに1つのデコーダ名を指定して、SFBAudioEngineのデコーダを生成・openする。SFBAudioEngineの既定の内容判定は使わない。内容判定では拡張子と無関係に、同梱する全デコーダ（Monkey's Audio、TTA、モジュール形式等）の解析処理へ到達し得るためである。
+すべての形式をAVAudioFile（Core Audio）で読み、Float32の非インターリーブPCMとして`PCMDecoding`を実装する。Core Audioの修正はOSの更新で届く。
 
-| 拡張子 | デコーダ |
+| 拡張子 | 受け付ける符号化方式 |
 | --- | --- |
-| mp3 | mpg123（`.MPEG`） |
-| flac | libFLAC（`.FLAC`） |
-| m4a・wav・aif・aiff | Core Audio（`.coreAudio`） |
+| mp3 | MPEG-1/2 Layer III（Layer I・IIも受け付ける） |
+| flac | FLAC |
+| m4a | AAC（HE・LD・ELDを含む）、ALAC |
+| wav・aif・aiff | リニアPCM、μ-law、A-law |
 
-- PCMコンテナはOS更新で修正されるCore Audioで読み、libsndfileは使用しない。
-- 内容が拡張子と一致しないファイルは、指定したデコーダで読めなければ読み込み失敗として扱い、別の解析処理へ回さない。
-
-Core Audioでの読み込みが、下位の`NSOSStatusErrorDomain`のeofErr（-39）で失敗した場合に限り、AVAudioFileでPCMを読み取る`PCMDecoding`アダプターへ切り替える。SFBAudioEngine 0.14.0では、短いM4A・WAV・AIFFでこの失敗が生じる。
-
-- アダプターは、m4aではAAC／ALAC、wav・aif・aiffではリニアPCMであることを確認する。それ以外の形式や読み込み失敗を正常扱いしない。
-- PCMの再生は引き続きSFBAudioEngineが担当する。
-- 依存ライブラリのソースは変更せず、互換処理をアプリ側のデコーダ生成に集約する。
+- 開いた音源の符号化方式が拡張子の表に含まれなければ、読み込み失敗として扱う。名前を変えたファイルが、拡張子と異なる解析処理で読まれることを防ぐ。
+- MP3のエンコーダの遅延とパディングは、LAME/Xingヘッダ、またはiTunSMPBに記録があればCore Audioが取り除く。記録のないMP3では取り除かれず、先頭と末尾に合わせて数十ms程度の無音が残る。
+- 32bit整数のPCMは、Float32の精度（24bit）で読む。最大音量の差は最大で約5×10⁻⁷dBである。
+- `PCMDecoding`の読み取りが要求より短いか0フレームのときは、音源の終わりを意味する。
 
 ### エラーの扱い
 
@@ -162,7 +175,9 @@ Core Audioでの読み込みが、下位の`NSOSStatusErrorDomain`のeofErr（-3
 
 - 状態遷移、失敗・取消、遅延通知、アクセスの解放、元ファイルの不変が上の表のとおりである。
 - 対応形式のデコード・再生終了、一時停止・再開・停止・再再生、シーク、ミュートの復元が動作する。
-- 拡張子に固定したデコーダのPCMが、SFBAudioEngineの内容判定で選ばれるデコーダのPCMと一致する。
+- 可逆形式（AIFF・ALAC・FLAC）のPCMが元のPCMとビット単位で一致する。名前を変えたファイルは読み込み失敗になる。
+- 遅延・パディングの記録があるMP3は、元の音源と同じフレーム数で、先頭がずれない。シークした位置のPCMが、先頭から読んだ同じ位置のPCMと一致する。
+- `PCMFeeder`が、全フレームを順番どおり欠けずに供給し、最後のバッファの再生後にだけ終了を通知する（オフラインのレンダリングで確認）。
 - システム音量が変わらない。比較はデバイスから読み取れる場合に行い、比較の可否をログへ出力する。
 
 ### 自動テスト
@@ -174,7 +189,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test
 
 通常のテストは音声を出力しない。2つ目の出力テストは既定出力先へ小さい正弦波を送る。
 
-テスト音源は独自の正弦波である。開発ビルド後に`python3 scripts/generate-fixtures.py Tests/PlaybackCoreTests/Fixtures`で再生成できる。手動確認用の音源は`python3 scripts/generate-fixtures.py build/manual-audio --duration 12`で生成する。
+テスト音源は独自の合成音である。WAV・AIFF・M4A・FLACは`python3 scripts/generate-fixtures.py Tests/PlaybackCoreTests/Fixtures`で再生成できる。MP3（`tone.mp3`と、遅延・パディングの記録を持つ`gapless-*.mp3`とその元のWAV）はLAME 3.100で作ってリポジトリに置き、再生成しない。手動確認用の音源は`python3 scripts/generate-fixtures.py build/manual-audio --duration 12`で生成する。
 
 ### 手動確認
 
@@ -189,6 +204,6 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test
 
 ## 6. 参照
 
-- [SFBAudioEngine 0.14.0](https://github.com/sbooth/SFBAudioEngine/tree/0.14.0)
-- [SFBAudioEngineの再生インターフェース](https://github.com/sbooth/SFBAudioEngine/blob/0.14.0/Sources/CSFBAudioEngine/include/SFBAudioEngine/SFBAudioPlayer.h)
+- [AVAudioPlayerNode](https://developer.apple.com/documentation/avfaudio/avaudioplayernode)
+- [AVAudioFile](https://developer.apple.com/documentation/avfaudio/avaudiofile)
 - [依存ライブラリの構成](11_third-party-dependencies.md)

@@ -24,7 +24,8 @@ def notice_files(root):
 
 
 def generate(resolved, graph, artifacts, destination, supplements=None):
-    pins = json.loads(resolved.read_text())['pins']
+    # SwiftPM writes no Package.resolved while the package has no dependencies.
+    pins = json.loads(resolved.read_text())['pins'] if resolved.exists() else []
     nodes = {}
 
     def walk(node):

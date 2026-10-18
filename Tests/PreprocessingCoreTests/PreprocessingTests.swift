@@ -1,6 +1,5 @@
 import AVFAudio
 import Foundation
-import SFBAudioEngine
 import Testing
 @testable import PreprocessingCore
 
@@ -129,7 +128,8 @@ private func wave(_ samples: [[Float]], rate: Double = 48000) throws -> URL {
         do { let file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatInt32, interleaved: false)
              for _ in 0..<20 { try file.write(from: buffer) } }
         let result = try await AudioPreprocessor.shared.measure(url)
-        #expect(abs(result.samplePeak - Double(Int32.max) / 2147483648) < 1e-12, "Measured peak \(result.samplePeak)")
+        // Decoders return Float32, so 32-bit integer PCM keeps 24 bits of precision.
+        #expect(abs(result.samplePeak - Double(Int32.max) / 2147483648) <= 0x1p-24, "Measured peak \(result.samplePeak)")
         let token = PreparationCancellation()
         let task = Task { try await AudioPreprocessor.shared.measure(url, cancellation: token) }
         try await Task.sleep(for: .milliseconds(1)); token.cancel()

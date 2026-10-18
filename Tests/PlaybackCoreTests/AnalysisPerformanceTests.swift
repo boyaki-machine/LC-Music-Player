@@ -36,7 +36,7 @@ struct AnalysisPerformanceTests {
         }
         let metrics = Metrics()
         var earlyEnd = false
-        let backend = try SFBAudioBackend(url: url)
+        let backend = try AudioEngineBackend(url: url)
         defer { backend.stop() }
         backend.volume = 0
         backend.onEvent = { _ in earlyEnd = true }

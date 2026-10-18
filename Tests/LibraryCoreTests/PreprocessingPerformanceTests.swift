@@ -17,7 +17,7 @@ import PreprocessingCore
                 for preparedPath in (run.isMultiple(of: 2) ? [false, true] : [true, false]) {
                     let preparation = preparedPath ? try await AudioPreprocessor.shared.prepare(url) : nil
                     let begin = now()
-                    let backend = try preparation.map { try SFBAudioBackend(prepared: $0) } ?? SFBAudioBackend(url: url)
+                    let backend = try preparation.map { try AudioEngineBackend(prepared: $0) } ?? AudioEngineBackend(url: url)
                     let selectionSeconds = now() - begin
                     backend.volume = 0
                     var firstAnalysis: Double?

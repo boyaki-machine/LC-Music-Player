@@ -23,7 +23,7 @@ private final class RenderProbe: @unchecked Sendable {
         var rows: [[String: Any]] = []
         for name in ["short.wav", "short.flac", "large.wav", "large.flac"] {
             let url = root.appendingPathComponent(name)
-            let profile = try SFBAudioBackend.measurementProfile()
+            let profile = try AudioEngineBackend.measurementProfile()
             let openStart = startupClock()
             let decoder = try AudioDecoderFactory.open(url)
             let openSeconds = startupClock() - openStart
@@ -42,12 +42,12 @@ private final class RenderProbe: @unchecked Sendable {
                         let begin = startupClock()
                         let prepared = prefixSeconds > 0 ? try await processor.prepare(url, seconds: prefixSeconds) : nil
                         let preparedAt = startupClock()
-                        let backend: SFBAudioBackend
+                        let backend: AudioEngineBackend
                         if let prepared {
-                            backend = try SFBAudioBackend(prepared: prepared, metrics: normalized ? metrics : nil)
+                            backend = try AudioEngineBackend(prepared: prepared, metrics: normalized ? metrics : nil)
                         } else {
                             if normalized { continue } // direct URL doesn't carry a measured plan
-                            backend = try SFBAudioBackend(url: url)
+                            backend = try AudioEngineBackend(url: url)
                         }
                         let selectedAt = startupClock(), probe = RenderProbe()
                         backend.onRenderScheduled = { probe.receive($0) }
@@ -82,7 +82,7 @@ private final class RenderProbe: @unchecked Sendable {
         let processor = AudioPreprocessor(cache: config, collectMeasurementTimings: true)
         var rows: [[String: Any]] = []
         for name in ["short.wav", "short.flac", "large.wav", "large.flac"] {
-            let url = root.appendingPathComponent(name), profile = try SFBAudioBackend.measurementProfile()
+            let url = root.appendingPathComponent(name), profile = try AudioEngineBackend.measurementProfile()
             let before = await processor.statistics(), begin = startupClock(), cpu = processCPU(), memoryBefore = startupResidentMiB()
             _ = try await processor.measureLevels(url, profile: profile)
             let first = startupClock()-begin, after = await processor.statistics()
@@ -94,7 +94,7 @@ private final class RenderProbe: @unchecked Sendable {
                 hitSeconds.append(startupClock()-start)
                 let requested = startupClock()
                 let prepared = try await reopened.prepare(url)
-                let backend = try SFBAudioBackend(prepared: prepared, metrics: metrics)
+                let backend = try AudioEngineBackend(prepared: prepared, metrics: metrics)
                 let probe = RenderProbe(); backend.onRenderScheduled = { probe.receive($0) }; backend.volume = 0
                 try backend.play()
                 let deadline = startupClock()+4
@@ -123,7 +123,7 @@ private final class RenderProbe: @unchecked Sendable {
         var rows: [[String: Any]] = []
         for name in ["large.wav", "large.flac"] {
             let processor = AudioPreprocessor(), token = PreparationCancellation()
-            let measurement = Task { try await processor.measureLevels(root.appendingPathComponent(name), profile: SFBAudioBackend.measurementProfile(), cancellation: token) }
+            let measurement = Task { try await processor.measureLevels(root.appendingPathComponent(name), profile: AudioEngineBackend.measurementProfile(), cancellation: token) }
             var maxGap = 0.0
             let heartbeat = Task {
                 var previous = startupClock()

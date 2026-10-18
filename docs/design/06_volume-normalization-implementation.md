@@ -53,18 +53,18 @@ PreprocessingCore
     ↓ TrackAudioMetrics（完了値＋音源・測定条件の識別情報）
 AudioProcessingCore（設定の検証 → NormalizationPlan）
     ↓
-PlaybackCore / SFBAudioBackend
-    ProfileDecoder → source → mixer → 観測ノード → 自動補正gain → mainMixer → OS出力
+PlaybackCore / AudioEngineBackend
+    ProfileDecoder → PCMFeeder → playerNode → mixer → 観測ノード → 自動補正gain → mainMixer → OS出力
                               ↓                         手動音量・mute
                          AnalysisCore → 可視化
 ```
 
-- `AudioProcessingCore`は、数値設定・測定器・補正量の計算・専用のgainノードを持つ。Foundation、AVFAudioと、独立したCターゲット`LevelDSP`を使用し、SFBAudioEngine、PreprocessingCore、LibraryCore、UIへ依存しない。
+- `AudioProcessingCore`は、数値設定・測定器・補正量の計算・専用のgainノードを持つ。Foundation、AVFAudioと、独立したCターゲット`LevelDSP`を使用し、PreprocessingCore、PlaybackCore、LibraryCore、UIへ依存しない。
 - `LevelDSP`はworker上でK-weightingと補間を行い、数値ループを最適化してビルドする。PreprocessingCoreはこのDSPをチャンク入力で利用し、ファイル・デコーダ・測定資源の寿命を管理する。
 - PlaybackCoreとLibraryCoreもAudioProcessingCoreの値型を利用する。UIからAudio Unitを直接操作しない。
 - 観測用の0band EQはglobalGain=0のままとし、補正専用の0band `AVAudioUnitEQ`をその後へ置く。解析の購読の有無・最小化・ウィンドウの非表示で補正を解除しない。
 - 可視化の値は、自動補正・手動音量より前の音源レベルを表し、出力レベル計として扱わない。
-- SFBAudioEngineのグラフの変更はsourceとmainMixerの間だけで行う。sourceの初期形式や内部ring bufferをアプリ側から先に変更せず、デコーダ形式の設定をSFBへ委ねる。エンジンの開始・停止はプレイヤーのAPIを使う。
+- 再生グラフは再生開始ごとに作り、プレイヤーノードとmainMixerの間に形式変換mixer・観測ノード・gain段を置く。プレイヤーノードの入力はデコーダ（またはProfileDecoder）のprocessingFormatとする。
 
 ### 処理段の重ね合わせと順序
 
@@ -97,7 +97,7 @@ EQと同期用ディレイを含む順序は次で固定する。利用者によ
 | --- | --- |
 | PlayerUI | 音量スライダー・ミュートの操作を受け付け、PlaybackControllerへ渡す |
 | PlaybackController | `setVolume`／`toggleMute`で、音量値、ミュート状態、解除時に戻す値を管理する |
-| SFBAudioBackend | 最終段の`mainMixerNode.outputVolume`へ音量を適用する |
+| AudioEngineBackend | 最終段の`mainMixerNode.outputVolume`へ音量を適用する |
 | AudioProcessingCore | 曲ごとの補正計画と加工段を担当し、手動音量の値を所有・上書きしない |
 
 - 自動補正は曲ごとの差を補う倍率、手動音量は利用者が聴く大きさを決める最終倍率である。全体の振幅には両方の倍率がかかる。
@@ -113,7 +113,7 @@ EQと同期用ディレイを含む順序は次で固定する。利用者によ
 | `AudioLevelMetrics` | Integrated LUFSまたは測定不能の理由、sample peak、true peak、フレーム数、gating block数 |
 | `TrackAudioMetrics` | SourceFingerprint、MeasurementProfile、AudioLevelMetrics、測定完了の識別情報 |
 | `NormalizationSettings` | 目標LUFS、true-peak上限、測定誤差用の余裕、増幅上限。有効状態はLibraryControllerが管理する |
-| `NormalizationPlan` | 測定profile、設定のsnapshot、適用するgainのdB・線形倍率、制約の理由。音源の照合情報はSFBAudioBackendがTrackAudioMetricsとして保持する |
+| `NormalizationPlan` | 測定profile、設定のsnapshot、適用するgainのdB・線形倍率、制約の理由。音源の照合情報はAudioEngineBackendがTrackAudioMetricsとして保持する |
 
 - `integratedLUFS`は、有限の測定値と、無音・gatingの対象なし・短すぎる音源を区別する。JSONやUIへNaN/Infinityを数値として保存・表示しない。ピークの線形0は無音として扱う。非有限の入力サンプルは無音へ置換せず、測定失敗とする。
 - `TrackPeak`・`measure`・`currentTrackPeak`はsample peak専用のAPIであり、LUFS/true peak付きの結果と見なさない。全曲のAPIは`measureLevels`、公開状態は`levelMeasurement`、有効な完了値を返す入口は`currentTrackMetrics`とする。
@@ -130,7 +130,7 @@ EQと同期用ディレイを含む順序は次で固定する。利用者によ
 
 - monoを同振幅の左右へ複製すると、左右のエネルギー和はmonoと異なる。レート変換もピークを変え得るため、ファイルのnative LUFS/peakだけを出力形式の測定値として扱わない。
 - `ProfileConversion`でAVAudioConverterの設定を共有し、測定と、自動調整ONの再生用`ProfileDecoder`に適用する。monoからstereoへは両チャンネルへ同振幅で写す。
-- ProfileDecoderはnative先頭PCM付きデコーダを包み、SFBのdecode threadで変換後のPCMを返す。その後のmixerへ同じレート・チャンネル数を渡すことで、暗黙のチャンネル変換への依存を避ける。自動調整OFFの再生はnativeデコーダの経路を使う。
+- ProfileDecoderはnative先頭PCM付きデコーダを包み、`PCMFeeder`の供給キューで変換後のPCMを返す。その後のmixerへ同じレート・チャンネル数を渡すことで、暗黙のチャンネル変換への依存を避ける。自動調整OFFの再生はnativeデコーダの経路を使う。
 - profileへ変換の版を含め、offlineの測定PCMと再生側の波形を照合する。
 - profileは再生準備時に実際の出力形式から作り、走査の開始時と再生開始の直前に照合する。走査中に出力が変わった場合、古いprofileのまま再生を始めない。変換APIの設定名が同じだけでは同一の波形と見なさず、照合に通らない変換は対応profileへ登録しない。
 - 対象はmono/stereoの入力とmono/stereoの処理出力、処理出力レート44.1/48/96kHzとする。任意の多ch配置を先頭2chだけで代用しない。未対応の配置や未検証の変換profileは自動調整不可として理由を表示する。自動調整OFFでの再生形式の対応は狭めない。
@@ -240,7 +240,7 @@ ITU-R BS.1770-5の測定方式に沿い、チャンネル別のK-weightingとエ
 - `LibraryController.setNormalizesVolume`／`setNormalizationTarget`：設定、現在曲・次曲の測定結果、再生準備を管理する。`levelMeasurement`／`currentTrackMetrics`／`preparationStage`を表示へ渡す。
 - `PlaybackController.requireNormalization`：有効なときに計画のない再生・再開を拒否する。設定の変更では一時停止し、OFFでは旧gainを解除する。
 - `selectPrepared(...metrics:settings:)`：音源と測定結果を照合し、保存の成功後に現在の再生を差し替える。
-- `SFBAudioBackend`：開始・再開時にfingerprintと実際の出力profileを再照合し、ProfileDecoderと独立したgainノードを所有する。`AudioProcessingChain`はレベル段を持ち、EQ・ディレイを追加する位置をその前後に定める。
+- `AudioEngineBackend`：開始・再開時にfingerprintと実際の出力profileを再照合し、ProfileDecoderと独立したgainノードを所有する。`AudioProcessingChain`はレベル段を持ち、EQ・ディレイを追加する位置をその前後に定める。
 
 ## 5. 検証
 
