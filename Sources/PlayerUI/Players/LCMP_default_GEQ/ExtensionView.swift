@@ -112,7 +112,7 @@ public struct ExtensionView: View {
                             Text("再生と表示")
                             Toggle("曲ごとの音量をそろえる", isOn: Binding(get: { library.normalizesVolume },
                                 set: { library.setNormalizesVolume($0) }))
-                            Text("曲全体の音量とピークを測定して補正します。未測定の曲は再生前に待ちます。設定変更時は一時停止します。")
+                            Text("曲全体の音量とピークを測定して音量補正します。")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             if library.normalizesVolume {
                                 Picker("目標音量", selection: Binding(get: { library.normalizationSettings.targetLUFS },
@@ -139,7 +139,7 @@ public struct ExtensionView: View {
                             }
                             Toggle("最大音量を測定", isOn: Binding(get: { library.measuresMaximumVolume },
                                 set: { library.setMeasuresMaximumVolume($0) }))
-                            Text("最大サンプル音量を表示します。リストの曲は背景でも測定し、再生音量は変更しません。")
+                            Text("最大サンプル音量を表示します。")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             switch library.peakMeasurement {
                             case .disabled: EmptyView()
@@ -148,12 +148,9 @@ public struct ExtensionView: View {
                                 Text(peak.samplePeak == 0 ? "最大音量：無音" : String(format: "最大音量：%.1f dBFS", peak.peakDBFS))
                             case .failed: Text("最大音量を測定できませんでした。").foregroundStyle(.secondary)
                             }
-                            #if os(iOS)
-                            Text("音量はアプリ内の再生音量です。出力はiPhoneの現在の出力先（スピーカー・ヘッドホンなど）を使用します。")
+                            Text("音量調整はアプリ内の再生音量で行います。")
                                 .fixedSize(horizontal: false, vertical: true)
-                            #else
-                            Text("音量はアプリ内の再生音量です。出力はmacOSの既定デバイスを使用します。")
-                                .fixedSize(horizontal: false, vertical: true)
+                            #if os(macOS)
                             Text("⌘O 音源登録 · Space 再生／一時停止\n⌘M 最小化 · ⌘W 閉じる · ⌘Q 終了")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             #endif
@@ -402,13 +399,12 @@ public struct ExtensionView: View {
         } else {
             HStack { Text("ライブラリ").fontWeight(.medium); Spacer(); Text("\(library.document.tracks.count)曲").foregroundStyle(.secondary) }
             HStack(spacing: 8) {
-                Button { actions.files(nil) } label: { Label("ファイルを登録…", systemImage: "doc.badge.plus") }
-                Button(action: actions.folder) { Label("フォルダを登録…", systemImage: "folder.badge.plus") }
-            }.buttonStyle(SoftGlassButtonStyle()).disabled(!library.canEdit)
-            if let musicLibrary = actions.musicLibrary {
-                Button { musicLibrary(nil) } label: { Label("ミュージックから登録…", systemImage: "music.note") }
-                    .buttonStyle(SoftGlassButtonStyle()).disabled(!library.canEdit)
-            }
+                Button { actions.files(nil) } label: { Label("ファイル", systemImage: "doc.badge.plus") }
+                Button(action: actions.folder) { Label("フォルダ", systemImage: "folder.badge.plus") }
+                if let musicLibrary = actions.musicLibrary {
+                    Button { musicLibrary(nil) } label: { Label("ミュージック", systemImage: "music.note") }
+                }
+            }.fixedSize(horizontal: false, vertical: true).buttonStyle(SoftGlassButtonStyle()).labelStyle(CompactLabelStyle()).disabled(!library.canEdit)
             scrolled {
                 SourceFolderList(tracks: library.document.tracks, unavailable: library.unavailable, canRemove: library.canEdit,
                                  select: { id in sourceID = id; originID = nil }, removeFolder: { confirmFolder = $0 })

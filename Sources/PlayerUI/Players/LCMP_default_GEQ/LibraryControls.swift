@@ -196,6 +196,13 @@ struct SoftGlassButtonStyle: ButtonStyle {
             .background(.white.opacity(enabled ? (configuration.isPressed ? 0.13 : 0.07) : 0.03), in: RoundedRectangle(cornerRadius: 5))
     }
 }
+/// Icon and title close together on one line, so several buttons fit a row on a narrow iPhone.
+/// The label fills the row's height, so a row fixed to its tallest button gives all of them one height.
+struct CompactLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 4) { configuration.icon; configuration.title }.lineLimit(1).fixedSize().frame(maxHeight: .infinity)
+    }
+}
 /// Shuffle mode toggle. The pictogram glows softly like an LED while shuffle is on and stays
 /// near-dark while playback follows the playlist order.
 struct ShuffleToggle: View {
