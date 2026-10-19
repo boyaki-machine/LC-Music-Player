@@ -17,6 +17,7 @@ Sources/
 ├── PlayerUI/
 │   ├── PlayerView.swift               アプリ向けのメイン画面の入口
 │   ├── AppVersion.swift               正式名称とInfo.plistからのバージョン表示
+│   ├── TransportStateMapping.swift    再生の状態からウィジェットの状態への対応
 │   ├── Acknowledgements/
 │   │   └── Acknowledgements.swift     ライセンスの表示モデル・View
 │   └── Players/
@@ -47,6 +48,7 @@ Sources/
 │   └── Shared/
 │       ├── SpectrumSample.swift       UIに依存しない表示用レベル・時刻の値型
 │       └── VisualizationClock.swift   共通のhost clock・activity
+├── ControlSurfaces/                   iPhoneのホーム画面のウィジェットの記号・配置・共有の状態（依存なし）
 ├── PreprocessingCore/                 先頭PCMの準備・LUFS/ピークの測定・共通のデコーダと形式変換
 ├── AudioProcessingCore/               測定値・設定・補正計画・独立したgain段
 ├── LevelDSP/                          worker用のK-weighting/true peak補間（C）

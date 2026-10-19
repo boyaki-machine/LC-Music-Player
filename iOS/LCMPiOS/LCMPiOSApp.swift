@@ -2,6 +2,7 @@ import SwiftUI
 import PlaybackCore
 import LibraryCore
 import PlayerUI
+import ControlSurfaces
 
 @main
 struct LCMPiOSApp: App {
@@ -10,11 +11,19 @@ struct LCMPiOSApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(model: model)
-                .preferredColorScheme(.dark)
-                .onOpenURL { model.open($0) }
+            #if DEBUG
+            if UserDefaults.standard.bool(forKey: "LCMPControlSurfaces") { ControlSurfaceGallery() } else { root }
+            #else
+            root
+            #endif
         }
         .onChange(of: scenePhase) { _, phase in model.sceneChanged(phase) }
+    }
+
+    private var root: some View {
+        RootView(model: model)
+            .preferredColorScheme(.dark)
+            .onOpenURL { model.open($0) }
     }
 }
 
@@ -24,6 +33,7 @@ struct LCMPiOSApp: App {
     let library: LibraryController
     let presentation = PlayerPresentation()
     @ObservationIgnored private var session: AudioSessionController?
+    @ObservationIgnored private var surfaces: ControlSurfaceController?
 
     init() {
         // Music library songs keep their measurements too, identified by the library's values.
@@ -40,6 +50,9 @@ struct LCMPiOSApp: App {
                                     preprocessor: AudioPreprocessor(cache: cache))
         session = AudioSessionController(playback: playback, library: library)
         library.restore()
+        surfaces = ControlSurfaceController(playback: playback)
+        // The buttons of the widgets run here, even with the app in the background.
+        TransportIntentHandler.handle = { [weak self] command in self?.perform(command) }
         // A normal launch shows the player with the extension below it.
         #if DEBUG
         // Simulator checks: `-LCMPExtension NO` starts with the extension closed.
@@ -65,6 +78,17 @@ struct LCMPiOSApp: App {
     }
     #endif
 
+    /// A button of the widgets, handled like the same button of the player.
+    func perform(_ command: TransportCommand) {
+        switch command {
+        case .playPause: library.togglePlayPause()
+        case .previous: if library.canPrevious { library.previous() }
+        case .next: if library.canNext { library.next() }
+        case .stop: library.stop()
+        case .menu: if !presentation.extensionVisible { toggleExtension() }
+        }
+    }
+
     func toggleExtension() {
         presentation.toggleExtension()
         if presentation.extensionVisible { library.refreshAvailability() }
@@ -79,7 +103,7 @@ struct LCMPiOSApp: App {
         if playback.analysisConfiguration != configuration { playback.configureAnalysis(configuration) }
     }
 
-    /// `lcmp://extension` (the ☰ of the widgets and the Live Activity) opens the extension.
+    /// `lcmp://extension` (the ☰ of the widgets) opens the extension.
     func open(_ url: URL) {
         guard url.scheme == "lcmp" else { return }
         if url.host() == "extension", !presentation.extensionVisible { toggleExtension() }

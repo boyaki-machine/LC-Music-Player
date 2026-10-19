@@ -4,6 +4,8 @@
 <dict>
 	<key>NSAppleMusicUsageDescription</key>
 	<string>「ミュージック」のライブラリの曲を選んで、LCMPで再生します。</string>
+	<key>LCMPAppGroup</key>
+	<string>$(LCMP_APP_GROUP)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

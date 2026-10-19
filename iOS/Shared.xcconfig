@@ -2,11 +2,20 @@
 // Machine- and person-specific values go in Local.xcconfig, which is not tracked:
 //   DEVELOPMENT_TEAM = <your team ID>
 //   LCMP_BUNDLE_PREFIX = <a bundle ID prefix only you use>
+//   LCMP_APP_GROUP_ENABLED = YES   (only if your team can use App Groups; the widgets then light while playing)
 // Without it the app still builds for the simulator, unsigned.
 
 LCMP_BUNDLE_PREFIX = local.lcmp
 DEVELOPMENT_TEAM =
 CODE_SIGN_STYLE = Automatic
+
+// The app and the widgets share the transport state through this App Group when it is enabled.
+// Without it they build and sign as before, and the widgets show a toggle glyph that never lights.
+LCMP_APP_GROUP = group.$(LCMP_BUNDLE_PREFIX).player
+LCMP_APP_GROUP_ENABLED = NO
+LCMP_ENTITLEMENTS_YES = AppGroup.entitlements
+LCMP_ENTITLEMENTS_NO =
+CODE_SIGN_ENTITLEMENTS = $(LCMP_ENTITLEMENTS_$(LCMP_APP_GROUP_ENABLED))
 
 PRODUCT_NAME = LCMP
 PRODUCT_BUNDLE_IDENTIFIER = $(LCMP_BUNDLE_PREFIX).player

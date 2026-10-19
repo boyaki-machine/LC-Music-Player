@@ -10,6 +10,9 @@
 		3190B78ED438754389C59B13 /* LibraryCore in Frameworks */ = {isa = PBXBuildFile; productRef = 574B9FE134CBEC8DB1693587 /* LibraryCore */; };
 		D2294E28DED27751AAB2E470 /* PlayerUI in Frameworks */ = {isa = PBXBuildFile; productRef = ECACC9F92FA0DFBEE9492084 /* PlayerUI */; };
 		D2F82E789BB18BFA61272237 /* PlaybackCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0DE2A57DACEA14B02F596219 /* PlaybackCore */; };
+		BD677E72B74BFBD1264FFAD2 /* ControlSurfaces in Frameworks */ = {isa = PBXBuildFile; productRef = 8CCEC3E1D2A818E7C75AA4CE /* ControlSurfaces */; };
+		B8E64B96030A52498E1C278A /* ControlSurfaces in Frameworks */ = {isa = PBXBuildFile; productRef = 8EB325AB8F6E2D1016D7566F /* ControlSurfaces */; };
+		3C2F6B703416A6A2864560DF /* LCMPWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B58FF54EDD6F400E834CECA4 /* LCMPWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -20,18 +23,44 @@
 			remoteGlobalIDString = D0A81B549CE2D545BDF4D19F;
 			remoteInfo = LCMPiOS;
 		};
+		239F4DF091AF136AE1AF31B3 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 587A1B49B5AB316D83FDA137 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 60C1EB11348233A982057535;
+			remoteInfo = LCMPWidgets;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		3B0F2C9FEDE03F8905425F62 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				3C2F6B703416A6A2864560DF /* LCMPWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		F28EC6A971B6D99A6860A031 /* LCMP.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LCMP.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2F307C2C863C655EAC19B0B7 /* LCMPiOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LCMPiOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B8A9AD91F0412797693F4DE7 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 		D48A0783EC3CC27D6BB84D0A /* LCMPiOS-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "LCMPiOS-Info.plist"; sourceTree = "<group>"; };
+		B58FF54EDD6F400E834CECA4 /* LCMPWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LCMPWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		ACA9C8D2B637E1075F0496CB /* LCMPWidgets-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "LCMPWidgets-Info.plist"; sourceTree = "<group>"; };
+		0EB3B93EAE6582ACE79C0472 /* AppGroup.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AppGroup.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C38B0364B98C08C81C45B14B /* LCMPiOS */ = {isa = PBXFileSystemSynchronizedRootGroup; path = LCMPiOS; sourceTree = "<group>"; };
 		C485924AD71516061617CBCC /* LCMPiOSUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = LCMPiOSUITests; sourceTree = "<group>"; };
+		6654E429BAAAB392C4FE4FC5 /* Shared */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Shared; sourceTree = "<group>"; };
+		3BD0CC0BE387C06874389074 /* LCMPWidgets */ = {isa = PBXFileSystemSynchronizedRootGroup; path = LCMPWidgets; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -42,6 +71,7 @@
 				3190B78ED438754389C59B13 /* LibraryCore in Frameworks */,
 				D2294E28DED27751AAB2E470 /* PlayerUI in Frameworks */,
 				D2F82E789BB18BFA61272237 /* PlaybackCore in Frameworks */,
+				BD677E72B74BFBD1264FFAD2 /* ControlSurfaces in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -49,6 +79,14 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3F0DAEE635EE5E74DB02F63C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B8E64B96030A52498E1C278A /* ControlSurfaces in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -60,7 +98,11 @@
 			children = (
 				B8A9AD91F0412797693F4DE7 /* Shared.xcconfig */,
 				D48A0783EC3CC27D6BB84D0A /* LCMPiOS-Info.plist */,
+				ACA9C8D2B637E1075F0496CB /* LCMPWidgets-Info.plist */,
+				0EB3B93EAE6582ACE79C0472 /* AppGroup.entitlements */,
 				C38B0364B98C08C81C45B14B /* LCMPiOS */,
+				6654E429BAAAB392C4FE4FC5 /* Shared */,
+				3BD0CC0BE387C06874389074 /* LCMPWidgets */,
 				C485924AD71516061617CBCC /* LCMPiOSUITests */,
 				7DFC14F700E4D9195E324C97 /* Products */,
 			);
@@ -71,6 +113,7 @@
 			children = (
 				F28EC6A971B6D99A6860A031 /* LCMP.app */,
 				2F307C2C863C655EAC19B0B7 /* LCMPiOSUITests.xctest */,
+				B58FF54EDD6F400E834CECA4 /* LCMPWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -85,20 +128,24 @@
 				370C5B63BCD1BBCA3253AE2A /* Sources */,
 				54FA66EA4A8962DD6F61D452 /* Frameworks */,
 				FDDBA9192E6B1B4B31A7B44C /* Resources */,
+				3B0F2C9FEDE03F8905425F62 /* Embed Foundation Extensions */,
 				1B3D5B08664097635BC6FD0E /* Bundle license and version */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				05759BBC2ECA80C8B545DAE4 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				C38B0364B98C08C81C45B14B /* LCMPiOS */,
+				6654E429BAAAB392C4FE4FC5 /* Shared */,
 			);
 			name = LCMPiOS;
 			packageProductDependencies = (
 				574B9FE134CBEC8DB1693587 /* LibraryCore */,
 				ECACC9F92FA0DFBEE9492084 /* PlayerUI */,
 				0DE2A57DACEA14B02F596219 /* PlaybackCore */,
+				8CCEC3E1D2A818E7C75AA4CE /* ControlSurfaces */,
 			);
 			productName = LCMPiOS;
 			productReference = F28EC6A971B6D99A6860A031 /* LCMP.app */;
@@ -125,6 +172,31 @@
 			productReference = 2F307C2C863C655EAC19B0B7 /* LCMPiOSUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		60C1EB11348233A982057535 /* LCMPWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FF19AF77E212F24757166145 /* Build configuration list for PBXNativeTarget "LCMPWidgets" */;
+			buildPhases = (
+				44347F3B18F8A28C4842797E /* Sources */,
+				3F0DAEE635EE5E74DB02F63C /* Frameworks */,
+				6160FCD2D9AB4C4EDE67ECC3 /* Resources */,
+				9CA09B32FD6477C6A9B5F670 /* Stamp version */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3BD0CC0BE387C06874389074 /* LCMPWidgets */,
+				6654E429BAAAB392C4FE4FC5 /* Shared */,
+			);
+			name = LCMPWidgets;
+			packageProductDependencies = (
+				8EB325AB8F6E2D1016D7566F /* ControlSurfaces */,
+			);
+			productName = LCMPWidgets;
+			productReference = B58FF54EDD6F400E834CECA4 /* LCMPWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -141,6 +213,9 @@
 					2005CF78C928D40CAC9D2641 = {
 						CreatedOnToolsVersion = 27.0;
 						TestTargetID = D0A81B549CE2D545BDF4D19F;
+					};
+					60C1EB11348233A982057535 = {
+						CreatedOnToolsVersion = 27.0;
 					};
 				};
 			};
@@ -163,6 +238,7 @@
 			targets = (
 				D0A81B549CE2D545BDF4D19F /* LCMPiOS */,
 				2005CF78C928D40CAC9D2641 /* LCMPiOSUITests */,
+				60C1EB11348233A982057535 /* LCMPWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -176,6 +252,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		72A9C2A301A8CE0A0751521D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6160FCD2D9AB4C4EDE67ECC3 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -205,6 +288,26 @@
 			shellPath = /bin/sh;
 			shellScript = "python3 \"$SRCROOT/../scripts/ios_resources.py\" \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\n";
 		};
+		9CA09B32FD6477C6A9B5F670 /* Stamp version */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Stamp version";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "python3 \"$SRCROOT/../scripts/ios_resources.py\" --version-only \"$TARGET_BUILD_DIR/$WRAPPER_NAME\"\n";
+		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -222,6 +325,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		44347F3B18F8A28C4842797E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -229,6 +339,11 @@
 			isa = PBXTargetDependency;
 			target = D0A81B549CE2D545BDF4D19F /* LCMPiOS */;
 			targetProxy = 4826DA2CEFC40EF34442E22A /* PBXContainerItemProxy */;
+		};
+		05759BBC2ECA80C8B545DAE4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 60C1EB11348233A982057535 /* LCMPWidgets */;
+			targetProxy = 239F4DF091AF136AE1AF31B3 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -295,6 +410,50 @@
 			};
 			name = Release;
 		};
+		052AA381858BE4CBA73C1DD4 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B8A9AD91F0412797693F4DE7 /* Shared.xcconfig */;
+			buildSettings = {
+				PRODUCT_NAME = LCMPWidgets;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LCMP_BUNDLE_PREFIX).player.widgets";
+				INFOPLIST_FILE = "LCMPWidgets-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = LCMP;
+				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "";
+				INFOPLIST_KEY_UIStatusBarStyle = "";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				SKIP_INSTALL = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+			};
+			name = Debug;
+		};
+		C3987ADEF7541E07E7084121 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B8A9AD91F0412797693F4DE7 /* Shared.xcconfig */;
+			buildSettings = {
+				PRODUCT_NAME = LCMPWidgets;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LCMP_BUNDLE_PREFIX).player.widgets";
+				INFOPLIST_FILE = "LCMPWidgets-Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = LCMP;
+				INFOPLIST_KEY_UILaunchScreen_Generation = NO;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "";
+				INFOPLIST_KEY_UIStatusBarStyle = "";
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				SKIP_INSTALL = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -325,6 +484,15 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		FF19AF77E212F24757166145 /* Build configuration list for PBXNativeTarget "LCMPWidgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				052AA381858BE4CBA73C1DD4 /* Debug */,
+				C3987ADEF7541E07E7084121 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -346,6 +514,14 @@
 		0DE2A57DACEA14B02F596219 /* PlaybackCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = PlaybackCore;
+		};
+		8CCEC3E1D2A818E7C75AA4CE /* ControlSurfaces */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ControlSurfaces;
+		};
+		8EB325AB8F6E2D1016D7566F /* ControlSurfaces */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ControlSurfaces;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

@@ -189,7 +189,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 
 ## iPhone版
 
-iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwiftパッケージのライブラリ（LibraryCore・PlayerUI・PlaybackCore）を参照し、iOSだけの部分（アプリの入口・音声セッション・ファイルの選択）を`iOS/LCMPiOS/`に置きます。
+iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwiftパッケージのライブラリ（LibraryCore・PlayerUI・PlaybackCore・ControlSurfaces）を参照し、iOSだけの部分（アプリの入口・音声セッション・ファイルの選択）を`iOS/LCMPiOS/`に、ホーム画面のウィジェットを`iOS/LCMPWidgets/`（アプリに埋め込む拡張）に置きます。
 
 | コマンド | 内容 |
 | --- | --- |
@@ -200,10 +200,11 @@ iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwif
 | `make ios-device` | 署名して実機向けにビルドし、接続したiPhoneに入れて起動します。 |
 
 - 上書きできる変数は`IOS_CONFIGURATION`（Debug／Release）、`IOS_SIMULATOR`（シミュレータの名前、既定は`iPhone 18 Pro Max`）、`IOS_DEVICE`（実機の名前か識別子）です。
-- 実機向けの署名には、Git管理外の`iOS/Local.xcconfig`に`DEVELOPMENT_TEAM`（Team ID）と`LCMP_BUNDLE_PREFIX`（自分だけのバンドルIDの接頭辞）を書きます。ないときはシミュレータ向けにだけビルドできます。
-- バージョンはmacOS版と同じく、ビルドの最後の段（`scripts/ios_resources.py`）がGitの履歴から決めてInfo.plistへ書き込みます。同じ段で、LCMPのLICENSE/NOTICEと依存の索引（空）をアプリへ入れます。
+- 実機向けの署名には、Git管理外の`iOS/Local.xcconfig`に`DEVELOPMENT_TEAM`（Team ID）と`LCMP_BUNDLE_PREFIX`（自分だけのバンドルIDの接頭辞）を書きます。ないときはシミュレータ向けにだけビルドできます。アプリとウィジェット拡張（`<接頭辞>.player.widgets`）の2つのバンドルIDを使います。
+- ウィジェットに再生中の点灯を出すには、App Groupを使えるチームで`iOS/Local.xcconfig`に`LCMP_APP_GROUP_ENABLED = YES`を書きます（グループ名は`group.<接頭辞>.player`）。書かないときはApp Groupの権利を付けず、ウィジェットは切り替えの記号になります。
+- バージョンはmacOS版と同じく、ビルドの最後の段（`scripts/ios_resources.py`）がGitの履歴から決めてInfo.plistへ書き込みます。同じ段で、LCMPのLICENSE/NOTICEと依存の索引（空）をアプリへ入れます。ウィジェット拡張には同じバージョンだけを書き込みます（`--version-only`）。
 - アイコンは`scripts/render-app-icon.swift --ios`で、macOS版と同じ図形から角の丸みと余白のない1024pxの画像を描きます。
-- DEBUGビルドには、シミュレータで確かめるための起動引数があります。`-LCMPImportPaths <パス>,<パス>`はMac上のファイル・フォルダを選択画面なしで現在のリストに登録し、`-LCMPAutoplay YES`で再生を始めます。`-LCMPOrientation landscape`は横置きに（`-LCMPOrientationDelay <秒>`で回すまでの待ち時間）、`-LCMPExtension NO`は拡張画面を閉じた状態で起動します。
+- DEBUGビルドには、シミュレータで確かめるための起動引数があります。`-LCMPImportPaths <パス>,<パス>`はMac上のファイル・フォルダを選択画面なしで現在のリストに登録し、`-LCMPAutoplay YES`で再生を始めます。`-LCMPOrientation landscape`は横置きに（`-LCMPOrientationDelay <秒>`で回すまでの待ち時間）、`-LCMPExtension NO`は拡張画面を閉じた状態で起動します。`-LCMPControlSurfaces YES`はウィジェットの見本を各状態で並べます。
 
 ## ライセンス情報の更新
 

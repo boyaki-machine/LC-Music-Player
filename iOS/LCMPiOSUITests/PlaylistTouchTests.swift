@@ -30,7 +30,7 @@ import XCTest
         XCTAssertFalse(row(40).exists && row(40).isHittable)
         // Quick flicks that start on a row, as a finger does; a long press would lift the row instead.
         for _ in 0..<8 where !(row(40).exists && row(40).isHittable) {
-            let start = row(visibleIndex()).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let start = row(middleVisibleIndex()).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -300)),
                         withVelocity: .fast, thenHoldForDuration: 0)
         }
@@ -53,8 +53,12 @@ import XCTest
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", String(format: "track-%02d", number))).firstMatch
     }
 
-    /// The lowest numbered song that is on screen now.
-    private func visibleIndex() -> Int { (1...40).first { row($0).exists && row($0).isHittable } ?? 1 }
+    /// A song in the middle of those on screen now. The topmost one can stop half under the list's
+    /// header, where a flick from its center would land on the header and not scroll.
+    private func middleVisibleIndex() -> Int {
+        let visible = (1...40).filter { row($0).exists && row($0).isHittable }
+        return visible.isEmpty ? 1 : visible[visible.count / 2]
+    }
 
     private func waitForLabel(of number: Int, containing text: String) -> Bool {
         let found = expectation(for: NSPredicate(format: "label CONTAINS %@", text), evaluatedWith: row(number))
