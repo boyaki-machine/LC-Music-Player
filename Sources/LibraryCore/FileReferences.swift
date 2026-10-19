@@ -15,20 +15,32 @@ public struct ResolvedTrack {
     func makeReference(_ url: URL) throws -> TrackReference
     func resolve(_ reference: TrackReference) throws -> ResolvedTrack
 }
+/// A song of the Music library that is stored on the device and readable (no DRM).
+public struct MediaLibrarySong: Equatable, Sendable {
+    public var assetURL: URL
+    /// The length and the date added tell a replaced recording from the one that was measured.
+    public var duration: TimeInterval
+    public var dateAdded: Date
+    public init(assetURL: URL, duration: TimeInterval, dateAdded: Date) {
+        self.assetURL = assetURL; self.duration = duration; self.dateAdded = dateAdded
+    }
+}
 /// Finds songs of the Music library. Only iOS has one; tests supply their own.
 public protocol MediaLibraryLookup: Sendable {
-    /// The asset URL of a song that is stored on the device and readable (no DRM), or nil.
-    func assetURL(forPersistentID id: UInt64) -> URL?
+    func song(forPersistentID id: UInt64) -> MediaLibrarySong?
+}
+extension MediaLibraryLookup {
+    public func assetURL(forPersistentID id: UInt64) -> URL? { song(forPersistentID: id)?.assetURL }
 }
 public struct SystemMediaLibrary: MediaLibraryLookup {
     public init() {}
-    public func assetURL(forPersistentID id: UInt64) -> URL? {
+    public func song(forPersistentID id: UInt64) -> MediaLibrarySong? {
         #if os(iOS)
         guard MPMediaLibrary.authorizationStatus() == .authorized else { return nil }
         let query = MPMediaQuery.songs()
         query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: id), forProperty: MPMediaItemPropertyPersistentID))
-        guard let item = query.items?.first, !item.hasProtectedAsset, !item.isCloudItem else { return nil }
-        return item.assetURL
+        guard let item = query.items?.first, !item.hasProtectedAsset, !item.isCloudItem, let url = item.assetURL else { return nil }
+        return MediaLibrarySong(assetURL: url, duration: item.playbackDuration, dateAdded: item.dateAdded)
         #else
         return nil
         #endif

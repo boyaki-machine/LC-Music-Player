@@ -6,14 +6,15 @@ import PlaybackCore
 /// A Music library with the songs a test puts in it, keyed by persistent ID.
 final class FakeMediaLibrary: MediaLibraryLookup, @unchecked Sendable {
     private let lock = NSLock()
-    private var songs: [UInt64: URL] = [:]
-    func add(_ id: UInt64, ext: String = "m4a") -> URL {
+    private var songs: [UInt64: MediaLibrarySong] = [:]
+    func add(_ id: UInt64, ext: String = "m4a", duration: TimeInterval = 180,
+             dateAdded: Date = Date(timeIntervalSince1970: 1_700_000_000)) -> URL {
         let url = URL(string: "ipod-library://item/item.\(ext)?id=\(id)")!
-        lock.withLock { songs[id] = url }
+        lock.withLock { songs[id] = MediaLibrarySong(assetURL: url, duration: duration, dateAdded: dateAdded) }
         return url
     }
     func remove(_ id: UInt64) { _ = lock.withLock { songs.removeValue(forKey: id) } }
-    func assetURL(forPersistentID id: UInt64) -> URL? { lock.withLock { songs[id] } }
+    func song(forPersistentID id: UInt64) -> MediaLibrarySong? { lock.withLock { songs[id] } }
 }
 
 @Suite @MainActor struct MediaLibraryTests {
@@ -81,6 +82,38 @@ final class FakeMediaLibrary: MediaLibraryLookup, @unchecked Sendable {
         await model.importMediaItems([M3U8Item(url: URL(string: "ipod-library://item/item.m4a?id=9")!, title: "Gone")])
         #expect(model.document.tracks.isEmpty)
         #expect(model.error != nil)
+    }
+
+    /// The measurement cache identifies a library song by its ID, length and date added.
+    @Test func measurementIdentityFollowsTheLibrarySong() throws {
+        let library = FakeMediaLibrary()
+        let identity = MediaLibraryMeasurementSourceIdentity(mediaLibrary: library)
+        let url = library.add(7, duration: 234.666)
+        let first = try #require(try identity.identity(for: url))
+        #expect(try identity.identity(for: url) == first)
+        #expect(first.locator == url.absoluteString && first.resource == "media-library/7" && first.size == 234_666)
+        _ = library.add(7, duration: 234.667)
+        #expect(try identity.identity(for: url) != first)
+        _ = library.add(7, duration: 234.666, dateAdded: Date(timeIntervalSince1970: 1_800_000_000))
+        #expect(try identity.identity(for: url) != first)
+        _ = library.add(7, duration: 234.666)
+        #expect(try identity.identity(for: url) == first)
+        // Another song, an unknown or removed one, a changed asset URL and a song without length are not cached.
+        #expect(try identity.identity(for: library.add(8, duration: 234.666)) != first)
+        #expect(try identity.identity(for: URL(string: "ipod-library://item/item.m4a?id=9")!) == nil)
+        #expect(try identity.identity(for: URL(string: "ipod-library://item/item.mp3?id=7")!) == nil)
+        #expect(try identity.identity(for: URL(string: "ipod-library://item/item.m4a")!) == nil)
+        #expect(try identity.identity(for: library.add(10, duration: 0)) == nil)
+        library.remove(7)
+        #expect(try identity.identity(for: url) == nil)
+    }
+
+    @Test func measurementIdentityLeavesFilesToTheLocalIdentity() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-identity-\(UUID()).m4a")
+        try Data([1, 2, 3]).write(to: file); defer { try? FileManager.default.removeItem(at: file) }
+        let identity = MediaLibraryMeasurementSourceIdentity(mediaLibrary: FakeMediaLibrary())
+        let local = try #require(try LocalMeasurementSourceIdentity().identity(for: file))
+        #expect(try identity.identity(for: file) == local)
     }
 
     @Test func playlistFilesKeepLibrarySongs() throws {

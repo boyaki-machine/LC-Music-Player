@@ -26,8 +26,11 @@ struct LCMPiOSApp: App {
     @ObservationIgnored private var session: AudioSessionController?
 
     init() {
+        // Music library songs keep their measurements too, identified by the library's values.
+        var cache = MeasurementCacheConfiguration.application
+        cache.sourceIdentity = MediaLibraryMeasurementSourceIdentity()
         library = LibraryController(playback: playback, preprocessingEnabled: true, playlistPreprocessingEnabled: true,
-                                    preprocessor: AudioPreprocessor(cache: .application))
+                                    preprocessor: AudioPreprocessor(cache: cache))
         session = AudioSessionController(playback: playback, library: library)
         library.restore()
         // A normal launch shows the player with the extension below it.

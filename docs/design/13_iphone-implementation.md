@@ -88,7 +88,7 @@
 - Info.plistの`NSAppleMusicUsageDescription`で利用目的を示し、初めて選ぶときに許可を求める。許可がないときは、設定を開く案内を出す。
 - 再生・測定はファイルと同じく`AudioFileDecoder`（AVAudioFile）で読む。asset URLの拡張子で形式を決める。
 - M3U8へはasset URLのまま書き出し、読み込みでも受け付ける。macOSで読み込んだ場合は参照切れになる。
-- 測定キャッシュの識別は返さない（[永続キャッシュ](05_measurement-cache-implementation.md)）。
+- 測定結果は、ファイルと同じく永続キャッシュに保存し、再起動後も再利用する。識別にはpersistent ID・asset URL・長さ・追加日時を使う（[永続キャッシュ](05_measurement-cache-implementation.md)）。アプリは`MeasurementCacheConfiguration.application`の音源識別のadapterを`MediaLibraryMeasurementSourceIdentity`に差し替える。
 - 再生前処理の`SourceFingerprint`は、ファイルの属性を読まず、asset URLそのものを識別にする（asset URLは1つの曲を指す）。
 - 音源一覧では、asset URLが曲ごとに異なっても、ライブラリの曲をすべて1つの「ミュージック」のまとまりに入れる。
 
@@ -112,12 +112,13 @@
 | macOSの寸法・テストが変わらない | `make test`（`PlayerFrameTests`がウィンドウの寸法を固定する） |
 | 各枠の寸法・ボタンが枠に収まる | `PlayerFrameTests` |
 | 回転で画面が入れ替わっても描画が止まらない | `VisualizationHostTests`（出る・消える順序の両方） |
-| ライブラリの曲の参照・登録・解決・M3U8・音源のまとまり・測定キャッシュの対象外 | `MediaLibraryTests`・`SourceGroupTests`・`MediaLibraryIdentityTests`（ライブラリを差し替えてmacOSでも実行する） |
+| ライブラリの曲の参照・登録・解決・M3U8・音源のまとまり・測定キャッシュの識別 | `MediaLibraryTests`・`SourceGroupTests`・`MediaLibraryIdentityTests`（ライブラリを差し替えてmacOSでも実行する） |
+| 提供元の識別で、別のprocessorでも測定結果を再利用し、revisionが変われば測り直す | `MeasurementCacheTests` |
 | iPhoneのアイコンが不透明な1024pxの正方形である | `scripts/test_app_icon.py` |
 | ビルドの段がライセンスとバージョンを入れる | `scripts/test_ios_resources.py` |
 | 縦置き・横置き・拡張を閉じた全画面の配置 | シミュレータで起動引数（`-LCMPImportPaths`・`-LCMPAutoplay`・`-LCMPOrientation`・`-LCMPExtension`）を付けて撮影し、UI・UX設計と見比べる |
 | バックグラウンドで再生が続く | 再生中に他のアプリへ切り替え、音が続くことと、アプリがMediaPlaybackの権利を持ち続けることを確かめる |
-| 実機での動作 | 実機で、ライブラリの曲の選択と再生、再生中の回転、書類の選択（このiPhone内・iCloud Drive・OneDrive）、ロック中の再生、中断（電話・他のアプリの音声）からの一時停止、Bluetoothの接続の変化での停止、ロック画面の表示がアプリ名だけであることを確かめる |
+| 実機での動作 | 実機で、ライブラリの曲の選択と再生（一度測った曲は、アプリの再起動後も測り直さずに鳴り始める）、再生中の回転、書類の選択（このiPhone内・iCloud Drive・OneDrive）、ロック中の再生、中断（電話・他のアプリの音声）からの一時停止、Bluetoothの接続の変化での停止、ロック画面の表示がアプリ名だけであることを確かめる |
 
 ## 6. 参照
 

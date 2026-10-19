@@ -24,7 +24,7 @@ public struct LocalMeasurementSourceIdentity: MeasurementSourceIdentifying {
     public func identity(for url: URL) throws -> MeasurementSourceIdentity? {
         // macOS and iOS both keep audio files on local APFS volumes (on iOS also the files a
         // file provider has stored on the device). Any change of a timestamp or size is a miss.
-        // Music library songs have no file revision to check, so they are measured each time.
+        // Music library songs have no file revision; the iOS app identifies them through the library.
         guard url.isFileURL else { return nil }
         let canonical = url.resolvingSymlinksInPath().standardizedFileURL
         let values = try canonical.resourceValues(forKeys: [.volumeUUIDStringKey, .volumeIsLocalKey, .isRegularFileKey])
