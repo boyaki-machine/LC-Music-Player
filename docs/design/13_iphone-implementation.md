@@ -8,6 +8,7 @@
 
 - iPhone版は、macOS版と同じSwiftパッケージのライブラリ（LibraryCore・PlayerUI・PlaybackCoreと、それらが依存するCoreモジュール）を使う。再生・解析・前処理・測定キャッシュ・ライブラリ・画面の部品は共通のソースである。
 - iOSだけの部分は、Xcodeプロジェクト`iOS/LCMPiOS.xcodeproj`のアプリ（`iOS/LCMPiOS/`）に置く。アプリの入口、音声セッション、ロック画面の操作、書類の選択、画面の向きに応じた配置を受け持つ。
+- ホーム画面のウィジェットは、同じプロジェクトのウィジェット拡張（`iOS/LCMPWidgets/`）に置く。アプリと拡張の両方で使うApp Intentsは`iOS/Shared/`に、記号・配置・状態は、パッケージのControlSurfacesモジュールに置く。ロック画面とDynamic IslandはiOSの「再生中」に任せ、ライブアクティビティは使わない。
 - 対象はiOS 26以降のiPhoneとする。
 
 ## 2. 要件
@@ -15,7 +16,9 @@
 - 共用部分のmacOSでの動作・寸法・テストの結果を変えない。
 - 画面を閉じても、他のアプリに切り替えても、ロックしても再生を続ける。
 - 電話や他のアプリの音声で中断されたら一時停止し、自動では再開しない。
-- ロック画面・コントロールセンターの「再生中」には、曲名・経過時間を出さない。
+- ロック画面・コントロールセンター・Dynamic Islandの「再生中」とウィジェットには、曲名・経過時間を出さない。
+- ウィジェットのボタンは、アプリがバックグラウンドにあっても、終了していても動く。
+- App Groupを使えない署名（無料の個人チーム）でも、ビルドと署名が通り、ウィジェットの操作が動く。
 - ファイルアプリに出る場所（このiPhone内・iCloud Drive・OneDrive等のファイル提供元）の音源と、「ミュージック」のライブラリの曲を、コピーせずに参照する。
 - バックグラウンドでは描画と解析の購読を止める。
 
@@ -59,6 +62,18 @@
 | `AudioSessionController` | 音声セッションの区分、中断の処理、ロック画面・コントロールセンターの操作と「再生中」の表示 |
 | `RootView` | 画面の向きと拡張の開閉に応じた配置、書類の選択・書き出し、ライブラリの曲の選択、ライセンスのシート |
 | `MusicLibraryPicker` | `MPMediaPickerController`による曲の選択と、ライブラリへのアクセスの許可 |
+| `ControlSurfaceController` | App Groupがあるとき、再生の状態を共有の状態へ書き、ウィジェットを再読み込みする |
+
+### ウィジェット拡張と共用の部分
+
+| 置き場 | 型 | 受け持つこと |
+| --- | --- | --- |
+| ControlSurfaces（パッケージ） | `TransportState`・`TransportCommand` | ウィジェットに見せる3つの状態（再生中・一時停止・停止）と5つのボタン |
+| | `SharedTransportStore` | App Groupの共有の状態の読み書き。App Groupの権利がなければ状態は不明（nil） |
+| | `MeterMark`・`TransportGlyph`・`SmallWidgetLayout`・`MediumWidgetLayout` | 記号と配置。各記号をボタンにする方法は呼び出し側が渡す |
+| PlayerUI（パッケージ） | `TransportState.init(_:)` | 再生の状態からの対応 |
+| `iOS/Shared/`（アプリと拡張） | `PlayPauseIntent`ほか4つのApp Intents、`ControlSurfaceButton` | ボタンの操作、記号をIntentかリンクのボタンにする |
+| `iOS/LCMPWidgets/`（拡張） | `PlayerWidget` | ウィジェット（小・中）の構成 |
 
 ## 4. 実装
 
@@ -74,6 +89,14 @@
 
 - `MPRemoteCommandCenter`の再生・一時停止・切り替え・停止・次の曲・前の曲を、LibraryControllerの操作へつなぐ。再生位置の変更と早送り・早戻しは無効にする。
 - `MPNowPlayingInfoCenter`には、タイトル「LC Music Player」、アートワークとしてアプリのアイコン、再生速度（再生中1・一時停止0）だけを渡す。長さと経過時間は渡さず、経過時間のバーを出さない。アプリのアイコンは画像として読めないため、同じ画像をアセット`NowPlayingArtwork`として持つ。
+
+### ウィジェット
+
+- ボタンのApp Intentsは`AudioPlaybackIntent`に準拠させ、アプリと拡張の両方でコンパイルする。iOSはこれらをアプリのプロセスで実行し、アプリが終了していればバックグラウンドで起動する。アプリは起動時に受け口（`TransportIntentHandler`）を登録し、メイン画面の同じボタンと同じLibraryControllerの操作を呼ぶ。
+- メニュー（☰）は`lcmp://extension`へのリンクとし、アプリを開いて拡張画面を表示する。
+- ウィジェットのタイムラインは状態が変わるまで更新しない（`.never`）。App Groupがあるときだけ、`ControlSurfaceController`が状態を共有のUserDefaultsへ書いてウィジェットを再読み込みする。再生の状態の`ready`（曲の選択・切り替えの途中）は表示を変えず、停止は0.6秒続いたときだけ反映する。曲の自然な終わりから次の曲へ移る間に光が消えないようにし、再読み込みの回数も抑えるためである。App Groupがないときはウィジェットは状態を知らず、切り替えの記号を出す。
+- ライブアクティビティ（ActivityKit）は使わない。iOSの仕様でロック画面への表示が必ず伴い、システムの「再生中」と二重になるためである。Dynamic Islandには、音声を再生しているアプリとしてシステムの「再生中」が出る。
+- App Groupは、ビルド設定`LCMP_APP_GROUP_ENABLED`が`YES`のときだけ権利（`iOS/AppGroup.entitlements`）を付ける。既定は`NO`で、App Groupを使えない無料の個人チームでもそのまま署名できる。グループ名は`group.<接頭辞>.player`で、アプリと拡張のInfo.plistの`LCMPAppGroup`に入れる。
 
 ### 書類の選択
 
@@ -106,7 +129,8 @@
 
 - `iOS/Shared.xcconfig`（Git管理）に共通の設定を置き、Git管理外の`iOS/Local.xcconfig`を任意で読み込む。Team IDとバンドルIDの接頭辞はLocal.xcconfigだけに置く。既定のバンドルIDは`local.lcmp.player`である。
 - アプリのソースはファイルシステムと同期するグループで参照し、ファイルの追加でプロジェクトを編集しない。
-- Info.plistはビルド設定から生成し、`iOS/LCMPiOS-Info.plist`の項目（バックグラウンドの音声、URLスキーム`lcmp`）を合わせる。
+- Info.plistはビルド設定から生成し、`iOS/LCMPiOS-Info.plist`の項目（バックグラウンドの音声、URLスキーム`lcmp`、App Groupの名前）を合わせる。
+- ウィジェット拡張のターゲットは`LCMPWidgets`（バンドルIDは`<接頭辞>.player.widgets`）とし、アプリに埋め込む。拡張の最後の段では`scripts/ios_resources.py --version-only`がアプリと同じバージョンだけを書き込む。
 - 最後のビルドの段で`scripts/ios_resources.py`を実行し、LICENSE/NOTICEを`LCMPLicense/`へ、空の依存の索引を`ThirdPartyLicenses/`へ入れ、Gitの履歴から決めたバージョンをInfo.plistへ書き込む。依存を加えたときは、この段で依存のnoticeも入れる必要があり、スクリプトはPackage.resolvedがあると失敗して知らせる。
 - パッケージにもmacOS版の実行ファイル`LCMP`があるため、iPhoneのターゲットとスキームの名前は`LCMPiOS`とする（アプリの名前は`LCMP.app`）。
 - 指の操作のテストはUIテストのターゲット`LCMPiOSUITests`（`iOS/LCMPiOSUITests/`）に置き、共有のスキーム`LCMPiOS`のテストに含める。
@@ -124,13 +148,17 @@
 | 提供元の識別で、別のprocessorでも測定結果を再利用し、revisionが変われば測り直す | `MeasurementCacheTests` |
 | iPhoneのアイコンが不透明な1024pxの正方形である | `scripts/test_app_icon.py` |
 | ビルドの段がライセンスとバージョンを入れる | `scripts/test_ios_resources.py` |
+| 再生の状態との対応、記号の点灯、App Groupがないときの状態 | `ControlSurfacesTests`（macOSとiOSで実行。記号は画面外に描いて緑の画素を数える） |
+| ☰のリンクで拡張画面が開く | `make ios-uitest`（`ControlSurfaceTests`） |
+| ウィジェットの見た目 | DEBUGの起動引数`-LCMPControlSurfaces YES`で各状態の見本を並べて撮影し、UI・UX設計と見比べる |
 | 縦置き・横置き・拡張を閉じた全画面の配置 | シミュレータで起動引数（`-LCMPImportPaths`・`-LCMPAutoplay`・`-LCMPOrientation`・`-LCMPExtension`）を付けて撮影し、UI・UX設計と見比べる |
 | バックグラウンドで再生が続く | 再生中に他のアプリへ切り替え、音が続くことと、アプリがMediaPlaybackの権利を持ち続けることを確かめる |
-| 実機での動作 | 実機で、ライブラリの曲の選択と再生（一度測った曲は、アプリの再起動後も測り直さずに鳴り始める）、再生中の回転、書類の選択（このiPhone内・iCloud Drive・OneDrive）、ロック中の再生、中断（電話・他のアプリの音声）からの一時停止、Bluetoothの接続の変化での停止、ロック画面の表示がアプリ名だけであることを確かめる |
+| 実機での動作 | 実機で、ライブラリの曲の選択と再生（一度測った曲は、アプリの再起動後も測り直さずに鳴り始める）、再生中の回転、書類の選択（このiPhone内・iCloud Drive・OneDrive）、ロック中の再生、中断（電話・他のアプリの音声）からの一時停止、Bluetoothの接続の変化での停止、ロック画面の表示がアプリ名だけであること、Dynamic Islandにシステムの「再生中」が出て長押しで操作できること、ウィジェット（小・中）のボタンで操作でき☰で拡張画面が開くことを確かめる |
 
 ## 6. 参照
 
 - [AVAudioSession](https://developer.apple.com/documentation/avfaudio/avaudiosession)
 - [MPMediaPickerController](https://developer.apple.com/documentation/mediaplayer/mpmediapickercontroller)・[MPMediaQuery](https://developer.apple.com/documentation/mediaplayer/mpmediaquery)
 - [MPRemoteCommandCenter](https://developer.apple.com/documentation/mediaplayer/mpremotecommandcenter)・[MPNowPlayingInfoCenter](https://developer.apple.com/documentation/mediaplayer/mpnowplayinginfocenter)
+- [WidgetKit](https://developer.apple.com/documentation/widgetkit)・[AudioPlaybackIntent](https://developer.apple.com/documentation/appintents/audioplaybackintent)
 - [Providing access to directories](https://developer.apple.com/documentation/uikit/providing-access-to-directories)
