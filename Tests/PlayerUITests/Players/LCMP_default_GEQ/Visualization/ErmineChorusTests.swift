@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import Testing
@@ -653,3 +654,4 @@ import Testing
         #expect(median < 0.012)
     }
 }
+#endif

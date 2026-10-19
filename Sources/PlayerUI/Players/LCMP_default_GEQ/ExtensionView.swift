@@ -8,10 +8,14 @@ import LibraryCore
     public var repair: (UUID) -> Void
     public var importPlaylist: () -> Void
     public var exportPlaylist: (UUID) -> Void
+    /// Picks songs of the Music library (iPhone only); the optional playlist receives them too.
+    public var musicLibrary: ((UUID?) -> Void)?
     public init(files: @escaping (UUID?) -> Void, folder: @escaping () -> Void, repair: @escaping (UUID) -> Void,
-                importPlaylist: @escaping () -> Void, exportPlaylist: @escaping (UUID) -> Void) {
+                importPlaylist: @escaping () -> Void, exportPlaylist: @escaping (UUID) -> Void,
+                musicLibrary: ((UUID?) -> Void)? = nil) {
         self.files = files; self.folder = folder; self.repair = repair
         self.importPlaylist = importPlaylist; self.exportPlaylist = exportPlaylist
+        self.musicLibrary = musicLibrary
     }
 }
 
@@ -34,6 +38,11 @@ public struct ExtensionView: View {
     @State private var rowDrag: RowDrag?
     @State private var reveal = UUID()
     private enum Screen { case list, chooser, manage, create, rename, add }
+    #if os(iOS)
+    private static let indexWidth: CGFloat = 22
+    #else
+    private static let indexWidth: CGFloat = 16
+    #endif
     private struct RowDrag { let entryID: UUID; let index: Int; var offset: CGFloat }
     public init(playback: PlaybackController, presentation: PlayerPresentation, library: LibraryController, actions: LibraryActions,
                 resizeExtension: @escaping (CGFloat) -> Void = { _ in }, showAcknowledgements: @escaping () -> Void = {}) {
@@ -49,10 +58,10 @@ public struct ExtensionView: View {
             HStack(spacing: 10) {
                 VisualizationThumbnail(design: design).frame(width: 64, height: 48).clipShape(RoundedRectangle(cornerRadius: 3))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(design.title).font(.system(size: 14, weight: .bold)).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(design.title).font(.ui(14, weight: .bold)).lineLimit(1).minimumScaleFactor(0.8)
                         .foregroundStyle(selected ? accent : Color.white.opacity(0.92))
                     // The tagline may wrap to a second line.
-                    Text(design.tagline).font(.system(size: 11)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    Text(design.tagline).font(.ui(11)).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                         .foregroundStyle(selected ? accent.opacity(0.9) : Color.white.opacity(0.72))
                 }
                 Spacer(minLength: 0)
@@ -81,7 +90,7 @@ public struct ExtensionView: View {
                         if section == .playlist { openCurrent() }
                         else if section == .source { sourceID = nil; originID = nil }
                     } label: {
-                        Text(section.rawValue).font(.system(size: 12)).frame(maxWidth: .infinity).padding(.vertical, 6)
+                        Text(section.rawValue).font(.ui(12)).frame(maxWidth: .infinity).padding(.vertical, 6)
                             .overlay(alignment: .bottom) { if presentation.section == section { Rectangle().fill(Color(red: 0.66, green: 0.85, blue: 0.74)).frame(height: 1) } }
                     }.buttonStyle(.plain).foregroundStyle(presentation.section == section ? Color.white.opacity(0.9) : Color.white.opacity(0.6))
                         .accessibilityLabel(section.rawValue).accessibilityAddTraits(presentation.section == section ? .isSelected : [])
@@ -139,10 +148,15 @@ public struct ExtensionView: View {
                                 Text(peak.samplePeak == 0 ? "最大音量：無音" : String(format: "最大音量：%.1f dBFS", peak.peakDBFS))
                             case .failed: Text("最大音量を測定できませんでした。").foregroundStyle(.secondary)
                             }
+                            #if os(iOS)
+                            Text("音量はアプリ内の再生音量です。出力はiPhoneの現在の出力先（スピーカー・ヘッドホンなど）を使用します。")
+                                .fixedSize(horizontal: false, vertical: true)
+                            #else
                             Text("音量はアプリ内の再生音量です。出力はmacOSの既定デバイスを使用します。")
                                 .fixedSize(horizontal: false, vertical: true)
                             Text("⌘O 音源登録 · Space 再生／一時停止\n⌘M 最小化 · ⌘W 閉じる · ⌘Q 終了")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            #endif
                             Divider()
                             Text("このアプリについて")
                             VStack(alignment: .leading, spacing: 2) {
@@ -156,15 +170,15 @@ public struct ExtensionView: View {
                     }
 
                 }
-            }.font(.system(size: 12)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            if library.isPreparing { Text(library.preparationStage ?? "再生を準備しています…").font(.system(size: 11)) }
-            if library.isBusy { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("音源を登録しています…").font(.system(size: 11)) } }
+            }.font(.ui(12)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            if library.isPreparing { Text(library.preparationStage ?? "再生を準備しています…").font(.ui(11)) }
+            if library.isBusy { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("音源を登録しています…").font(.ui(11)) } }
             if let notice = library.error ?? library.message ?? playback.error?.localizedDescription {
                 HStack(alignment: .top, spacing: 4) {
-                    Text(notice).font(.system(size: 11)).foregroundStyle(library.error == nil ? Color.white.opacity(0.6) : .orange).lineLimit(2).textSelection(.enabled)
+                    Text(notice).font(.ui(11)).foregroundStyle(library.error == nil ? Color.white.opacity(0.6) : .orange).lineLimit(2).textSelection(.enabled)
                     Spacer(minLength: 0)
                     if library.editsEnabled, library.error != nil || library.message != nil {
-                        Button { library.clearNotice() } label: { Image(systemName: "xmark").font(.system(size: 10)) }.buttonStyle(.plain).accessibilityLabel("通知を閉じる")
+                        Button { library.clearNotice() } label: { Image(systemName: "xmark").font(.ui(10)) }.buttonStyle(.plain).accessibilityLabel("通知を閉じる")
                     }
                 }
             }
@@ -285,6 +299,9 @@ public struct ExtensionView: View {
             }
             HStack(spacing: 8) {
                 Button { actions.files(viewed?.id) } label: { Label("ファイルから…", systemImage: "folder") }.disabled(!library.canEdit)
+                if let musicLibrary = actions.musicLibrary {
+                    Button { musicLibrary(viewed?.id) } label: { Label("ミュージックから…", systemImage: "music.note") }.disabled(!library.canEdit)
+                }
                 Button("選んだ\(checked.count)曲を追加") {
                     if let id = viewed?.id { library.addTracks(library.document.tracks.filter { checked.contains($0.id) }.map(\.id), to: id); if library.error == nil { screen = .list } }
                 }.disabled(checked.isEmpty || !library.canEdit)
@@ -297,7 +314,7 @@ public struct ExtensionView: View {
         } else if let id = viewed?.id { library.renamePlaylist(id, name: name); if library.error == nil { screen = .list } }
     }
     private func smallButton(_ symbol: String, _ label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: symbol).font(.system(size: 11)).frame(width: 24, height: 32).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel(label).help(label)
+        Button(action: action) { Image(systemName: symbol).font(.ui(11)).frame(width: 24, height: 32).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel(label).help(label)
     }
     private func playlistRow(_ track: LibraryTrack, entry: PlaylistEntry, index: Int, list: MusicPlaylist) -> some View {
         let current = entry.id == library.document.currentEntryID
@@ -309,7 +326,7 @@ public struct ExtensionView: View {
             return drag.index < index ? .bottom : .top
         }
         return HStack(spacing: 6) {
-            Text(current ? (playback.state == .playing ? "▸" : playback.state == .paused ? "Ⅱ" : "•") : String(format: "%02d", index + 1)).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+            Text(current ? (playback.state == .playing ? "▸" : playback.state == .paused ? "Ⅱ" : "•") : String(format: "%02d", index + 1)).font(.ui(11)).foregroundStyle(.secondary).frame(width: Self.indexWidth)
             Button {
                 activatePlaylistRow(track, entry: entry, list: list, clickCount: 1)
             } label: {
@@ -320,7 +337,7 @@ public struct ExtensionView: View {
                         Text(missing ? "ファイルが見つからないか、アクセスできません" : track.reference.lastKnownURL.pathExtension.uppercased())
                             .foregroundStyle(missing ? Color.orange.opacity(0.85) : .white.opacity(0.55)).lineLimit(1)
                         if current { Text(currentWord).foregroundStyle(indicator).fixedSize() }
-                    }.font(.system(size: 11))
+                    }.font(.ui(11))
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.buttonStyle(.plain).accessibilityLabel("\(track.name)\(current ? "、\(currentWord)" : "")\(missing ? "、音源を確認" : "")")
                 .overlay(PlaylistClickSurface(entryID: entry.id, drag: library.canEdit && list.entries.count > 1 ? { phase in
@@ -370,12 +387,13 @@ public struct ExtensionView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text(track.name).fontWeight(.medium).textSelection(.enabled)
                     Text(library.unavailable[sourceID] ?? "ファイルを参照できます").foregroundStyle(library.unavailable[sourceID] == nil ? Color.white.opacity(0.6) : .orange)
-                    Text(track.reference.lastKnownURL.lastPathComponent).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(track.reference.mediaItemID == nil ? track.reference.lastKnownURL.lastPathComponent : "「ミュージック」のライブラリの曲")
+                        .font(.ui(11)).foregroundStyle(.secondary).textSelection(.enabled)
                     VStack(alignment: .leading, spacing: 6) {
                         Button { actions.repair(sourceID) } label: { Label("ファイルを再選択…", systemImage: "folder") }
                         Button { confirmSource = sourceID } label: { Label("ライブラリから除外", systemImage: "trash") }
                     }.buttonStyle(SoftGlassButtonStyle()).disabled(!library.canEdit)
-                    Text("除外すると各リストの参照も外れます。元ファイルは削除しません。").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text("除外すると各リストの参照も外れます。元ファイルは削除しません。").font(.ui(11)).foregroundStyle(.secondary)
                 }
             }
             if originID != nil {
@@ -387,6 +405,10 @@ public struct ExtensionView: View {
                 Button { actions.files(nil) } label: { Label("ファイルを登録…", systemImage: "doc.badge.plus") }
                 Button(action: actions.folder) { Label("フォルダを登録…", systemImage: "folder.badge.plus") }
             }.buttonStyle(SoftGlassButtonStyle()).disabled(!library.canEdit)
+            if let musicLibrary = actions.musicLibrary {
+                Button { musicLibrary(nil) } label: { Label("ミュージックから登録…", systemImage: "music.note") }
+                    .buttonStyle(SoftGlassButtonStyle()).disabled(!library.canEdit)
+            }
             scrolled {
                 SourceFolderList(tracks: library.document.tracks, unavailable: library.unavailable, canRemove: library.canEdit,
                                  select: { id in sourceID = id; originID = nil }, removeFolder: { confirmFolder = $0 })

@@ -1,4 +1,5 @@
 import Foundation
+#if os(macOS)
 import CoreAudio
 
 /// Watches output identity/format while an idle playlist sweep has no playback engine.
@@ -45,3 +46,19 @@ import CoreAudio
         watch(device, kAudioDevicePropertyStreamConfiguration, scope: kAudioDevicePropertyScopeOutput)
     }
 }
+#else
+import AVFAudio
+
+/// Watches the audio session's output route while an idle playlist sweep has no playback engine.
+/// iOS reports output identity and format changes as route changes.
+@MainActor final class PlaylistOutputObserver {
+    private var token: (any NSObjectProtocol)?
+    init(changed: @escaping @MainActor () -> Void) {
+        token = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification,
+                                                       object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { changed() }
+        }
+    }
+    isolated deinit { if let token { NotificationCenter.default.removeObserver(token) } }
+}
+#endif

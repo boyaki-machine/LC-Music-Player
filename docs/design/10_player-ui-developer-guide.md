@@ -26,7 +26,9 @@ Sources/
 │           ├── PlayerPresentation.swift       画面の状態とdriverの所有
 │           ├── ExtensionView.swift            拡張画面
 │           ├── WindowLayout.swift             ウィンドウの配置の計算
-│           ├── NativeControls.swift           移動・シーク・音量の入力
+│           ├── PlayerFrame.swift              画面の枠（macOSのウィンドウ・iPhoneのカード・全画面・パネル）と文字の大きさ
+│           ├── NativeControls.swift           移動・シーク・音量の入力（macOS）
+│           ├── TouchControls.swift            同じ名前の入力部品のiOS版（タッチ）
 │           ├── VolumeControls.swift           音量の操作曲線・内部のフォーカス境界
 │           ├── PlaylistClickSurface.swift     マウスのクリック回数・行のドラッグ
 │           ├── LibraryControls.swift          リストの操作・グラス等
@@ -76,6 +78,7 @@ Tests/PlayerUITests/
 - `VisualizationKit/Shared/`にはUIに依存しない共通部品だけを置く。個別のPlayer UIの描画を登録したり、個別のView・スケール・driverを参照したりしない。Player UIから共通部品を利用する一方向の依存にする。
 - 音声エンジン・FFT・ライブラリの保存は、それぞれのCoreモジュールへ委ねる。
 - フォルダはSwiftのモジュールや名前空間ではない。Player UIごとのソースは、現在の`PlayerUI`ターゲット内でコンパイルされる。新しい型には実装固有の接頭辞を付け、別の実装で同名の`PlayerPresentation`等を重複して定義しない。
+- AppKitを使う部品は`#if os(macOS)`で囲み、同じ型名と引数のiOS版を`TouchControls.swift`に置く。共用のViewはOSを意識せずに部品を使う。メイン画面の大きさは`playerFrame`の環境値で決まり、macOSのウィンドウ（360×210pt）の寸法を変えない。
 - 通常のSwiftファイルはサブフォルダにあってもSwiftPMが検出するため、移動や追加だけなら`Package.swift`の変更は不要である。ターゲットや画像等のresourcesを追加する場合は、別途manifestを変更する。
 
 ## 3. モジュール間のI/F

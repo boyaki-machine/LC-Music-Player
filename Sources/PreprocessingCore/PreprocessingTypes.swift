@@ -20,6 +20,11 @@ public struct SourceFingerprint: Hashable, Sendable {
     private let identity: String
     private let persistentRevision: MeasurementSourceIdentity?
     public init(url: URL) throws {
+        // A Music library song has no file attributes to read; its asset URL names one fixed song.
+        guard url.isFileURL else {
+            self.url = url; size = 0; modified = .distantPast; identity = url.absoluteString; persistentRevision = nil
+            return
+        }
         let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
         guard let size = attributes[.size] as? NSNumber,
               let modified = attributes[.modificationDate] as? Date else { throw PreprocessingFailure.invalidAudio }

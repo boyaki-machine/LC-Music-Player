@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import Testing
@@ -110,3 +111,4 @@ import Testing
         window.contentView = nil
     }
 }
+#endif

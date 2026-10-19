@@ -22,7 +22,10 @@ public protocol MeasurementSourceIdentifying: Sendable {
 public struct LocalMeasurementSourceIdentity: MeasurementSourceIdentifying {
     public init() {}
     public func identity(for url: URL) throws -> MeasurementSourceIdentity? {
-        #if os(macOS)
+        // macOS and iOS both keep audio files on local APFS volumes (on iOS also the files a
+        // file provider has stored on the device). Any change of a timestamp or size is a miss.
+        // Music library songs have no file revision to check, so they are measured each time.
+        guard url.isFileURL else { return nil }
         let canonical = url.resolvingSymlinksInPath().standardizedFileURL
         let values = try canonical.resourceValues(forKeys: [.volumeUUIDStringKey, .volumeIsLocalKey, .isRegularFileKey])
         guard values.isRegularFile == true, values.volumeIsLocal == true,
@@ -34,11 +37,6 @@ public struct LocalMeasurementSourceIdentity: MeasurementSourceIdentifying {
             resource: "\(volume)/\(info.st_dev)/\(info.st_ino)",
             revision: "\(info.st_mtimespec.tv_sec):\(info.st_mtimespec.tv_nsec)/\(info.st_ctimespec.tv_sec):\(info.st_ctimespec.tv_nsec)/\(info.st_birthtimespec.tv_sec):\(info.st_birthtimespec.tv_nsec)",
             size: info.st_size)
-        #else
-        // iOS file providers require a provider-specific revision adapter. Until
-        // verified, a miss is preferable to assuming desktop inode semantics.
-        return nil
-        #endif
     }
 }
 

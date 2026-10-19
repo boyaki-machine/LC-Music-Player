@@ -26,8 +26,11 @@ public enum PlaybackError: LocalizedError, Equatable, Sendable {
 
 public enum SupportedAudio {
     public static let extensions = ["mp3", "m4a", "wav", "aif", "aiff", "flac"]
+    /// Songs of the iPhone's Music library: `ipod-library://item/item.<ext>?id=<persistent ID>`.
+    /// Core Audio reads them like files.
+    public static let mediaLibraryScheme = "ipod-library"
 
     public static func accepts(_ url: URL) -> Bool {
-        url.isFileURL && extensions.contains(url.pathExtension.lowercased())
+        (url.isFileURL || url.scheme == mediaLibraryScheme) && extensions.contains(url.pathExtension.lowercased())
     }
 }

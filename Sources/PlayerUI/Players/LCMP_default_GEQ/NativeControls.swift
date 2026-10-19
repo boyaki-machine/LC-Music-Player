@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 
@@ -253,3 +254,4 @@ struct VolumeClickRegion: NSViewRepresentable {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
+#endif

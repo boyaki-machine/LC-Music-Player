@@ -1,5 +1,6 @@
 // Renders the LCMP app icon (glowing play triangle over a level meter) into an .icns file.
 // Usage: swift scripts/render-app-icon.swift assets/AppIcon.icns
+//        swift scripts/render-app-icon.swift --ios iOS/LCMPiOS/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 // The drawing is the chosen B3 design (see the app icon in the UI/UX design), on a 1024 canvas with y pointing down.
 import CoreGraphics
 import Foundation
@@ -19,23 +20,28 @@ func gradient(_ colors: [CGColor]) -> CGGradient {
 let lit = [color(0x66ff79), color(0xeaff51), color(0xff585c)]
 let unlit = [color(0x0d2113), color(0x20210d), color(0x240e12)]
 
-func draw(_ context: CGContext, size: Int) {
-    let scale = CGFloat(size) / 1024
+/// `fullBleed` draws the glass body over the whole square without the macOS margin, shadow and
+/// outline; iOS masks the corners itself.
+func draw(_ context: CGContext, size: Int, fullBleed: Bool = false) {
+    let scale = CGFloat(size) / (fullBleed ? 824 : 1024)
     context.translateBy(x: 0, y: CGFloat(size))
     context.scaleBy(x: scale, y: -scale)
+    if fullBleed { context.translateBy(x: -100, y: -100) }
     // Shadow offsets and blur are in device space, so they are scaled by hand.
     func shadow(_ blur: CGFloat, _ shadowColor: CGColor, dy: CGFloat = 0) {
         context.setShadow(offset: CGSize(width: 0, height: -dy * scale), blur: blur * scale, color: shadowColor)
     }
 
-    let body = CGPath(roundedRect: CGRect(x: 100, y: 100, width: 824, height: 824),
-                      cornerWidth: 185, cornerHeight: 185, transform: nil)
-    context.saveGState()
-    shadow(28, color(0x000000, 0.35), dy: 12)
-    context.addPath(body)
-    context.setFillColor(color(0x151719))
-    context.fillPath()
-    context.restoreGState()
+    let body = fullBleed ? CGPath(rect: CGRect(x: 100, y: 100, width: 824, height: 824), transform: nil)
+        : CGPath(roundedRect: CGRect(x: 100, y: 100, width: 824, height: 824), cornerWidth: 185, cornerHeight: 185, transform: nil)
+    if !fullBleed {
+        context.saveGState()
+        shadow(28, color(0x000000, 0.35), dy: 12)
+        context.addPath(body)
+        context.setFillColor(color(0x151719))
+        context.fillPath()
+        context.restoreGState()
+    }
 
     context.saveGState()
     context.addPath(body)
@@ -87,6 +93,7 @@ func draw(_ context: CGContext, size: Int) {
     context.drawLinearGradient(gradient([color(0xffffff, 0.10), color(0xffffff, 0)]),
                                start: CGPoint(x: 0, y: 100), end: CGPoint(x: 0, y: 512), options: [])
     context.restoreGState()
+    if fullBleed { return }
 
     context.addPath(CGPath(roundedRect: CGRect(x: 101.5, y: 101.5, width: 821, height: 821),
                            cornerWidth: 184, cornerHeight: 184, transform: nil))
@@ -95,13 +102,14 @@ func draw(_ context: CGContext, size: Int) {
     context.strokePath()
 }
 
-func writePNG(size: Int, to url: URL) throws {
+func writePNG(size: Int, to url: URL, fullBleed: Bool = false) throws {
+    // The iOS icon must be opaque.
+    let alpha = fullBleed ? CGImageAlphaInfo.noneSkipLast : CGImageAlphaInfo.premultipliedLast
     guard let context = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: alpha.rawValue) else {
         throw CocoaError(.featureUnsupported)
     }
-    draw(context, size: size)
+    draw(context, size: size, fullBleed: fullBleed)
     guard let image = context.makeImage(),
           let destination = CGImageDestinationCreateWithURL(url as CFURL, UTType.png.identifier as CFString, 1, nil) else {
         throw CocoaError(.fileWriteUnknown)
@@ -111,8 +119,13 @@ func writePNG(size: Int, to url: URL) throws {
 }
 
 let arguments = CommandLine.arguments
+if arguments.count == 3, arguments[1] == "--ios" {
+    try writePNG(size: 1024, to: URL(fileURLWithPath: arguments[2]), fullBleed: true)
+    print(arguments[2])
+    exit(0)
+}
 guard arguments.count == 2 else {
-    FileHandle.standardError.write("usage: render-app-icon.swift <output.icns>\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: render-app-icon.swift <output.icns> | --ios <output.png>\n".data(using: .utf8)!)
     exit(2)
 }
 let output = URL(fileURLWithPath: arguments[1])

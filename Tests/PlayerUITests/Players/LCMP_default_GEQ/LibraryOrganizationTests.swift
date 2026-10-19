@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Testing
 import LibraryCore
@@ -74,3 +75,4 @@ import LibraryCore
         #expect(clicks == [1])
     }
 }
+#endif

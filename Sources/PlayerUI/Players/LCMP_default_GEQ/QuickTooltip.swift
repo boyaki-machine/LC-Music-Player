@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
 extension View {
@@ -34,6 +36,7 @@ struct OverflowTitle: View {
     }
 }
 
+#if os(macOS)
 /// Track-title help with an app-local delay; the panel never takes clicks or focus.
 struct QuickTooltip: NSViewRepresentable {
     var text: String
@@ -125,3 +128,4 @@ struct QuickTooltip: NSViewRepresentable {
         }
     }
 }
+#endif

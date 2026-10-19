@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import Testing
@@ -516,3 +517,4 @@ extension LibraryNativeViewTests {
         #expect(ermine > led + 0.1, "led \(led), ermine \(ermine)")
     }
 }
+#endif

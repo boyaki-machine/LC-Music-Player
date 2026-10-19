@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import Foundation
 import SwiftUI
@@ -42,3 +43,4 @@ import LibraryCore
     func load() throws -> LibraryDocument { LibraryDocument() }
     func save(_ document: LibraryDocument) throws {}
 }
+#endif

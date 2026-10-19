@@ -4,6 +4,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 ICON = ROOT / 'assets/AppIcon.icns'
+IOS_ICON = ROOT / 'iOS/LCMPiOS/Assets.xcassets/AppIcon.appiconset/AppIcon.png'
 PNG = b'\x89PNG\r\n\x1a\n'
 # icns element types that iconutil writes as PNG, with their pixel sizes.
 PNG_ELEMENTS = {b'ic07': 128, b'ic08': 256, b'ic09': 512, b'ic10': 1024,
@@ -44,6 +45,17 @@ class AppIconTests(unittest.TestCase):
         build = (ROOT / 'scripts/build-app.py').read_text()
         self.assertIn('"assets/AppIcon.icns", contents / "Resources/AppIcon.icns"', build)
         self.assertIn('"CFBundleIconFile": "AppIcon"', build)
+
+    def test_iphone_icon_is_an_opaque_1024_square(self):
+        data = IOS_ICON.read_bytes()
+        self.assertEqual(data[:8], PNG)
+        width, height, depth, color_type = struct.unpack('>IIBB', data[16:26])
+        self.assertEqual((width, height), (1024, 1024))
+        # Colour type 2 is RGB without alpha; iOS rejects icons with transparency.
+        self.assertEqual((depth, color_type), (8, 2))
+        contents = (IOS_ICON.parent / 'Contents.json').read_text()
+        self.assertIn('"filename" : "AppIcon.png"', contents)
+        self.assertIn('"size" : "1024x1024"', contents)
 
 
 if __name__ == '__main__':

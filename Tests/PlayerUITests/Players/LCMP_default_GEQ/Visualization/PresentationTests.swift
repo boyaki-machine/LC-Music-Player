@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import SwiftUI
 import Testing
@@ -276,3 +277,4 @@ func frame(levels: [Float], generation: UUID = UUID(), sequence: UInt64 = 1, ban
     func stop() {}
     func seek(to seconds: TimeInterval) throws { currentTime = seconds }
 }
+#endif

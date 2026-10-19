@@ -12,10 +12,12 @@ LEARNINGS_CODEX.md
 LEARNINGS_CLAUDE.md
 /DEVELOPMENT_NOTES.md
 /CHARACTER_ANIMATION_GUIDE.md
+/IPHONE_DEVELOPMENT.md
 # Local design mockups (HTML)
 /prototypes/
 
 # Xcode and Swift build products
+/iOS/Local.xcconfig
 DerivedData/
 build/
 .build/

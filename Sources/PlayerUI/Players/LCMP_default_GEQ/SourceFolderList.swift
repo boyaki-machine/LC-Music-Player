@@ -1,19 +1,32 @@
 import SwiftUI
 import LibraryCore
+import PlaybackCore
 
 struct SourceFolderGroup: Identifiable {
     var id: String { directory?.absoluteString ?? "default" }
     let directory: URL?
     let tracks: [LibraryTrack]
-    var name: String { directory.map { $0.lastPathComponent.isEmpty ? $0.path : $0.lastPathComponent } ?? "デフォルト" }
+    var name: String {
+        guard let directory else { return "デフォルト" }
+        if directory.scheme == SupportedAudio.mediaLibraryScheme { return "ミュージック" }
+        return directory.lastPathComponent.isEmpty ? directory.path : directory.lastPathComponent
+    }
     /// A parent folder becomes a group when it holds a folder-registered track or two or more
     /// tracks. A file registered alone stays in the default group until another track from its
     /// folder arrives. Only the display changes; the stored registration does not.
+    /// All Music library songs share one group; their asset URLs differ only in the ID query.
+    private static let mediaLibraryFolder = URL(string: "\(SupportedAudio.mediaLibraryScheme)://item/")!
+    private static func folder(of track: LibraryTrack) -> URL {
+        track.reference.mediaItemID != nil ? mediaLibraryFolder : track.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL
+    }
     static func groups(_ tracks: [LibraryTrack]) -> [Self] {
-        let byFolder = Dictionary(grouping: tracks) { $0.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL }
-        let folders = Set(byFolder.filter { _, members in members.count > 1 || members.contains { $0.registration == .folder } }.keys)
+        let byFolder = Dictionary(grouping: tracks, by: folder(of:))
+        // Music library songs always form their own group, even a single one.
+        let folders = Set(byFolder.filter { folder, members in
+            folder.scheme == SupportedAudio.mediaLibraryScheme || members.count > 1 || members.contains { $0.registration == .folder }
+        }.keys)
         return Dictionary(grouping: tracks) { track -> URL? in
-            let folder = track.reference.lastKnownURL.deletingLastPathComponent().standardizedFileURL
+            let folder = folder(of: track)
             return folders.contains(folder) ? folder : nil
         }
             .map { Self(directory: $0.key, tracks: $0.value) }
@@ -34,10 +47,10 @@ struct SourceFolderList: View {
                     VStack(alignment: .leading, spacing: 2) {
                         OverflowTitle(name: track.name)
                         Text(unavailable[track.id] ?? track.reference.lastKnownURL.pathExtension.uppercased())
-                            .font(.system(size: 11)).foregroundStyle(unavailable[track.id] == nil ? Color.white.opacity(0.55) : .orange).lineLimit(1)
+                            .font(.ui(11)).foregroundStyle(unavailable[track.id] == nil ? Color.white.opacity(0.55) : .orange).lineLimit(1)
                     }
                     Spacer(minLength: 4)
-                    Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Image(systemName: "chevron.right").font(.ui(11)).foregroundStyle(.secondary)
                 }.frame(minHeight: 40).contentShape(Rectangle())
             }.buttonStyle(.plain)
         }
@@ -68,10 +81,10 @@ struct SourceFolderSections<Row: View>: View {
                         Image(systemName: "folder").foregroundStyle(.white.opacity(0.6))
                         OverflowTitle(name: group.name).fontWeight(.medium)
                         Spacer(minLength: 4)
-                        Text("\(group.tracks.count)曲").font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text("\(group.tracks.count)曲").font(.ui(11)).foregroundStyle(.secondary)
                         if let removeFolder, group.directory != nil {
                             Button { removeFolder(group) } label: {
-                                Image(systemName: "trash").font(.system(size: 11)).frame(width: 24, height: 24).contentShape(Rectangle())
+                                Image(systemName: "trash").font(.ui(11)).frame(width: 24, height: 24).contentShape(Rectangle())
                             }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.55))
                                 .accessibilityLabel("フォルダ「\(group.name)」を除外").help("フォルダ「\(group.name)」を除外")
                                 .padding(.vertical, -4)

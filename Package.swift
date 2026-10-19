@@ -3,10 +3,12 @@ import PackageDescription
 
 let package = Package(
     name: "LCMP",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v26)],
     products: [
         .executable(name: "LCMP", targets: ["LCMPApp"]),
         .library(name: "PlaybackCore", targets: ["PlaybackCore"]),
+        .library(name: "LibraryCore", targets: ["LibraryCore"]),
+        .library(name: "PlayerUI", targets: ["PlayerUI"]),
     ],
     targets: [
         .systemLibrary(name: "CSQLite"),
