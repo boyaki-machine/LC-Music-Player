@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
 enum PlaylistRowDrag: Equatable {
@@ -21,6 +23,7 @@ enum PlaylistReorder {
     static func destination(from index: Int, target: Int) -> Int { target > index ? target + 1 : target }
 }
 
+#if os(macOS)
 /// Mouse clicks use AppKit's click count; the underlying Button keeps keyboard and AX actions.
 /// A press that moves 6pt or more is a drag, never a click; with `drag` set it reorders the row.
 struct PlaylistClickSurface: NSViewRepresentable {
@@ -92,3 +95,4 @@ struct PlaylistClickSurface: NSViewRepresentable {
         }
     }
 }
+#endif

@@ -1,3 +1,5 @@
+// Reads the macOS default output device through Core Audio HAL.
+#if os(macOS)
 import AVFAudio
 import AnalysisCore
 import CoreAudio
@@ -252,3 +254,4 @@ struct AudioOutputTests {
         return nil
     }
 }
+#endif

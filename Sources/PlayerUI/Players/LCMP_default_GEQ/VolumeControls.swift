@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
 /// UI position only. PlaybackCore continues to own the actual linear gain.
@@ -19,6 +21,7 @@ enum VolumeCurve {
     }
 }
 
+#if os(macOS)
 /// A separate hosting subtree makes focus ownership include the slider and mute button.
 struct VolumeFocusScope<Content: View>: NSViewRepresentable {
     let content: Content
@@ -63,3 +66,4 @@ struct VolumeFocusScope<Content: View>: NSViewRepresentable {
     }
     isolated deinit { stop() }
 }
+#endif

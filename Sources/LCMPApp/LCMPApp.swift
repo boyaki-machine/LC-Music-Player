@@ -1,3 +1,5 @@
+// The macOS app. The iPhone app lives in iOS/ and links the shared libraries instead.
+#if os(macOS)
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -244,3 +246,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NSApp.mainMenu = bar
     }
 }
+#else
+@main
+enum LCMPApp {
+    static func main() {}
+}
+#endif

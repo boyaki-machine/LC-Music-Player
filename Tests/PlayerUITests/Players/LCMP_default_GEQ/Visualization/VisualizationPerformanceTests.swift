@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import AVFAudio
 import Darwin
@@ -171,3 +172,4 @@ private func rssMB() -> Double {
     }
     return result == KERN_SUCCESS ? Double(info.resident_size) / 1048576 : .nan
 }
+#endif

@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import AVFAudio
 import Foundation
@@ -97,3 +98,4 @@ import PlaybackCore
         #expect(playback.state == .finished && driver.snapshot.counts.allSatisfy { $0 == 0 } && !driver.isRunning)
     }
 }
+#endif

@@ -1,9 +1,18 @@
 import Foundation
+import PlaybackCore
 
 public struct TrackReference: Codable, Equatable, Sendable {
     public var bookmark: Data?
     public var lastKnownURL: URL
     public init(bookmark: Data?, lastKnownURL: URL) { self.bookmark = bookmark; self.lastKnownURL = lastKnownURL }
+    /// The persistent ID of a Music library song. Such a reference has no bookmark; its URL is the
+    /// song's asset URL, which carries the ID.
+    public var mediaItemID: UInt64? {
+        guard lastKnownURL.scheme == SupportedAudio.mediaLibraryScheme,
+              let value = URLComponents(url: lastKnownURL, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "id" })?.value else { return nil }
+        return UInt64(value)
+    }
 }
 public enum TrackRegistration: String, Codable, Sendable { case file, folder }
 public struct LibraryTrack: Codable, Equatable, Identifiable, Sendable {
@@ -42,7 +51,7 @@ public struct LibraryDocument: Codable, Equatable, Sendable {
         let entries = playlists.flatMap(\.entries)
         guard tracks.count == self.tracks.count, lists.count == playlists.count,
               Set(entries.map(\.id)).count == entries.count,
-              self.tracks.allSatisfy({ $0.reference.lastKnownURL.isFileURL }),
+              self.tracks.allSatisfy({ $0.reference.lastKnownURL.isFileURL || $0.reference.mediaItemID != nil }),
               playlists.allSatisfy({ !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }),
               entries.allSatisfy({ tracks.contains($0.trackID) }),
               currentPlaylistID.map({ lists.contains($0) }) ?? (currentEntryID == nil),

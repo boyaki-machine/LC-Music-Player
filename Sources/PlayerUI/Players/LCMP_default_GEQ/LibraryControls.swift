@@ -1,6 +1,9 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
+#if os(macOS)
 /// Fixed native button rectangles keep thin glyphs easy to click.
 struct PlaylistRowActions: NSViewRepresentable {
     let name: String
@@ -51,6 +54,8 @@ struct PlaylistRowActions: NSViewRepresentable {
     }
 }
 
+#endif
+
 struct PlaylistTrackChoice: View {
     let name: String
     let added: Bool
@@ -60,7 +65,7 @@ struct PlaylistTrackChoice: View {
             HStack(spacing: 6) {
                 OverflowTitle(name: name, help: name + "\n" + (added ? "このプレイリストに追加済みです。再度選ぶと重複して追加します。" : "このプレイリストに追加します。"))
                     .foregroundStyle(added ? Color.white.opacity(0.55) : Color.white.opacity(0.85))
-                if added { Text("追加済").font(.system(size: 10)).foregroundStyle(Color(red: 0.65, green: 0.79, blue: 0.72)).fixedSize() }
+                if added { Text("追加済").font(.ui(10)).foregroundStyle(Color(red: 0.65, green: 0.79, blue: 0.72)).fixedSize() }
             }
         }.toggleStyle(.checkbox)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -68,6 +73,7 @@ struct PlaylistTrackChoice: View {
     }
 }
 
+#if os(macOS)
 /// A narrow bottom grip preserves the borderless glass window's shape.
 struct ExtensionResizeHandle: NSViewRepresentable {
     var resize: (CGFloat) -> Void
@@ -171,6 +177,8 @@ struct RefinedScrollStyle: NSViewRepresentable {
     }
 }
 
+#endif
+
 struct PlayerGlassBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     var body: some View {
@@ -183,7 +191,7 @@ struct PlayerGlassBackground: View {
 struct SoftGlassButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.font(.system(size: 12)).padding(.horizontal, 9).padding(.vertical, 6)
+        configuration.label.font(.ui(12)).padding(.horizontal, 9).padding(.vertical, 6)
             .foregroundStyle(Color(red: 0.79, green: 0.91, blue: 0.84).opacity(enabled ? 1 : 0.35))
             .background(.white.opacity(enabled ? (configuration.isPressed ? 0.13 : 0.07) : 0.03), in: RoundedRectangle(cornerRadius: 5))
     }
@@ -196,7 +204,7 @@ struct ShuffleToggle: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            Image(systemName: "shuffle").font(.system(size: 13, weight: .medium))
+            Image(systemName: "shuffle").font(.ui(13, weight: .medium))
                 .foregroundStyle(isOn ? Self.litColor : .white.opacity(0.3))
                 .shadow(color: isOn ? Self.litColor.opacity(0.6) : .clear, radius: 4)
                 // A 32×28pt hit area that does not make the header row taller.

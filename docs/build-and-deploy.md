@@ -11,7 +11,7 @@
 | Python 3.9以降 | `python3 --version` |
 | make | `make --version` |
 
-`codesign`、`otool`、`install_name_tool`、`strip`、`ditto`、`hdiutil`、`osascript`はmacOSの開発ツール・標準のコマンドを使用します。iPhone向けの成果物は作成しません。
+`codesign`、`otool`、`install_name_tool`、`strip`、`ditto`、`hdiutil`、`osascript`はmacOSの開発ツール・標準のコマンドを使用します。iPhone版には、iOS 26以降のSDKとiOSシミュレータの実行環境を含むXcodeが要ります（[iPhone版](#iphone版)）。
 
 以下のコマンドはリポジトリの直下で実行します。パッケージの依存はないので、ビルドにネットワーク接続は要りません。`scripts/swift.sh`は、そのコマンドの中だけキーチェーン・netrc・Gitの認証ヘルパーの参照を無効にします。保存済みの認証やグローバル設定は変更しません。
 
@@ -186,6 +186,24 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 
 - `--no-parallel`を外してスイートを並列に実行しても成功します。
 - 実出力のテストを追加するときは、並列でも成功するように書きます。固定の待ち時間ではなく条件が成り立つまで待ち、負荷が高くても待つ間に自然送りが起きない長さ（数秒以上）の音源を使います。共有の`AudioPreprocessor.shared`ではなく専用のインスタンスを渡し、LibraryControllerが裏で行うキャッシュの照合などは、完了を確かめてから次へ進みます。共有の一時フォルダは、件数ではなく自分が作ったファイルだけを確かめます。
+
+## iPhone版
+
+iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwiftパッケージのライブラリ（LibraryCore・PlayerUI・PlaybackCore）を参照し、iOSだけの部分（アプリの入口・音声セッション・ファイルの選択）を`iOS/LCMPiOS/`に置きます。
+
+| コマンド | 内容 |
+| --- | --- |
+| `make ios-build` | シミュレータ向けにビルドします（署名なし）。成果物は`build/ios/app/Build/Products/Debug-iphonesimulator/LCMP.app`です。 |
+| `make ios-test` | 共用モジュールのテストをiOSシミュレータで実行します。AppKitの画面のテストはmacOSだけで実行します。 |
+| `make ios-uitest` | アプリをシミュレータで起動し、指の操作のテスト（`iOS/LCMPiOSUITests/`）を実行します。 |
+| `make ios-sim` | ビルドしてシミュレータに入れ、起動します。 |
+| `make ios-device` | 署名して実機向けにビルドし、接続したiPhoneに入れて起動します。 |
+
+- 上書きできる変数は`IOS_CONFIGURATION`（Debug／Release）、`IOS_SIMULATOR`（シミュレータの名前、既定は`iPhone 18 Pro Max`）、`IOS_DEVICE`（実機の名前か識別子）です。
+- 実機向けの署名には、Git管理外の`iOS/Local.xcconfig`に`DEVELOPMENT_TEAM`（Team ID）と`LCMP_BUNDLE_PREFIX`（自分だけのバンドルIDの接頭辞）を書きます。ないときはシミュレータ向けにだけビルドできます。
+- バージョンはmacOS版と同じく、ビルドの最後の段（`scripts/ios_resources.py`）がGitの履歴から決めてInfo.plistへ書き込みます。同じ段で、LCMPのLICENSE/NOTICEと依存の索引（空）をアプリへ入れます。
+- アイコンは`scripts/render-app-icon.swift --ios`で、macOS版と同じ図形から角の丸みと余白のない1024pxの画像を描きます。
+- DEBUGビルドには、シミュレータで確かめるための起動引数があります。`-LCMPImportPaths <パス>,<パス>`はMac上のファイル・フォルダを選択画面なしで現在のリストに登録し、`-LCMPAutoplay YES`で再生を始めます。`-LCMPOrientation landscape`は横置きに（`-LCMPOrientationDelay <秒>`で回すまでの待ち時間）、`-LCMPExtension NO`は拡張画面を閉じた状態で起動します。
 
 ## ライセンス情報の更新
 

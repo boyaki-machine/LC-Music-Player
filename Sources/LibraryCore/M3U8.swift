@@ -1,4 +1,5 @@
 import Foundation
+import PlaybackCore
 
 public struct M3U8Item: Equatable, Sendable {
     public var url: URL
@@ -34,7 +35,9 @@ public enum M3U8 {
             if line.hasPrefix("#") { continue }
             let url: URL
             if let parsed = URL(string: line), parsed.scheme != nil {
-                guard parsed.isFileURL, parsed.host == nil || parsed.host == "" || parsed.host == "localhost" else {
+                // Library songs keep their asset URL, so an exported list of them reads back on the iPhone.
+                guard parsed.isFileURL && (parsed.host == nil || parsed.host == "" || parsed.host == "localhost")
+                        || parsed.scheme == SupportedAudio.mediaLibraryScheme else {
                     throw LibraryFailure.invalidPlaylist("ローカル音源のリストを選択してください。")
                 }
                 url = parsed

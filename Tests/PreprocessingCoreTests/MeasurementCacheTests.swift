@@ -32,6 +32,15 @@ private func profile(_ rate: Double = 48000, _ channels: UInt32 = 2) throws -> M
 private struct NoStableIdentity: MeasurementSourceIdentifying {
     func identity(for url: URL) throws -> MeasurementSourceIdentity? { nil }
 }
+/// A provider without file attributes, like the Music library: its revision is whatever it reports.
+private final class ProviderIdentity: MeasurementSourceIdentifying, @unchecked Sendable {
+    private let lock = NSLock()
+    private var revision = "180.0/1700000000"
+    func replace(with revision: String) { lock.withLock { self.revision = revision } }
+    func identity(for url: URL) throws -> MeasurementSourceIdentity? {
+        lock.withLock { MeasurementSourceIdentity(locator: "provider://\(url.lastPathComponent)", resource: "provider/1", revision: revision, size: 180_000) }
+    }
+}
 
 @Suite(.serialized) struct MeasurementCacheTests {
     @Test func survivesNewProcessorReusesNativePeakAndRecalculatesTarget() async throws {
@@ -85,6 +94,22 @@ private struct NoStableIdentity: MeasurementSourceIdentifying {
         _ = try await processor.measure(link)
         let stats = await processor.statistics()
         #expect(stats.peakScans == 5 && stats.cacheHits == 1)
+    }
+    /// A provider's identity keeps measurements across processors until the provider reports another revision.
+    @Test func providerIdentitySurvivesNewProcessorUntilItsRevisionChanges() async throws {
+        let f = try CacheFixture(); defer { f.cleanup() }
+        let url = try f.wave(), provider = ProviderIdentity()
+        var config = f.configuration; config.sourceIdentity = provider
+        let metrics = try await AudioPreprocessor(cache: config).measureLevels(url, profile: profile())
+        let reopened = AudioPreprocessor(cache: config)
+        #expect(try await reopened.measureLevels(url, profile: profile()) == metrics)
+        var stats = await reopened.statistics()
+        #expect(stats.levelScans == 0 && stats.cacheHits == 1)
+        provider.replace(with: "181.0/1700000000")
+        let replaced = AudioPreprocessor(cache: config)
+        _ = try await replaced.measureLevels(url, profile: profile())
+        stats = await replaced.statistics()
+        #expect(stats.levelScans == 1 && stats.cacheHits == 0)
     }
     @Test func incompatibleProgramAlgorithmConversionAndOutputMiss() async throws {
         let f = try CacheFixture(); defer { f.cleanup() }; let url = try f.wave()

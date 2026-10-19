@@ -21,13 +21,17 @@ struct PlaybackVisualization: View {
             case .ermineChorus: ErmineChorusView(driver: presentation.ermineChorusDriver)
             }
         }
-        .onAppear { synchronize(); receive() }
+        .onAppear { presentation.visualizationHostAppeared(); synchronize(); receive() }
         .onChange(of: playback.state) { _, _ in synchronize(); receive() }
         .onChange(of: visible) { _, _ in synchronize(); receive() }
         .onChange(of: presentation.visualizationDesign) { _, _ in synchronize(); receive() }
         .onChange(of: playback.analysisResetID) { _, _ in presentation.activeVisualizationDriver.reset(); receive() }
         .onChange(of: stamp) { _, _ in receive() }
-        .onDisappear { presentation.activeVisualizationDriver.synchronize(activity: .inactive, visible: false) }
+        .onDisappear {
+            if presentation.visualizationHostDisappeared() {
+                presentation.activeVisualizationDriver.synchronize(activity: .inactive, visible: false)
+            }
+        }
     }
     private func synchronize() {
         let configuration = visible ? VisualizationDesign.configuration : nil

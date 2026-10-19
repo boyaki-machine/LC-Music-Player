@@ -1,0 +1,34 @@
+// Settings shared by every configuration of the iPhone app (tracked in Git).
+// Machine- and person-specific values go in Local.xcconfig, which is not tracked:
+//   DEVELOPMENT_TEAM = <your team ID>
+//   LCMP_BUNDLE_PREFIX = <a bundle ID prefix only you use>
+// Without it the app still builds for the simulator, unsigned.
+
+LCMP_BUNDLE_PREFIX = local.lcmp
+DEVELOPMENT_TEAM =
+CODE_SIGN_STYLE = Automatic
+
+PRODUCT_NAME = LCMP
+PRODUCT_BUNDLE_IDENTIFIER = $(LCMP_BUNDLE_PREFIX).player
+IPHONEOS_DEPLOYMENT_TARGET = 26.0
+TARGETED_DEVICE_FAMILY = 1
+SDKROOT = iphoneos
+SUPPORTED_PLATFORMS = iphoneos iphonesimulator
+SWIFT_VERSION = 6.0
+SWIFT_APPROACHABLE_CONCURRENCY = YES
+ENABLE_USER_SCRIPT_SANDBOXING = NO
+ALWAYS_SEARCH_USER_PATHS = NO
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_FILE = LCMPiOS-Info.plist
+INFOPLIST_KEY_CFBundleDisplayName = LCMP
+INFOPLIST_KEY_UILaunchScreen_Generation = YES
+INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+INFOPLIST_KEY_UIStatusBarStyle = UIStatusBarStyleLightContent
+INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES
+// scripts/ios_resources.py writes the Git-derived version over these after the Info.plist is built.
+MARKETING_VERSION = 1.0.0
+CURRENT_PROJECT_VERSION = 1
+
+#include? "Local.xcconfig"

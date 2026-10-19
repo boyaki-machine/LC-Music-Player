@@ -1,3 +1,4 @@
+#if os(macOS)
 import AppKit
 import QuartzCore
 import SwiftUI
@@ -214,3 +215,4 @@ private func licenseFixture() throws -> URL {
     func load() throws -> LibraryDocument { LibraryDocument() }
     func save(_ document: LibraryDocument) throws { saves += 1 }
 }
+#endif

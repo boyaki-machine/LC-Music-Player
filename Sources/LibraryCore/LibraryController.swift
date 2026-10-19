@@ -385,6 +385,23 @@ import AudioProcessingCore
             if commit(next) { error = skipped; message = "\(ids.count)曲を登録しました。" }
         } catch { self.error = error.localizedDescription }
     }
+    /// Registers songs of the Music library. Each item's URL is the song's asset URL and its title the song title.
+    public func importMediaItems(_ items: [M3U8Item], into playlistID: UUID? = nil) async {
+        guard canEdit else { return }; isBusy = true; error = nil
+        defer { finishImport() }
+        await retirePlaylistWorkForImport()
+        guard editsEnabled, !shuttingDown else { return }
+        do {
+            var next = document
+            let ids = try await stage(items, in: &next, allowMissing: false)
+            if let playlistID {
+                guard let i = next.playlists.firstIndex(where: { $0.id == playlistID }) else { throw LibraryFailure.invalidDocument }
+                next.playlists[i].entries += ids.map { PlaylistEntry(trackID: $0) }
+            }
+            let skipped = error
+            if commit(next) { error = skipped; message = "\(ids.count)曲を登録しました。" }
+        } catch { self.error = error.localizedDescription }
+    }
     private func stage(_ items: [M3U8Item], in next: inout LibraryDocument, allowMissing: Bool, folderRoots: [URL] = []) async throws -> [UUID] {
         var paths: [URL: UUID] = [:]
         for i in next.tracks.indices {
@@ -416,7 +433,7 @@ import AudioProcessingCore
             let track = LibraryTrack(name: name, reference: reference, registration: fromFolder ? .folder : .file)
             positions[track.id] = next.tracks.count
             next.tracks.append(track); paths[path] = track.id; ids.append(track.id)
-            if reference.bookmark == nil { unavailable[track.id] = "ファイルが見つからないか、アクセスできません。" }
+            if reference.bookmark == nil && reference.mediaItemID == nil { unavailable[track.id] = "ファイルが見つからないか、アクセスできません。" }
             if index % 32 == 0 { await Task.yield() }
         }
         if failed > 0 { self.error = "\(failed)件は形式またはアクセスを確認できず、登録していません。" }

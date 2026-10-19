@@ -72,7 +72,14 @@
 他のOSへの対応は次のとおりとする。
 
 - 共通の保存スキーマにはPOSIXの型を持ち込まない。`MeasurementSourceIdentifying`が`MeasurementSourceIdentity`を返す境界を用意し、iOSのファイル提供元に応じた参照・revisionの取得を差し替えられるようにする。
-- 現在の標準adapterはmacOS用で、他のOSでは永続ヒットを無効とする。SQLite・キー・DTO・Auditは共通化できるが、iOSの音源参照adapterとビルド・実機での検証は別途必要である。
+- 標準adapterはmacOSとiOSで共通とする。どちらも音源はローカルのAPFS上の通常ファイルで（iOSではファイル提供元が端末に置いたファイルを含む）、ボリューム・inode・各時刻・サイズのどれかが変われば別の音源として測り直す。SQLite・キー・DTO・Auditも共通である。標準adapterは「ミュージック」のライブラリの曲に識別を返さない。
+- iOSアプリは、ライブラリの曲を`MediaLibraryMeasurementSourceIdentity`（LibraryCore）で識別し、ファイルは標準adapterに委ねる。ライブラリにはファイルの属性がないため、ライブラリが返す値を使う。
+  - 参照：asset URL（persistent IDと形式を含む）。ライブラリが同じIDに返すasset URLと一致しなければ、識別を返さない。
+  - 資源識別子：persistent ID。
+  - 更新revision：曲の長さ（`playbackDuration`）とライブラリへの追加日時（`dateAdded`）。再生回数・最終再生日時は再生のたびに変わるので使わない。
+  - サイズ：ライブラリはバイト数を返さないため、長さのミリ秒を入れる。
+  - 許可がない曲、DRM付き・iCloudだけの曲、長さが0の曲には識別を返さず、毎回測定する。
+- 同じpersistent IDのまま中身を差し替えた曲は、長さか追加日時が変われば別の音源として測り直す。両方が同じままの差し替えは見分けられず、古い測定値で補正する。影響は補正量のずれに限られ、true peakによる上限は古い値のまま効く。アプリの入れ直し（実行ファイルの変化）と90日間の未使用で、記録は失効する。
 - 端末間の同期は提供しない。
 
 ### 完了値と再生の契約

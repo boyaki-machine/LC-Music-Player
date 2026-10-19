@@ -1,4 +1,6 @@
+#if os(macOS)
 import AppKit
+#endif
 import SwiftUI
 
 struct AcknowledgementDocument: Codable, Identifiable, Hashable, Sendable {
@@ -150,6 +152,7 @@ struct AcknowledgementsView: View {
     }
 }
 
+#if os(macOS)
 struct NoticeText: NSViewRepresentable {
     let text: String
     func makeNSView(context: Context) -> NSScrollView {
@@ -265,3 +268,52 @@ struct NoticeDocumentPicker: NSViewRepresentable {
         }
     }
 }
+#endif
+
+#if os(iOS)
+struct NoticeText: View {
+    let text: String
+    var body: some View {
+        ScrollView {
+            Text(verbatim: text).font(.system(size: 12, design: .monospaced)).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+        }
+    }
+}
+
+struct NoticeDocumentPicker: View {
+    let documents: [AcknowledgementDocument]
+    @Binding var selection: AcknowledgementDocument?
+    var body: some View {
+        Picker("収録文書", selection: $selection) {
+            ForEach(documents) { Text($0.title).tag(Optional($0)) }
+        }.pickerStyle(.segmented)
+    }
+}
+
+/// iOS has no split view for this sheet; the list and the document stack vertically.
+struct HSplitView<Content: View>: View {
+    let content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    var body: some View { VStack(alignment: .leading, spacing: 8) { content } }
+}
+
+struct AcknowledgementsButton: View {
+    let action: () -> Void
+    var body: some View {
+        Button("ライセンス…", action: action).buttonStyle(SoftGlassButtonStyle()).accessibilityIdentifier("showAcknowledgements")
+    }
+}
+
+/// The license page as a sheet. The app bundles the same LCMPLicense directory as macOS.
+public struct AcknowledgementsSheet: View {
+    private let root: URL
+    private let licenseRoot: URL
+    public init(resourceRoot: URL? = nil, licenseRoot: URL? = nil) {
+        let resources = Bundle.main.resourceURL ?? Bundle.main.bundleURL
+        root = resourceRoot ?? resources.appendingPathComponent("ThirdPartyLicenses")
+        self.licenseRoot = licenseRoot ?? resources.appendingPathComponent("LCMPLicense")
+    }
+    public var body: some View { AcknowledgementsView(root: root, licenseRoot: licenseRoot) }
+}
+#endif

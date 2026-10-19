@@ -3,13 +3,14 @@ import SwiftUI
 public struct LCMPDefaultGEQView: View {
     let driver: VisualizationDriver
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.geqAxisLabelSize) private var axisLabelSize
     public init(driver: VisualizationDriver) { self.driver = driver }
     public var body: some View {
         let snapshot = driver.snapshot
         let now = driver.drawTime
         Canvas { context, size in
             LCMPDefaultGEQRenderer.draw(context: context, size: size, snapshot: snapshot, now: now,
-                                       reduceMotion: reduceMotion)
+                                       reduceMotion: reduceMotion, axisLabelSize: axisLabelSize)
         }
         .overlay(alignment: .topLeading) {
             if snapshot.waitingForData {
@@ -28,10 +29,12 @@ public struct LCMPDefaultGEQView: View {
 public enum LCMPDefaultGEQRenderer {
     public static let background = Color(red: 5/255, green: 8/255, blue: 7/255)
     public static func draw(context original: GraphicsContext, size: CGSize, snapshot: SpectrumSnapshot,
-                            now: Double, reduceMotion: Bool = false) {
+                            now: Double, reduceMotion: Bool = false, axisLabelSize: CGFloat = 9) {
         let context = original
         context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(background))
-        let plot = CGRect(x: 18, y: 20, width: max(0, size.width - 36), height: max(0, size.height - 47))
+        // Larger axis labels take room from the plot's bottom edge.
+        let labelGrowth = max(0, axisLabelSize - 9)
+        let plot = CGRect(x: 18, y: 20, width: max(0, size.width - 36), height: max(0, size.height - 47 - labelGrowth * 1.5))
         let columnWidth = max(0, (plot.width - 7 * 15) / 16)
         let cellHeight = max(0, (plot.height - 23) / 24)
         guard columnWidth > 0, cellHeight > 0 else { return }
@@ -79,8 +82,13 @@ public enum LCMPDefaultGEQRenderer {
         for (label, x, anchor) in [("20 Hz", plot.minX, UnitPoint.leading),
                                     ("1k", plot.minX + plot.width * 0.5663, .center),
                                     ("20k", plot.maxX, .trailing)] {
-            context.draw(Text(label).font(.system(size: 9, design: .monospaced)).foregroundColor(axis),
-                         at: CGPoint(x: x, y: size.height - 11), anchor: anchor)
+            context.draw(Text(label).font(.system(size: axisLabelSize, design: .monospaced)).foregroundColor(axis),
+                         at: CGPoint(x: x, y: size.height - 11 - labelGrowth * 0.75), anchor: anchor)
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Point size of the 20 Hz / 1k / 20k labels. The macOS window uses 9.
+    @Entry var geqAxisLabelSize: CGFloat = 9
 }

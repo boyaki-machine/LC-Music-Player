@@ -1,5 +1,8 @@
 import Foundation
 import PlaybackCore
+#if os(iOS)
+import MediaPlayer
+#endif
 
 public struct ResolvedTrack {
     public var url: URL
@@ -12,26 +15,79 @@ public struct ResolvedTrack {
     func makeReference(_ url: URL) throws -> TrackReference
     func resolve(_ reference: TrackReference) throws -> ResolvedTrack
 }
-@MainActor public struct BookmarkFileReferences: FileReferenceProvider {
+/// A song of the Music library that is stored on the device and readable (no DRM).
+public struct MediaLibrarySong: Equatable, Sendable {
+    public var assetURL: URL
+    /// The length and the date added tell a replaced recording from the one that was measured.
+    public var duration: TimeInterval
+    public var dateAdded: Date
+    public init(assetURL: URL, duration: TimeInterval, dateAdded: Date) {
+        self.assetURL = assetURL; self.duration = duration; self.dateAdded = dateAdded
+    }
+}
+/// Finds songs of the Music library. Only iOS has one; tests supply their own.
+public protocol MediaLibraryLookup: Sendable {
+    func song(forPersistentID id: UInt64) -> MediaLibrarySong?
+}
+extension MediaLibraryLookup {
+    public func assetURL(forPersistentID id: UInt64) -> URL? { song(forPersistentID: id)?.assetURL }
+}
+public struct SystemMediaLibrary: MediaLibraryLookup {
     public init() {}
+    public func song(forPersistentID id: UInt64) -> MediaLibrarySong? {
+        #if os(iOS)
+        guard MPMediaLibrary.authorizationStatus() == .authorized else { return nil }
+        let query = MPMediaQuery.songs()
+        query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: id), forProperty: MPMediaItemPropertyPersistentID))
+        guard let item = query.items?.first, !item.hasProtectedAsset, !item.isCloudItem, let url = item.assetURL else { return nil }
+        return MediaLibrarySong(assetURL: url, duration: item.playbackDuration, dateAdded: item.dateAdded)
+        #else
+        return nil
+        #endif
+    }
+}
+
+@MainActor public struct BookmarkFileReferences: FileReferenceProvider {
+    // macOS bookmarks carry an explicit read-only security scope. iOS bookmarks of picked
+    // documents carry their access implicitly and still need start/stop around each use.
+    #if os(macOS)
+    private static let creation: URL.BookmarkCreationOptions = [.withSecurityScope, .securityScopeAllowOnlyReadAccess]
+    private static let resolution: URL.BookmarkResolutionOptions = [.withSecurityScope, .withoutUI, .withoutMounting]
+    #else
+    private static let creation: URL.BookmarkCreationOptions = []
+    private static let resolution: URL.BookmarkResolutionOptions = [.withoutUI]
+    #endif
+    private let mediaLibrary: any MediaLibraryLookup
+    public init(mediaLibrary: any MediaLibraryLookup = SystemMediaLibrary()) { self.mediaLibrary = mediaLibrary }
     public func beginAccess(_ url: URL) -> FileLease {
         let started = url.startAccessingSecurityScopedResource()
         return FileLease { if started { url.stopAccessingSecurityScopedResource() } }
     }
     public func makeReference(_ url: URL) throws -> TrackReference {
+        if url.scheme == SupportedAudio.mediaLibraryScheme {
+            let reference = TrackReference(bookmark: nil, lastKnownURL: url)
+            guard let id = reference.mediaItemID, mediaLibrary.assetURL(forPersistentID: id) != nil else { throw LibraryFailure.inaccessible }
+            return reference
+        }
         guard url.isFileURL else { throw LibraryFailure.inaccessible }
         let lease = beginAccess(url)
         defer { withExtendedLifetime(lease) {} }
         guard (try url.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true,
               FileManager.default.isReadableFile(atPath: url.path) else { throw LibraryFailure.inaccessible }
-        let data = try url.bookmarkData(options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+        let data = try url.bookmarkData(options: Self.creation,
                                         includingResourceValuesForKeys: nil, relativeTo: nil)
         return TrackReference(bookmark: data, lastKnownURL: url.standardizedFileURL)
     }
     public func resolve(_ reference: TrackReference) throws -> ResolvedTrack {
+        // A library song is looked up by its ID each time; it needs no file access scope.
+        if let id = reference.mediaItemID {
+            guard let url = mediaLibrary.assetURL(forPersistentID: id) else { throw LibraryFailure.unavailable }
+            var updated = reference; updated.lastKnownURL = url
+            return ResolvedTrack(url: url, reference: updated, lease: FileLease())
+        }
         guard let data = reference.bookmark else { throw LibraryFailure.unavailable }
         var stale = false
-        let url = try URL(resolvingBookmarkData: data, options: [.withSecurityScope, .withoutUI, .withoutMounting],
+        let url = try URL(resolvingBookmarkData: data, options: Self.resolution,
                           relativeTo: nil, bookmarkDataIsStale: &stale)
         let lease = beginAccess(url)
         guard (try url.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true,

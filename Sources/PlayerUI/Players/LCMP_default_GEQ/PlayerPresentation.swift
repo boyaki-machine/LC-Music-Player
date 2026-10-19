@@ -44,6 +44,15 @@ public final class PlayerPresentation {
             .flatMap(VisualizationDesign.init(rawValue:)) ?? .fluorescentLED
     }
     var activeVisualizationDriver: any PlayerVisualizationDriver { driver(for: visualizationDesign) }
+    /// Views currently showing the visualization. Turning an iPhone replaces the player view, and
+    /// the new view can appear before the old one disappears; only the last one to leave stops the drawing.
+    @ObservationIgnored private var visualizationHosts = 0
+    func visualizationHostAppeared() { visualizationHosts += 1 }
+    /// Returns true when no view shows the visualization any more.
+    func visualizationHostDisappeared() -> Bool {
+        visualizationHosts = max(0, visualizationHosts - 1)
+        return visualizationHosts == 0
+    }
     private func driver(for design: VisualizationDesign) -> any PlayerVisualizationDriver {
         switch design {
         case .fluorescentLED: visualizationDriver
