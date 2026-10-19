@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 # SwiftPM products are shared by these targets, even with make -j.
 .NOTPARALLEL:
-.PHONY: help release debug archive dmg test ios-build ios-test ios-sim ios-device
+.PHONY: help release debug archive dmg test ios-build ios-test ios-uitest ios-sim ios-device
 
 PYTHON ?= python3
 RELEASE_OUTPUT ?= build/release/LCMP.app
@@ -25,6 +25,7 @@ help:
 	  'make test     Tests without audio output' \
 	  'make ios-build   iPhone app for the simulator (unsigned): $(IOS_SIM_APP)' \
 	  'make ios-test    Shared-module tests on the iOS simulator' \
+	  'make ios-uitest  Touch tests of the iPhone app on the simulator' \
 	  'make ios-sim     Build, install and launch on the simulator' \
 	  'make ios-device  Build, sign, install and launch on a connected iPhone' \
 	  'Overrides: PYTHON, RELEASE_OUTPUT, DEBUG_OUTPUT, ARCHIVE, DMG_OUTPUT, DMG_APP,' \
@@ -69,6 +70,9 @@ ios-build:
 
 ios-test:
 	xcodebuild test -scheme LCMP-Package -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' -derivedDataPath build/ios/package
+
+ios-uitest:
+	$(IOS_XCODEBUILD) -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' -derivedDataPath build/ios/uitest test
 
 ios-sim: ios-build
 	xcrun simctl boot "$(IOS_SIMULATOR)" 2>/dev/null || true

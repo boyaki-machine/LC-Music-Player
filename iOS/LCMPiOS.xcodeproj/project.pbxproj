@@ -12,14 +12,26 @@
 		D2F82E789BB18BFA61272237 /* PlaybackCore in Frameworks */ = {isa = PBXBuildFile; productRef = 0DE2A57DACEA14B02F596219 /* PlaybackCore */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		4826DA2CEFC40EF34442E22A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 587A1B49B5AB316D83FDA137 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D0A81B549CE2D545BDF4D19F;
+			remoteInfo = LCMPiOS;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		F28EC6A971B6D99A6860A031 /* LCMP.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LCMP.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		2F307C2C863C655EAC19B0B7 /* LCMPiOSUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LCMPiOSUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B8A9AD91F0412797693F4DE7 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 		D48A0783EC3CC27D6BB84D0A /* LCMPiOS-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "LCMPiOS-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		C38B0364B98C08C81C45B14B /* LCMPiOS */ = {isa = PBXFileSystemSynchronizedRootGroup; path = LCMPiOS; sourceTree = "<group>"; };
+		C485924AD71516061617CBCC /* LCMPiOSUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; path = LCMPiOSUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -33,6 +45,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B885DAB0A53AF3AD1323C5B9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -42,6 +61,7 @@
 				B8A9AD91F0412797693F4DE7 /* Shared.xcconfig */,
 				D48A0783EC3CC27D6BB84D0A /* LCMPiOS-Info.plist */,
 				C38B0364B98C08C81C45B14B /* LCMPiOS */,
+				C485924AD71516061617CBCC /* LCMPiOSUITests */,
 				7DFC14F700E4D9195E324C97 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -50,6 +70,7 @@
 			isa = PBXGroup;
 			children = (
 				F28EC6A971B6D99A6860A031 /* LCMP.app */,
+				2F307C2C863C655EAC19B0B7 /* LCMPiOSUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,6 +104,27 @@
 			productReference = F28EC6A971B6D99A6860A031 /* LCMP.app */;
 			productType = "com.apple.product-type.application";
 		};
+		2005CF78C928D40CAC9D2641 /* LCMPiOSUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6F947A0621D637E945B85E4C /* Build configuration list for PBXNativeTarget "LCMPiOSUITests" */;
+			buildPhases = (
+				4978BF20864858BBCAC1EC8E /* Sources */,
+				B885DAB0A53AF3AD1323C5B9 /* Frameworks */,
+				72A9C2A301A8CE0A0751521D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4732771089DE1D3378BE778E /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C485924AD71516061617CBCC /* LCMPiOSUITests */,
+			);
+			name = LCMPiOSUITests;
+			productName = LCMPiOSUITests;
+			productReference = 2F307C2C863C655EAC19B0B7 /* LCMPiOSUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -95,6 +137,10 @@
 				TargetAttributes = {
 					D0A81B549CE2D545BDF4D19F = {
 						CreatedOnToolsVersion = 27.0;
+					};
+					2005CF78C928D40CAC9D2641 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = D0A81B549CE2D545BDF4D19F;
 					};
 				};
 			};
@@ -116,12 +162,20 @@
 			projectRoot = "";
 			targets = (
 				D0A81B549CE2D545BDF4D19F /* LCMPiOS */,
+				2005CF78C928D40CAC9D2641 /* LCMPiOSUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		FDDBA9192E6B1B4B31A7B44C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		72A9C2A301A8CE0A0751521D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -161,7 +215,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4978BF20864858BBCAC1EC8E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4732771089DE1D3378BE778E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D0A81B549CE2D545BDF4D19F /* LCMPiOS */;
+			targetProxy = 4826DA2CEFC40EF34442E22A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		A7A4C420A04DCEDD7DD0CE11 /* Debug */ = {
@@ -202,6 +271,30 @@
 			};
 			name = Release;
 		};
+		AD392441FB55CE8C7D4F806F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B8A9AD91F0412797693F4DE7 /* Shared.xcconfig */;
+			buildSettings = {
+				PRODUCT_NAME = LCMPiOSUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LCMP_BUNDLE_PREFIX).player.uitests";
+				INFOPLIST_FILE = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				TEST_TARGET_NAME = LCMPiOS;
+			};
+			name = Debug;
+		};
+		4BD0E5BB5F5D616841605FB6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = B8A9AD91F0412797693F4DE7 /* Shared.xcconfig */;
+			buildSettings = {
+				PRODUCT_NAME = LCMPiOSUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = "$(LCMP_BUNDLE_PREFIX).player.uitests";
+				INFOPLIST_FILE = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				TEST_TARGET_NAME = LCMPiOS;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -219,6 +312,15 @@
 			buildConfigurations = (
 				878743E93E83238ECEE7E4B3 /* Debug */,
 				38B687BEF1339818DB155C43 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		6F947A0621D637E945B85E4C /* Build configuration list for PBXNativeTarget "LCMPiOSUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AD392441FB55CE8C7D4F806F /* Debug */,
+				4BD0E5BB5F5D616841605FB6 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

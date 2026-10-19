@@ -30,7 +30,7 @@
 | 音源のブックマーク（`BookmarkFileReferences`） | 読み取り専用のsecurity-scoped bookmark | オプションなしのブックマーク（選択時のアクセス権を暗黙に持つ） |
 | 「ミュージック」のライブラリ（`SystemMediaLibrary`） | なし（ライブラリの曲は参照切れ） | `MPMediaQuery`でpersistent IDから曲を探す |
 | 出力の変化の監視（`PlaylistOutputObserver`） | Core Audio HALの既定出力・サンプルレート・ストリーム構成 | `AVAudioSession`の経路変更の通知 |
-| 入力部品（シーク・音量・行の操作・クリック・ツールチップ等） | AppKitの`NSViewRepresentable`（`NativeControls.swift`ほか） | 同じ型名と引数のSwiftUIの部品（`TouchControls.swift`） |
+| 入力部品（シーク・音量・行の操作・クリック・ツールチップ等） | AppKitの`NSViewRepresentable`（`NativeControls.swift`ほか） | 同じ型名と引数の部品（`TouchControls.swift`。行のクリックと並べ替えはUIKitの`UIViewRepresentable`） |
 | ライセンスの表示 | 専用のウィンドウ（`AcknowledgementsWindowController`） | シート（`AcknowledgementsSheet`） |
 | Escapeで閉じる | `onExitCommand` | ハードウェアキーボードのEscape（`onKeyPress`） |
 | 設定の説明文 | 既定の出力デバイスとキーボードショートカット | 現在の出力先（ショートカットの説明は出さない） |
@@ -92,6 +92,12 @@
 - 再生前処理の`SourceFingerprint`は、ファイルの属性を読まず、asset URLそのものを識別にする（asset URLは1つの曲を指す）。
 - 音源一覧では、asset URLが曲ごとに異なっても、ライブラリの曲をすべて1つの「ミュージック」のまとまりに入れる。
 
+### プレイリストの行の操作
+
+- 行のタップ・ダブルタップ・長押しは、行に重ねたUIKitのviewのジェスチャー認識（`UITapGestureRecognizer`・`UILongPressGestureRecognizer`、長押しは0.35秒）で受ける。タップはダブルタップの失敗を待ってから選択として扱う。
+- 長押しの成立前に指が動くと、タップと長押しは失敗し、一覧のスクロールが動く。成立した後の指の動きは行の移動として扱い、ウィンドウ座標の縦の移動量を並べ替えに渡す。
+- SwiftUIのジェスチャー（長押しの後にドラッグを続ける形。`UIGestureRecognizerRepresentable`で付けた長押しを含む）は、行の上から始めたスクロールを妨げるため使わない。
+
 ### 画面の回転
 
 - 縦置きと横置きは別のプレイヤーの画面を作るため、回転で画面が入れ替わる。新しい画面が出てから古い画面が消える順序でも描画を止めないよう、`PlayerPresentation`が可視化を表示している画面の数を数え、最後の1つが消えたときだけ描画を止める。
@@ -103,6 +109,7 @@
 - Info.plistはビルド設定から生成し、`iOS/LCMPiOS-Info.plist`の項目（バックグラウンドの音声、URLスキーム`lcmp`）を合わせる。
 - 最後のビルドの段で`scripts/ios_resources.py`を実行し、LICENSE/NOTICEを`LCMPLicense/`へ、空の依存の索引を`ThirdPartyLicenses/`へ入れ、Gitの履歴から決めたバージョンをInfo.plistへ書き込む。依存を加えたときは、この段で依存のnoticeも入れる必要があり、スクリプトはPackage.resolvedがあると失敗して知らせる。
 - パッケージにもmacOS版の実行ファイル`LCMP`があるため、iPhoneのターゲットとスキームの名前は`LCMPiOS`とする（アプリの名前は`LCMP.app`）。
+- 指の操作のテストはUIテストのターゲット`LCMPiOSUITests`（`iOS/LCMPiOSUITests/`）に置き、共有のスキーム`LCMPiOS`のテストに含める。
 
 ## 5. 検証
 
@@ -111,6 +118,7 @@
 | 共用モジュールのテストがiOSでも成功する（測定キャッシュの識別を含む） | `make ios-test` |
 | macOSの寸法・テストが変わらない | `make test`（`PlayerFrameTests`がウィンドウの寸法を固定する） |
 | 各枠の寸法・ボタンが枠に収まる | `PlayerFrameTests` |
+| 項目の多いプレイリストを行の上から指でスクロールでき、タップ・ダブルタップ・長押しの並べ替えも動く | `make ios-uitest`（`PlaylistTouchTests`。シミュレータで40曲を登録し、指の操作を再現する。`-LCMPLibraryFile`で専用のライブラリを使う） |
 | 回転で画面が入れ替わっても描画が止まらない | `VisualizationHostTests`（出る・消える順序の両方） |
 | ライブラリの曲の参照・登録・解決・M3U8・音源のまとまり・測定キャッシュの識別 | `MediaLibraryTests`・`SourceGroupTests`・`MediaLibraryIdentityTests`（ライブラリを差し替えてmacOSでも実行する） |
 | 提供元の識別で、別のprocessorでも測定結果を再利用し、revisionが変われば測り直す | `MeasurementCacheTests` |

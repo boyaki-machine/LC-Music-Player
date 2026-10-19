@@ -195,6 +195,7 @@ iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwif
 | --- | --- |
 | `make ios-build` | シミュレータ向けにビルドします（署名なし）。成果物は`build/ios/app/Build/Products/Debug-iphonesimulator/LCMP.app`です。 |
 | `make ios-test` | 共用モジュールのテストをiOSシミュレータで実行します。AppKitの画面のテストはmacOSだけで実行します。 |
+| `make ios-uitest` | アプリをシミュレータで起動し、指の操作のテスト（`iOS/LCMPiOSUITests/`）を実行します。 |
 | `make ios-sim` | ビルドしてシミュレータに入れ、起動します。 |
 | `make ios-device` | 署名して実機向けにビルドし、接続したiPhoneに入れて起動します。 |
 

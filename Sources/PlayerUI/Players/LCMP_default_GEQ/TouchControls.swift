@@ -188,30 +188,47 @@ struct RefinedScrollStyle: UIViewRepresentable {
 
 /// A tap is click count 1 and a double tap is 2, matching the macOS row semantics.
 /// A long press lifts the row; the following drag reorders it.
-struct PlaylistClickSurface: View {
+/// The gestures are UIKit recognizers on a plain view, as table cells have: a tap or a long press
+/// fails when the finger moves first, so a flick that starts on a row scrolls the list. SwiftUI
+/// gestures (a long press sequenced before a drag, also as a UIGestureRecognizerRepresentable)
+/// kept the touch from the enclosing scroll view, and the list could not be scrolled from its rows.
+struct PlaylistClickSurface: UIViewRepresentable {
     let entryID: UUID
     var drag: ((PlaylistRowDrag) -> Void)? = nil
     let click: (Int) -> Void
-    @State private var lifted = false
-    var body: some View {
-        let surface = Color.clear.contentShape(Rectangle())
-            .onTapGesture(count: 2) { click(2) }
-            .onTapGesture(count: 1) { click(1) }
-        if let drag {
-            surface.gesture(LongPressGesture(minimumDuration: 0.35)
-                .sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
-                .onChanged { value in
-                    guard case .second(true, let movement) = value else { return }
-                    lifted = true
-                    drag(.moved(movement?.translation.height ?? 0))
-                }
-                .onEnded { value in
-                    defer { lifted = false }
-                    if case .second(true, let movement?) = value { drag(.ended(movement.translation.height)) }
-                    else if lifted { drag(.cancelled) }
-                })
-        } else {
-            surface
+    func makeUIView(context: Context) -> Surface { Surface() }
+    func updateUIView(_ view: Surface, context: Context) {
+        view.click = click; view.drag = drag; view.press.isEnabled = drag != nil
+    }
+    final class Surface: UIView {
+        var click: (Int) -> Void = { _ in }
+        var drag: ((PlaylistRowDrag) -> Void)?
+        let press = UILongPressGestureRecognizer()
+        private var start: CGFloat = 0
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            backgroundColor = .clear
+            let double = UITapGestureRecognizer(target: self, action: #selector(doubleTapped))
+            double.numberOfTapsRequired = 2
+            let single = UITapGestureRecognizer(target: self, action: #selector(tapped))
+            single.require(toFail: double)
+            press.minimumPressDuration = 0.35
+            press.addTarget(self, action: #selector(pressed(_:)))
+            [double, single, press].forEach(addGestureRecognizer)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+        @objc private func tapped() { click(1) }
+        @objc private func doubleTapped() { click(2) }
+        @objc private func pressed(_ recognizer: UILongPressGestureRecognizer) {
+            // Window coordinates: the lifted row moves with the finger, so its own space would not do.
+            let y = recognizer.location(in: nil).y
+            switch recognizer.state {
+            case .began: start = y; drag?(.moved(0))
+            case .changed: drag?(.moved(y - start))
+            case .ended: drag?(.ended(y - start))
+            case .cancelled, .failed: drag?(.cancelled)
+            default: break
+            }
         }
     }
 }

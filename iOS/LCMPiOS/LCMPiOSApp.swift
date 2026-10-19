@@ -29,7 +29,14 @@ struct LCMPiOSApp: App {
         // Music library songs keep their measurements too, identified by the library's values.
         var cache = MeasurementCacheConfiguration.application
         cache.sourceIdentity = MediaLibraryMeasurementSourceIdentity()
-        library = LibraryController(playback: playback, preprocessingEnabled: true, playlistPreprocessingEnabled: true,
+        #if DEBUG
+        // UI tests: `-LCMPLibraryFile <path>` keeps their library apart from the one in use.
+        let store = JSONLibraryStore(url: UserDefaults.standard.string(forKey: "LCMPLibraryFile")
+            .map { URL(fileURLWithPath: $0) } ?? JSONLibraryStore.defaultURL)
+        #else
+        let store = JSONLibraryStore(url: JSONLibraryStore.defaultURL)
+        #endif
+        library = LibraryController(playback: playback, store: store, preprocessingEnabled: true, playlistPreprocessingEnabled: true,
                                     preprocessor: AudioPreprocessor(cache: cache))
         session = AudioSessionController(playback: playback, library: library)
         library.restore()
