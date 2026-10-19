@@ -36,7 +36,7 @@
 | 入力部品（シーク・音量・行の操作・クリック・ツールチップ等） | AppKitの`NSViewRepresentable`（`NativeControls.swift`ほか） | 同じ型名と引数の部品（`TouchControls.swift`。行のクリックと並べ替えはUIKitの`UIViewRepresentable`） |
 | ライセンスの表示 | 専用のウィンドウ（`AcknowledgementsWindowController`） | シート（`AcknowledgementsSheet`） |
 | Escapeで閉じる | `onExitCommand` | ハードウェアキーボードのEscape（`onKeyPress`） |
-| 設定の説明文 | 既定の出力デバイスとキーボードショートカット | 現在の出力先（ショートカットの説明は出さない） |
+| 設定の説明文 | キーボードショートカットの説明を出す | ショートカットの説明は出さない |
 | アプリの入口（`LCMPApp`） | AppKitのアプリとウィンドウ | 何もしない入口（iPhoneのアプリは`iOS/LCMPiOS/`） |
 
 ### 画面の枠
@@ -150,6 +150,7 @@
 | ビルドの段がライセンスとバージョンを入れる | `scripts/test_ios_resources.py` |
 | 再生の状態との対応、記号の点灯、App Groupがないときの状態 | `ControlSurfacesTests`（macOSとiOSで実行。記号は画面外に描いて緑の画素を数える） |
 | ☰のリンクで拡張画面が開く | `make ios-uitest`（`ControlSurfaceTests`） |
+| 音源タブの登録ボタン（ファイル・フォルダ・ミュージック）が1行に同じ高さで並び、名前が折り返さない | `make ios-uitest`（`SourceButtonsTests`。幅の狭い機種（iPhone SE、375pt）では、シミュレータの画面で目視する） |
 | ウィジェットの見た目 | DEBUGの起動引数`-LCMPControlSurfaces YES`で各状態の見本を並べて撮影し、UI・UX設計と見比べる |
 | 縦置き・横置き・拡張を閉じた全画面の配置 | シミュレータで起動引数（`-LCMPImportPaths`・`-LCMPAutoplay`・`-LCMPOrientation`・`-LCMPExtension`）を付けて撮影し、UI・UX設計と見比べる |
 | バックグラウンドで再生が続く | 再生中に他のアプリへ切り替え、音が続くことと、アプリがMediaPlaybackの権利を持ち続けることを確かめる |
