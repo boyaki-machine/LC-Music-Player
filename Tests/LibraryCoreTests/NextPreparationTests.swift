@@ -206,6 +206,54 @@ private actor HeldPreprocessor: AudioPreprocessing {
         Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
     }
 
+    /// A slow preparation shows the notice once the delay has passed; it goes away when done.
+    @Test func slowPreparationShowsTheNoticeAfterTheDelay() async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let url = try audioFile(fixture.root, name: "a.wav", duration: 1)
+        let worker = HeldPreprocessor(url, prefix: true)
+        let model = LibraryController(playback: PlaybackController(), store: MemoryStore(), references: TestReferences(),
+            preprocessingEnabled: true, preferences: MemoryPreferences(), preprocessor: worker,
+            preparationNoticeDelay: .milliseconds(80))
+        defer { model.shutdown() }
+        let list = try #require(model.document.currentPlaylistID)
+        await model.importFiles([url], into: list)
+        let entry = try #require(model.playlist(list)?.entries.first)
+        model.clickEntry(entry.id, in: list, clickCount: 1)
+        try await waitAsync { await worker.waiting }
+        #expect(model.isPreparing)
+        try await wait { model.showsPreparationNotice }
+        await worker.release()
+        try await wait { !model.isPreparing }
+        #expect(!model.showsPreparationNotice)
+    }
+
+    /// A preparation shorter than the delay never shows the notice.
+    @Test func quickPreparationNeverShowsTheNotice() async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let url = try audioFile(fixture.root, name: "a.wav", duration: 1)
+        let worker = HeldPreprocessor(url, prefix: true)
+        await worker.release()
+        let model = LibraryController(playback: PlaybackController(), store: MemoryStore(), references: TestReferences(),
+            preprocessingEnabled: true, preferences: MemoryPreferences(), preprocessor: worker,
+            preparationNoticeDelay: .seconds(2))
+        defer { model.shutdown() }
+        let list = try #require(model.document.currentPlaylistID)
+        await model.importFiles([url], into: list)
+        let entry = try #require(model.playlist(list)?.entries.first)
+        model.clickEntry(entry.id, in: list, clickCount: 1)
+        #expect(model.isPreparing)
+        var shown = false
+        let deadline = ContinuousClock.now + .seconds(5)
+        while model.isPreparing, ContinuousClock.now < deadline {
+            shown = shown || model.showsPreparationNotice
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        #expect(!model.isPreparing && !shown)
+        // The cancelled timer does not show it late either.
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!model.showsPreparationNotice)
+    }
+
     private func wait(_ predicate: () -> Bool) async throws {
         try await waitAsync { predicate() }
     }

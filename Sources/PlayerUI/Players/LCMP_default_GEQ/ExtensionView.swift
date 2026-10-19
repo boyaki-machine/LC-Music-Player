@@ -171,7 +171,7 @@ public struct ExtensionView: View {
 
                 }
             }.font(.ui(12)).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            if library.isPreparing { Text(library.preparationStage ?? "再生を準備しています…").font(.ui(11)) }
+            if library.showsPreparationNotice { Text(library.preparationStage ?? "再生を準備しています…").font(.ui(11)) }
             if library.isBusy { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text("音源を登録しています…").font(.ui(11)) } }
             if let notice = library.error ?? library.message ?? playback.error?.localizedDescription {
                 HStack(alignment: .top, spacing: 4) {

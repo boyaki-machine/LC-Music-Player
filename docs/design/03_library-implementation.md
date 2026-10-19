@@ -111,6 +111,7 @@
 アプリは前処理を有効にしてLibraryControllerを作り、音源の確認と再生開始のデコーダI/Oを背景へ渡す。前処理の動作（先頭PCM、全曲測定の巡回と優先順位、leaseの上限）は[再生前処理の実装設計](04_preprocessing-implementation.md)に記載する。
 
 - `selectEntry`の戻り値trueは、要求を受け付けたことを示す。選択の確定は`isPreparing`がfalseになるまで待つ。
+- `showsPreparationNotice`は、`isPreparing`が真になってから一定時間（既定0.3秒、初期化の`preparationNoticeDelay`）続いたときだけ真になり、準備が終われば偽に戻る。画面の状態文はこれに従い、停止の可否は`isPreparing`に従う。
 - 確定の前に対象と参照を再確認し、保存に成功してから選択を公開する。
 - 停止・別の選択・終了は世代を更新して古い要求を取り消す。
 - 利用者の明示的な選択が準備中なら、自然送りはその要求を上書きしない。
@@ -188,6 +189,7 @@
 - 実ブックマークの改名・削除、重複エントリ、参照の修復が要件どおりに扱われ、元ファイルが変わらない。
 - 次曲送りと遅延通知、M3U8の往復、ネイティブ描画と初期スクロールが動作する。
 - ランダム再生の順序が全エントリの順列で、各エントリが各位置に偏りなく現れ、前後・自然送り・編集・設定の保存が要件どおりに動く。
+- 準備の状態文は、0.3秒より短い準備では出ず、長い準備では遅れて出て、終われば消える（`NextPreparationTests`の`quickPreparationNeverShowsTheNotice`・`slowPreparationShowsTheNoticeAfterTheDelay`）。
 
 ### 自動テスト
 
