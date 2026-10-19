@@ -104,7 +104,7 @@
 
 ### 設定タブ
 
-- Player UIは再生の開始・前後の曲・停止をLibraryControllerへ渡し、停止は準備中にも有効にする。拡張画面は`isPreparing`を表示する。
+- Player UIは再生の開始・前後の曲・停止をLibraryControllerへ渡し、停止は準備中にも有効にする。拡張画面は、準備が0.3秒を超えたとき（`showsPreparationNotice`）だけ状態文を表示する。
 - 設定タブはScrollView内に、最大音量測定のToggle、説明、測定状態・dBFSまたは無音を表示し、`setMeasuresMaximumVolume(_:)`で変更する。最小の240ptでも説明を折り返し、残りはスクロールで読める構成にする。
 - 音量自動調整のToggleと目標LUFSのPickerも置き、`setNormalizesVolume`／`setNormalizationTarget`へ操作を渡す。`levelMeasurement`に基づくLUFS/true peak、`playback.normalizationPlan`の補正dBと制限の理由を表示し、`preparationStage`で全曲測定中を案内する。
 - 自動調整の設定変更による一時停止と、再生を続ける手動音量の操作を区別する。測定・補正の契約は[音量自動調整の実装設計](06_volume-normalization-implementation.md)に記載する。

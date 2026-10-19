@@ -17,7 +17,14 @@ import AudioProcessingCore
     public let playback: PlaybackController
     @ObservationIgnored private let store: any LibraryPersistence
     @ObservationIgnored private let references: any FileReferenceProvider
-    public private(set) var isPreparing = false
+    public private(set) var isPreparing = false {
+        didSet { if isPreparing != oldValue { schedulePreparationNotice() } }
+    }
+    /// The "preparing" notice appears only when preparation lasts longer than this, so a quick
+    /// song change shows nothing. Stopping stays available for the whole preparation.
+    public private(set) var showsPreparationNotice = false
+    @ObservationIgnored private let preparationNoticeDelay: Duration
+    @ObservationIgnored private var preparationNoticeTask: Task<Void, Never>?
     public private(set) var peakMeasurement: PeakMeasurementState = .disabled
     public private(set) var measuresMaximumVolume = false
     public private(set) var normalizesVolume = false
@@ -55,8 +62,10 @@ import AudioProcessingCore
                 references: any FileReferenceProvider = BookmarkFileReferences(),
                 preprocessingEnabled: Bool = false, playlistPreprocessingEnabled: Bool = false, preferences: any PreferenceStoring = UserDefaults.standard,
                 preprocessor: any AudioPreprocessing = AudioPreprocessor.shared,
-                random: any RandomNumberGenerator = SystemRandomNumberGenerator()) {
+                random: any RandomNumberGenerator = SystemRandomNumberGenerator(),
+                preparationNoticeDelay: Duration = .milliseconds(300)) {
         self.playback = playback; self.store = store; self.references = references
+        self.preparationNoticeDelay = preparationNoticeDelay
         self.preprocessor = preprocessor; self.random = AnyRandomNumberGenerator(random)
         self.preprocessingEnabled = preprocessingEnabled; self.preferences = preferences
         if preprocessingEnabled && playlistPreprocessingEnabled {
@@ -536,6 +545,16 @@ extension LibraryController {
     // Ownership of a prepared prefix, measurement and file lease moves only on the main actor;
     // every cancelled Task is chained into backgroundRetirement before new scoped access begins.
 
+    private func schedulePreparationNotice() {
+        preparationNoticeTask?.cancel(); preparationNoticeTask = nil
+        guard isPreparing else { showsPreparationNotice = false; return }
+        let delay = preparationNoticeDelay
+        preparationNoticeTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self, self.isPreparing else { return }
+            self.showsPreparationNotice = true
+        }
+    }
     private func cancelMeasurement() {
         measurementCancellation?.cancel(); measurementCancellation = nil
         measurementTask?.cancel(); measurementTask = nil; measurementID = UUID()

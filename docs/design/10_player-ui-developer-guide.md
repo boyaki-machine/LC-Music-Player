@@ -112,7 +112,7 @@ flowchart LR
 | アプリ → メイン画面 | `PlayerView(playback:presentation:library:chooseFile:toggleExtension:)` | 再生・ライブラリ・画面の状態を所有して渡す。ファイル選択とウィンドウ操作はclosureで渡す |
 | アプリ → 拡張画面 | `ExtensionView`、`LibraryActions`、`resizeExtension` closure | ファイル選択・修復・M3U8の入出力とAppKitのウィンドウ変更を担当する |
 | 画面 → 再生 | `PlaybackController` | `togglePlayPause()`、`stop()`、`seek(to:)`、`setVolume(_:)`、`toggleMute()`等の公開操作を使う |
-| 画面 → ライブラリ | `LibraryController` | 再生開始・停止・前後の曲・編集・取り込みを公開操作へ渡す。`isPreparing`と`peakMeasurement`を表示し、測定の設定は`setMeasuresMaximumVolume(_:)`で変更する |
+| 画面 → ライブラリ | `LibraryController` | 再生開始・停止・前後の曲・編集・取り込みを公開操作へ渡す。準備中の状態文は`showsPreparationNotice`、停止の可否は`isPreparing`で決め、`peakMeasurement`を表示し、測定の設定は`setMeasuresMaximumVolume(_:)`で変更する |
 | 画面 → 解析の購読 | `PlaybackController.configureAnalysis(_:)` | 表示するデザインの`AnalysisConfiguration`を設定し、非表示時はnilで解除する |
 | 再生 → 画面 | `analysisFrame`、`analysisResetID`、`state` | 最新のフレームを渡し、状態・取消IDの変更を可視化へ反映する |
 | 画面 → デザインの選択 | `PlayerPresentation.setVisualizationDesign(_:)` | 表示タブから呼ぶ。旧デザインのdriverを止め、選択を`UserDefaults`へ保存する |
