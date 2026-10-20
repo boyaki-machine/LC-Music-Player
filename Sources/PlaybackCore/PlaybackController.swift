@@ -31,6 +31,8 @@ public final class PlaybackController {
     @ObservationIgnored private var volumeBeforeMute: Float = 0.25
     @ObservationIgnored public var onActivityChange: (@MainActor () -> Void)?
     @ObservationIgnored public var onNaturalFinish: (@MainActor () -> Void)?
+    /// Called after the app volume or mute changes, including changes made by code.
+    @ObservationIgnored public var onVolumeChange: (@MainActor () -> Void)?
 
     @ObservationIgnored private var backend: (any PlaybackBackend)?
     @ObservationIgnored private var lease: FileLease?
@@ -194,6 +196,7 @@ public final class PlaybackController {
         isMuted = false
         if volume > 0 { volumeBeforeMute = volume }
         backend?.volume = volume
+        onVolumeChange?()
     }
 
     public func toggleMute() {
@@ -206,6 +209,7 @@ public final class PlaybackController {
             volume = 0
         }
         backend?.volume = volume
+        onVolumeChange?()
     }
 
     /// The UI previews locally and commits once. Seeking never starts idle audio.

@@ -284,10 +284,17 @@ public struct ExtensionView: View {
             Spacer(minLength: 0)
         case .add:
             header("「\(viewed?.name ?? "")」へ曲を追加") { screen = .list }
-            Text("ライブラリから選択").foregroundStyle(.secondary)
+            let addedIDs = Set(viewed?.entries.map(\.trackID) ?? [])
+            HStack(spacing: 0) {
+                Text("ライブラリから選択").foregroundStyle(.secondary); Spacer()
+                HideAddedToggle(isOn: presentation.hidesAddedTracks) {
+                    presentation.setHidesAddedTracks(!presentation.hidesAddedTracks)
+                    if presentation.hidesAddedTracks { checked.subtract(addedIDs) }
+                }
+            }
             scrolled {
-                SourceFolderSections(tracks: library.document.tracks) { track in
-                    let added = viewed?.entries.contains(where: { $0.trackID == track.id }) == true
+                SourceFolderSections(tracks: library.document.tracks, hidden: presentation.hidesAddedTracks ? addedIDs : []) { track in
+                    let added = addedIDs.contains(track.id)
                     PlaylistTrackChoice(name: track.name, added: added,
                         selected: Binding(get: { checked.contains(track.id) }, set: { if $0 { checked.insert(track.id) } else { checked.remove(track.id) } }))
                         .frame(minHeight: 32)

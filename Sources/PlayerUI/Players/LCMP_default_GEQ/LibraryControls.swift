@@ -205,6 +205,21 @@ struct CompactLabelStyle: LabelStyle {
 }
 /// Shuffle mode toggle. The pictogram glows softly like an LED while shuffle is on and stays
 /// near-dark while playback follows the playlist order.
+/// Hides or shows the songs already in the playlist on the add screen; lit while they are hidden.
+struct HideAddedToggle: View {
+    let isOn: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isOn ? "eye.slash" : "eye").font(.ui(13, weight: .medium))
+                .foregroundStyle(isOn ? ShuffleToggle.litColor : .white.opacity(0.45))
+                .shadow(color: isOn ? ShuffleToggle.litColor.opacity(0.6) : .clear, radius: 4)
+                .frame(width: 32, height: 28).contentShape(Rectangle()).padding(.vertical, -6)
+        }.buttonStyle(.plain).help("追加済みの曲を隠す").accessibilityLabel("追加済みの曲を隠す")
+            .accessibilityValue(isOn ? "オン" : "オフ").accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
 struct ShuffleToggle: View {
     static let litColor = Color(red: 0.62, green: 0.91, blue: 0.74)
     let isOn: Bool

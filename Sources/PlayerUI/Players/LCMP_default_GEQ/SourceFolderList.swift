@@ -32,6 +32,15 @@ struct SourceFolderGroup: Identifiable {
             .map { Self(directory: $0.key, tracks: $0.value) }
             .sorted { ($0.directory?.path ?? "").localizedStandardCompare($1.directory?.path ?? "") == .orderedAscending }
     }
+    /// Groups every track first and then leaves out the hidden ones, so hiding tracks never moves
+    /// the rest into another group. A group with no visible track is left out.
+    static func groups(_ tracks: [LibraryTrack], hiding hidden: Set<UUID>) -> [Self] {
+        guard !hidden.isEmpty else { return groups(tracks) }
+        return groups(tracks).compactMap { group in
+            let visible = group.tracks.filter { !hidden.contains($0.id) }
+            return visible.isEmpty ? nil : Self(directory: group.directory, tracks: visible)
+        }
+    }
 }
 
 struct SourceFolderList: View {
@@ -62,11 +71,13 @@ struct SourceFolderSections<Row: View>: View {
     let tracks: [LibraryTrack]
     /// Shows a remove button on real folders. The default group has none against mistaken taps.
     var removeFolder: ((SourceFolderGroup) -> Void)? = nil
+    /// Tracks left out of the list, such as those already in the playlist being added to.
+    var hidden: Set<UUID> = []
     @ViewBuilder var row: (LibraryTrack) -> Row
     @State private var expanded: Set<String> = []
     var body: some View {
         LazyVStack(alignment: .leading, spacing: 10) {
-            ForEach(SourceFolderGroup.groups(tracks)) { group in
+            ForEach(SourceFolderGroup.groups(tracks, hiding: hidden)) { group in
                 DisclosureGroup(isExpanded: Binding(get: { expanded.contains(group.id) }, set: { open in
                     if open { expanded.insert(group.id) } else { expanded.remove(group.id) }
                 })) {
@@ -93,6 +104,7 @@ struct SourceFolderSections<Row: View>: View {
                 }.tint(.white.opacity(0.6))
             }
             if tracks.isEmpty { Text("ファイルやフォルダを登録してください。").foregroundStyle(.secondary).padding(.vertical, 16) }
+            else if tracks.allSatisfy({ hidden.contains($0.id) }) { Text("未追加の曲はありません。").foregroundStyle(.secondary).padding(.vertical, 16) }
         }
     }
 }

@@ -34,6 +34,7 @@ struct LCMPiOSApp: App {
     let presentation = PlayerPresentation()
     @ObservationIgnored private var session: AudioSessionController?
     @ObservationIgnored private var surfaces: ControlSurfaceController?
+    @ObservationIgnored private var deviceVolume: DeviceVolumeMemory?
 
     init() {
         // Music library songs keep their measurements too, identified by the library's values.
@@ -49,6 +50,7 @@ struct LCMPiOSApp: App {
         library = LibraryController(playback: playback, store: store, preprocessingEnabled: true, playlistPreprocessingEnabled: true,
                                     preprocessor: AudioPreprocessor(cache: cache))
         session = AudioSessionController(playback: playback, library: library)
+        deviceVolume = DeviceVolumeMemory(playback: playback, system: AudioSessionOutputVolume(setter: SystemVolumeSlider.shared.set))
         library.restore()
         surfaces = ControlSurfaceController(playback: playback)
         // The buttons of the widgets run here, even with the app in the background.
