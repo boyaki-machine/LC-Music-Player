@@ -22,14 +22,21 @@ private func playlist(_ count: Int) -> MusicPlaylist {
     MusicPlaylist(name: "list", entries: (0..<count).map { _ in PlaylistEntry(trackID: UUID()) })
 }
 
-@Suite struct ShuffleOrderTests {
-    @Test func orderIsPermutationStartingAtCurrent() {
+/// Plays one whole cycle with the same picks as playback: a random first entry, then random unplayed entries.
+private func cycleOrder(_ list: MusicPlaylist, first: UUID? = nil, using random: inout some RandomNumberGenerator) -> [UUID] {
+    var cycle = ShuffleCycle(playlistID: list.id, first: first ?? list.entries.randomElement(using: &random)!.id)
+    while let pick = cycle.randomUnplayed(in: list, using: &random) { cycle.record(pick, keepsPosition: true) }
+    return cycle.played
+}
+
+@Suite struct ShuffleCycleTests {
+    @Test func cycleIsPermutationStartingAtTheFirstEntry() {
         var random = SplitMix64(seed: 1)
         let list = playlist(30)
         for first in [nil, list.entries[0].id, list.entries[17].id] {
-            let order = ShuffleOrder(list, first: first, using: &random)
-            #expect(order.entries.count == 30 && Set(order.entries) == Set(list.entries.map(\.id)))
-            if let first { #expect(order.entries[0] == first) }
+            let order = cycleOrder(list, first: first, using: &random)
+            #expect(order.count == 30 && Set(order) == Set(list.entries.map(\.id)))
+            if let first { #expect(order[0] == first) }
         }
     }
 
@@ -38,7 +45,7 @@ private func playlist(_ count: Int) -> MusicPlaylist {
         let list = playlist(6), ids = list.entries.map(\.id), trials = 60_000
         var counts = Array(repeating: Array(repeating: 0, count: 6), count: 6)
         for _ in 0..<trials {
-            for (position, id) in ShuffleOrder(list, first: nil, using: &random).entries.enumerated() {
+            for (position, id) in cycleOrder(list, using: &random).enumerated() {
                 counts[ids.firstIndex(of: id)!][position] += 1
             }
         }
@@ -53,16 +60,16 @@ private func playlist(_ count: Int) -> MusicPlaylist {
         var random = SplitMix64(seed: 3)
         let list = playlist(4), trials = 48_000
         var counts: [[UUID]: Int] = [:]
-        for _ in 0..<trials { counts[ShuffleOrder(list, first: nil, using: &random).entries, default: 0] += 1 }
+        for _ in 0..<trials { counts[cycleOrder(list, using: &random), default: 0] += 1 }
         let expected = Double(trials) / 24
         #expect(counts.count == 24)
         #expect(counts.values.allSatisfy { abs(Double($0) - expected) < expected * 0.1 })
     }
 
-    @Test func repeatedShufflesDoNotRepeatOrSettleIntoTheListOrder() {
+    @Test func repeatedCyclesDoNotRepeatOrSettleIntoTheListOrder() {
         var system = SystemRandomNumberGenerator()
         let list = playlist(20), ids = list.entries.map(\.id)
-        let orders = (0..<200).map { _ in ShuffleOrder(list, first: ids[0], using: &system).entries }
+        let orders = (0..<200).map { _ in cycleOrder(list, first: ids[0], using: &system) }
         #expect(Set(orders).count == orders.count)
         // Consecutive orders share about one position out of 19 by chance.
         for (a, b) in zip(orders, orders.dropFirst()) {
@@ -71,79 +78,112 @@ private func playlist(_ count: Int) -> MusicPlaylist {
         #expect(orders.filter { $0 == ids }.isEmpty)
     }
 
-    @Test func editsRemoveEntriesAndAddNewOnesAfterTheCurrentEntry() {
-        var random = SplitMix64(seed: 4)
-        var list = playlist(8)
-        var order = ShuffleOrder(list, first: list.entries[0].id, using: &random)
-        let current = order.entries[3], played = Array(order.entries[0...3])
-        let removed = order.entries[5]
-        list.entries.removeAll { $0.id == removed }
-        list.entries.swapAt(0, 1)
-        let added = (0..<3).map { _ in PlaylistEntry(trackID: UUID()) }
-        list.entries += added
-        order.reconcile(with: list, current: current, using: &random)
-        #expect(Set(order.entries) == Set(list.entries.map(\.id)) && order.entries.count == list.entries.count)
-        #expect(Array(order.entries[0...3]) == played)
-        #expect(added.allSatisfy { order.entries.firstIndex(of: $0.id)! > 3 })
-        #expect(order.neighbor(of: played[0], offset: -1) == nil)
-        #expect(order.neighbor(of: current, offset: -1) == played[2])
+    @Test func recordingKeepsOrMovesPlayedEntriesAndEditsLeaveOnlyRemovals() {
+        var list = playlist(6)
+        let ids = list.entries.map(\.id)
+        var cycle = ShuffleCycle(playlistID: list.id, first: ids[3])
+        cycle.record(ids[1], keepsPosition: true); cycle.record(ids[4], keepsPosition: true)
+        // Going back and forth keeps a played entry in place; choosing it again moves it to the end.
+        cycle.record(ids[1], keepsPosition: true)
+        #expect(cycle.played == [ids[3], ids[1], ids[4]])
+        #expect(cycle.neighbor(of: ids[1], offset: -1) == ids[3] && cycle.neighbor(of: ids[1], offset: 1) == ids[4])
+        cycle.record(ids[1], keepsPosition: false)
+        #expect(cycle.played == [ids[3], ids[4], ids[1]] && cycle.neighbor(of: ids[1], offset: 1) == nil)
+        // Reordering does nothing, a removed entry leaves, an added one is unplayed.
+        list.entries.swapAt(0, 5)
+        list.entries.removeAll { $0.id == ids[4] }
+        let added = PlaylistEntry(trackID: UUID()); list.entries.append(added)
+        cycle.reconcile(with: list)
+        #expect(cycle.played == [ids[3], ids[1]])
+        #expect(Set(cycle.unplayed(in: list)) == Set([ids[0], ids[2], ids[5], added.id]))
+    }
+
+    @Test func documentsWithoutCyclesStillLoadAndStaleCyclesAreDropped() throws {
+        var doc = LibraryDocument()
+        let track = LibraryTrack(name: "a", reference: TrackReference(bookmark: nil, lastKnownURL: URL(fileURLWithPath: "/tmp/a.wav")))
+        doc.tracks = [track]
+        let entries = [PlaylistEntry(trackID: track.id), PlaylistEntry(trackID: track.id)]
+        doc.playlists[0].entries = entries
+        // An older file has no "shuffleCycles" key, and a document without cycles writes none.
+        let encoded = try JSONEncoder().encode(doc)
+        #expect(String(decoding: encoded, as: UTF8.self).contains("shuffleCycles") == false)
+        #expect(try JSONDecoder().decode(LibraryDocument.self, from: encoded) == doc)
+        var cycle = ShuffleCycle(playlistID: doc.playlists[0].id, first: entries[0].id)
+        cycle.record(UUID(), keepsPosition: true)
+        doc.shuffleCycles = [cycle, ShuffleCycle(playlistID: UUID(), first: UUID())]
+        let pruned = doc.prunedShuffleCycles()
+        #expect(pruned.shuffleCycles?.map(\.played) == [[entries[0].id]])
+        try pruned.validate()
+        doc.playlists[0].entries = [entries[1]]
+        #expect(doc.prunedShuffleCycles().shuffleCycles == nil)
     }
 }
 
 @Suite(.serialized) @MainActor struct ShufflePlaybackTests {
     private func model(_ fixture: Fixture, count: Int, preferences: MemoryPreferences = MemoryPreferences(),
-                       seed: UInt64 = 5) async throws -> (LibraryController, PlaybackController, () -> TestBackend?) {
+                       store: MemoryStore = MemoryStore(), seed: UInt64 = 5) async throws -> (LibraryController, PlaybackController, () -> TestBackend?) {
         var backends: [TestBackend] = []
         let playback = PlaybackController(makeBackend: { _ in let b = TestBackend(); backends.append(b); return b })
-        let model = LibraryController(playback: playback, store: MemoryStore(), references: TestReferences(),
+        let model = LibraryController(playback: playback, store: store, references: TestReferences(),
                                       preferences: preferences, random: SplitMix64(seed: seed))
         let list = try #require(model.document.currentPlaylistID)
-        await model.importFiles(try (0..<count).map { try fixture.file("\($0).wav") }, into: list)
+        if count > 0 { await model.importFiles(try (0..<count).map { try fixture.file("\($0).wav") }, into: list) }
         return (model, playback, { backends.last })
     }
 
-    @Test func naturalFinishFollowsTheShuffleOrderAndStopsAfterOneCycle() async throws {
+    @Test func naturalFinishPlaysEveryEntryOnceAndStopsAfterOneCycle() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
         let (model, playback, backend) = try await model(fixture, count: 8)
         defer { model.shutdown() }
         let list = try #require(model.currentPlaylist)
         model.setShufflesPlayback(true)
         model.playPlaylist(list.id)
-        let order = try #require(model.shuffledEntries)
-        #expect(model.currentEntry?.id == order[0] && playback.state == .playing)
-        #expect(order != list.entries.map(\.id))
-        var played = [order[0]]
-        for _ in 1..<order.count {
+        #expect(model.shufflePlayed?.count == 1 && playback.state == .playing)
+        var played = [try #require(model.currentEntry?.id)]
+        for _ in 1..<list.entries.count {
             backend()?.onEvent?(.finished)
             played.append(try #require(model.currentEntry?.id))
             #expect(playback.state == .playing)
         }
-        #expect(played == order && !model.canNext && model.canPrevious)
+        #expect(Set(played).count == 8 && played != list.entries.map(\.id))
+        #expect(model.shufflePlayed == played && !model.canNext && model.canPrevious)
         backend()?.onEvent?(.finished)
-        #expect(model.currentEntry?.id == order.last && playback.state == .finished)
+        #expect(model.currentEntry?.id == played.last && playback.state == .finished)
+        // Playing the list again starts a new cycle.
+        model.playPlaylist(list.id)
+        #expect(model.shufflePlayed?.count == 1 && model.canNext)
     }
 
-    @Test func previousAndNextWalkTheShuffleOrderAndTurningOffRestoresListOrder() async throws {
+    @Test func previousAndNextWalkTheCycleAndClickingARowContinuesIt() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
         let (model, playback, _) = try await model(fixture, count: 6)
         defer { model.shutdown() }
         let list = try #require(model.currentPlaylist)
         let start = list.entries[2].id
         model.clickEntry(start, in: list.id, clickCount: 2)
-        #expect(model.shuffledEntries == nil)
+        #expect(model.shufflePlayed == nil)
         model.setShufflesPlayback(true)
-        let order = try #require(model.shuffledEntries)
-        #expect(order[0] == start && !model.canPrevious)
+        #expect(model.shufflePlayed == [start] && !model.canPrevious)
         model.next(); model.next()
-        #expect(model.currentEntry?.id == order[2] && playback.state == .playing)
+        let order = try #require(model.shufflePlayed)
+        #expect(order.count == 3 && model.currentEntry?.id == order[2] && playback.state == .playing)
         model.previous()
         #expect(model.currentEntry?.id == order[1])
-        // Clicking a row starts a new cycle from that row.
-        let clicked = try #require(order.last)
-        model.clickEntry(clicked, in: list.id, clickCount: 1)
-        #expect(model.shuffledEntries?.first == clicked && model.canNext)
+        // Going back and on again replays the recorded entry, not a new pick.
+        model.next()
+        #expect(model.currentEntry?.id == order[2] && model.shufflePlayed == order)
+        // Clicking an unplayed row adds it; clicking a played row moves it to the end.
+        let unplayed = try #require(list.entries.map(\.id).first { !order.contains($0) })
+        model.clickEntry(unplayed, in: list.id, clickCount: 1)
+        #expect(model.shufflePlayed == order + [unplayed])
+        model.clickEntry(order[0], in: list.id, clickCount: 1)
+        #expect(model.shufflePlayed == [order[1], order[2], unplayed, order[0]])
+        #expect(model.canNext && model.canPrevious)
+        // Two unplayed entries remain; then the cycle ends.
+        model.next(); model.next()
+        #expect(Set(try #require(model.shufflePlayed)) == Set(list.entries.map(\.id)) && !model.canNext)
         model.setShufflesPlayback(false)
-        #expect(model.shuffledEntries == nil)
+        #expect(model.shufflePlayed == nil && model.document.shuffleCycles == nil)
         let index = try #require(model.currentIndex)
         #expect(model.canNext == (index + 1 < list.entries.count))
         if model.canNext {
@@ -152,7 +192,7 @@ private func playlist(_ count: Int) -> MusicPlaylist {
         }
     }
 
-    @Test func addedEntriesJoinTheUnplayedPartOfTheCycle() async throws {
+    @Test func addedEntriesAreUnplayedAndRemovedEntriesLeaveTheCycle() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
         let (model, _, backend) = try await model(fixture, count: 5)
         defer { model.shutdown() }
@@ -160,33 +200,47 @@ private func playlist(_ count: Int) -> MusicPlaylist {
         model.setShufflesPlayback(true)
         model.playPlaylist(list.id)
         backend()?.onEvent?(.finished)
-        let current = try #require(model.currentEntry?.id)
+        let played = try #require(model.shufflePlayed)
+        #expect(played.count == 2)
         model.addTracks([list.entries[0].trackID, list.entries[1].trackID], to: list.id)
-        #expect(model.canNext)
-        let order = try #require(model.shuffledEntries)
         let added = try #require(model.currentPlaylist?.entries.suffix(2).map(\.id))
-        let position = try #require(order.firstIndex(of: current))
-        #expect(position == 1 && order.count == 7)
-        #expect(added.allSatisfy { order.firstIndex(of: $0)! > position })
+        #expect(model.shufflePlayed == played)
+        model.removeEntry(played[0], from: list.id)
+        #expect(model.document.shuffleCycles?.first?.played == [played[1]])
+        var rest: [UUID] = []
+        while model.canNext { backend()?.onEvent?(.finished); rest.append(try #require(model.currentEntry?.id)) }
+        #expect(rest.count == 5 && Set(added).isSubset(of: rest) && !rest.contains(played[1]))
+        // Deleting the list drops its cycle.
+        model.deletePlaylist(list.id)
+        #expect(model.document.shuffleCycles == nil)
     }
 
-    @Test func shuffleSettingPersistsButTheOrderIsMadeAgain() async throws {
+    @Test func theCycleIsSavedAndContinuesAfterTheAppIsClosed() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
-        let preferences = MemoryPreferences()
-        let (first, _, _) = try await model(fixture, count: 6, preferences: preferences)
+        let preferences = MemoryPreferences(), store = MemoryStore()
+        let (first, _, firstBackend) = try await model(fixture, count: 8, preferences: preferences, store: store)
         #expect(!first.shufflesPlayback)
         first.setShufflesPlayback(true)
         #expect(preferences.bool(forKey: "shufflePlayback"))
+        let list = try #require(first.currentPlaylist)
+        first.playPlaylist(list.id)
+        for _ in 0..<2 { firstBackend()?.onEvent?(.finished) }
+        let before = try #require(first.shufflePlayed)
+        #expect(before.count == 3 && store.document.shuffleCycles?.first?.played == before)
         first.shutdown()
-        let playback = PlaybackController(makeBackend: { _ in TestBackend() })
-        let store = MemoryStore(); store.document = first.document
-        let second = LibraryController(playback: playback, store: store, references: TestReferences(),
-                                       preferences: preferences, random: SplitMix64(seed: 6))
+        // The next launch continues the same cycle: going back retraces it, going on picks only unplayed entries.
+        let (second, _, secondBackend) = try await model(fixture, count: 0, preferences: preferences, store: store, seed: 6)
         defer { second.shutdown() }
-        #expect(second.shufflesPlayback && second.shuffledEntries == nil)
-        let list = try #require(second.currentPlaylist)
-        second.selectEntry(list.entries[3].id, in: list.id)
-        #expect(second.canNext && second.shuffledEntries?.first == list.entries[3].id)
+        #expect(second.shufflesPlayback && second.shufflePlayed == before && second.currentEntry?.id == before[2])
+        second.restore()
+        second.previous()
+        #expect(second.currentEntry?.id == before[1])
+        second.next()
+        #expect(second.currentEntry?.id == before[2])
+        second.togglePlayPause()
+        var played = before
+        while second.canNext { secondBackend()?.onEvent?(.finished); played.append(try #require(second.currentEntry?.id)) }
+        #expect(played.count == 8 && Set(played) == Set(list.entries.map(\.id)))
     }
 
     @Test func playlistPreprocessingRanksTheShuffleNeighbors() throws {
@@ -224,16 +278,16 @@ private func playlist(_ count: Int) -> MusicPlaylist {
         model.setShufflesPlayback(true)
         model.playPlaylist(list)
         try await shuffleWait { !model.isPreparing && playback.state == .playing }
-        let order = try #require(model.shuffledEntries)
-        #expect(model.currentEntry?.id == order[0])
-        // The list neighbor would be a different entry for this seed.
+        let first = try #require(model.currentEntry?.id)
+        // The prepared entry is the one that next() then plays.
+        try await shuffleWait { model.preparedNextEntryID != nil }
+        let prepared = try #require(model.preparedNextEntryID)
         let ids = try #require(model.playlist(list)?.entries.map(\.id))
-        let start = try #require(ids.firstIndex(of: order[0]))
-        #expect(start + 1 == ids.count || ids[start + 1] != order[1])
-        try await shuffleWait { model.preparedNextEntryID == order[1] }
+        #expect(prepared != first)
         model.next()
-        try await shuffleWait { !model.isPreparing && model.currentEntry?.id == order[1] && playback.state == .playing }
-        try await shuffleWait { model.preparedNextEntryID == order[2] }
+        try await shuffleWait { !model.isPreparing && model.currentEntry?.id == prepared && playback.state == .playing }
+        #expect(model.shufflePlayed == [first, prepared])
+        try await shuffleWait { model.preparedNextEntryID.map { ![first, prepared].contains($0) && ids.contains($0) } == true }
         model.stop(); try await shuffleWait { refs.scopes.active == 0 }
     }
 }

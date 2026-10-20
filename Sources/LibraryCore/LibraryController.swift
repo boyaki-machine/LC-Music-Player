@@ -31,7 +31,8 @@ import AudioProcessingCore
     public private(set) var normalizationSettings = NormalizationSettings.standard
     public private(set) var levelMeasurement: LevelMeasurementState = .disabled
     public private(set) var shufflesPlayback = false
-    @ObservationIgnored private var shuffleOrder: ShuffleOrder?
+    /// The entry picked to follow `after`, kept so that preparing the next entry and moving to it agree.
+    @ObservationIgnored private var upcomingShuffle: (playlist: UUID, after: UUID, pick: UUID)?
     @ObservationIgnored private var random: AnyRandomNumberGenerator
     public private(set) var preparationStage: String?
     @ObservationIgnored private var measuredLevels: TrackAudioMetrics?
@@ -84,7 +85,7 @@ import AudioProcessingCore
         playback.requireNormalization(normalizesVolume)
         levelMeasurement = normalizesVolume ? .pending : .disabled
         if preprocessingEnabled { playback.onActivityChange = { [weak self] in self?.updatePreprocessing() } }
-        do { publish(try store.load()); message = store.recoveryMessage; auditMeasurementCache() }
+        do { publish(try store.load().prunedShuffleCycles()); message = store.recoveryMessage; auditMeasurementCache() }
         catch { self.error = error.localizedDescription; editsEnabled = false }
         if playlistPreprocessing != nil {
             Task { [weak self] in self?.resumePlaylistPreprocessing() }
@@ -130,6 +131,7 @@ import AudioProcessingCore
     }
     @discardableResult private func commit(_ next: LibraryDocument) -> Bool {
         guard editsEnabled else { return false }
+        let next = next.prunedShuffleCycles()
         do {
             try next.validate(); try store.save(next)
             let oldEntry = document.currentEntryID
@@ -244,14 +246,19 @@ import AudioProcessingCore
     // MARK: Selection and transport
 
     @discardableResult public func selectEntry(_ entryID: UUID, in playlistID: UUID, autoPlay: Bool = false) -> Bool {
+        selectEntry(entryID, in: playlistID, autoPlay: autoPlay, shuffle: .keep)
+    }
+    @discardableResult private func selectEntry(_ entryID: UUID, in playlistID: UUID, autoPlay: Bool, shuffle: ShuffleStep) -> Bool {
         guard canEdit, let entry = playlist(playlistID)?.entries.first(where: { $0.id == entryID }), let track = track(entry.trackID) else { return false }
         if preprocessingEnabled {
-            beginPreparedSelection(entryID, playlistID: playlistID, autoPlay: autoPlay)
+            beginPreparedSelection(entryID, playlistID: playlistID, autoPlay: autoPlay, shuffle: shuffle)
             return true
         }
         do {
             let resolved = try references.resolve(track.reference)
-            var next = document; next.currentPlaylistID = playlistID; next.currentEntryID = entryID
+            var next = document
+            recordShuffle(&next, entry: entryID, playlist: playlistID, step: shuffle)
+            next.currentPlaylistID = playlistID; next.currentEntryID = entryID
             if let i = next.tracks.firstIndex(where: { $0.id == track.id }) { next.tracks[i].reference = resolved.reference }
             // Decoder and file lease are prepared first; disk failure keeps the old audio intact.
             let success = playback.select(resolved.url, using: resolved.lease) { if next != document { try store.save(next) } }
@@ -278,16 +285,15 @@ import AudioProcessingCore
             if clickCount == 2, playback.state != .playing { togglePlayPause() }
             return
         }
-        startShuffle(playlistID, first: entryID)
-        selectEntry(entryID, in: playlistID, autoPlay: play)
+        // Choosing a row continues the cycle: the row joins the played entries.
+        selectEntry(entryID, in: playlistID, autoPlay: play, shuffle: .add)
     }
 
     public func playPlaylist(_ id: UUID) {
         guard let list = playlist(id) else { return }
         let first = shufflesPlayback ? list.entries.randomElement(using: &random) : list.entries.first
         guard let first else { return }
-        startShuffle(id, first: first.id)
-        selectEntry(first.id, in: id, autoPlay: true)
+        selectEntry(first.id, in: id, autoPlay: true, shuffle: .restart)
     }
     public func togglePlayPause() {
         if playback.state == .playing || (playback.state == .paused && !normalizationNeedsPreparation) {
@@ -314,36 +320,62 @@ import AudioProcessingCore
     public func next() { move(1, autoPlay: playback.state == .playing) }
     private func move(_ offset: Int, autoPlay: Bool) {
         guard let list = currentPlaylist, let entry = adjacentEntry(offset) else { return }
-        selectEntry(entry.id, in: list.id, autoPlay: autoPlay)
+        selectEntry(entry.id, in: list.id, autoPlay: autoPlay, shuffle: .keep)
     }
 
     // MARK: Shuffle
 
+    /// Turning shuffle on or off forgets every cycle; turning it on starts a new cycle from the current entry.
     public func setShufflesPlayback(_ enabled: Bool) {
         guard !shuttingDown, shufflesPlayback != enabled else { return }
         shufflesPlayback = enabled; preferences.set(enabled, forKey: "shufflePlayback")
-        shuffleOrder = nil
-        if let list = document.currentPlaylistID, let entry = document.currentEntryID { startShuffle(list, first: entry) }
+        upcomingShuffle = nil
+        var next = document
+        next.shuffleCycles = nil
+        if enabled, let list = next.currentPlaylistID, let entry = next.currentEntryID {
+            next.shuffleCycles = [ShuffleCycle(playlistID: list, first: entry)]
+        }
+        if next != document, editsEnabled, commit(next) { return }
         if preprocessingEnabled { restartNextPreparation() }
     }
-    var shuffledEntries: [UUID]? { shuffleOrder?.entries }
-    /// An explicit start begins a new cycle; next, previous and natural finish keep the cycle.
-    private func startShuffle(_ playlistID: UUID, first: UUID) {
-        guard shufflesPlayback, let list = playlist(playlistID) else { return }
-        shuffleOrder = ShuffleOrder(list, first: first, using: &random)
+    /// The played entries of the current playlist's cycle.
+    var shufflePlayed: [UUID]? { shufflesPlayback ? currentPlaylist.flatMap { shuffleCycle(in: document, list: $0)?.played } : nil }
+    /// The saved cycle of `list`, with the current entry counted as played. A list without a
+    /// saved cycle (an older file) starts one from its current entry.
+    private func shuffleCycle(in document: LibraryDocument, list: MusicPlaylist) -> ShuffleCycle? {
+        let stored = document.shuffleCycles?.first { $0.playlistID == list.id }
+        guard document.currentPlaylistID == list.id, let current = document.currentEntryID,
+              list.entries.contains(where: { $0.id == current }) else { return stored }
+        var cycle = stored ?? ShuffleCycle(playlistID: list.id, first: current)
+        cycle.record(current, keepsPosition: true)
+        return cycle
     }
-    /// The entry `offset` steps away in the playback order: the playlist order, or the shuffle order.
-    /// The last entry of either order has no next entry.
+    /// Records the entry about to become current in its playlist's cycle. `document` still holds
+    /// the entry that was current, which a list without a saved cycle starts from.
+    private func recordShuffle(_ next: inout LibraryDocument, entry: UUID, playlist playlistID: UUID, step: ShuffleStep) {
+        guard shufflesPlayback, let list = playlist(playlistID) else { return }
+        var cycle = step == .restart ? ShuffleCycle(playlistID: playlistID, first: entry)
+            : shuffleCycle(in: document, list: list) ?? ShuffleCycle(playlistID: playlistID, first: entry)
+        cycle.record(entry, keepsPosition: step != .add)
+        var cycles = next.shuffleCycles ?? []
+        if let i = cycles.firstIndex(where: { $0.playlistID == playlistID }) { cycles[i] = cycle } else { cycles.append(cycle) }
+        next.shuffleCycles = cycles
+    }
+    /// The entry `offset` steps away in the playback order: the playlist order, or the shuffle cycle.
+    /// Going back walks the played entries; going on picks an unplayed entry. When every entry of
+    /// the cycle has been played, there is no next entry and playback stops.
     private func adjacentEntry(_ offset: Int) -> PlaylistEntry? {
         guard let list = currentPlaylist, let current = document.currentEntryID, let i = currentIndex else { return nil }
         guard shufflesPlayback else { return list.entries.indices.contains(i + offset) ? list.entries[i + offset] : nil }
-        var order: ShuffleOrder
-        if let existing = shuffleOrder, existing.playlistID == list.id, existing.contains(current) {
-            order = existing; order.reconcile(with: list, current: current, using: &random)
-        } else { order = ShuffleOrder(list, first: current, using: &random) }
-        shuffleOrder = order
-        let id = order.neighbor(of: current, offset: offset)
-        return list.entries.first { $0.id == id }
+        guard let cycle = shuffleCycle(in: document, list: list) else { return nil }
+        func entry(_ id: UUID) -> PlaylistEntry? { list.entries.first { $0.id == id } }
+        if let id = cycle.neighbor(of: current, offset: offset) { return entry(id) }
+        guard offset == 1 else { return nil }
+        if let upcoming = upcomingShuffle, upcoming.playlist == list.id, upcoming.after == current,
+           cycle.unplayed(in: list).contains(upcoming.pick) { return entry(upcoming.pick) }
+        guard let pick = cycle.randomUnplayed(in: list, using: &random) else { upcomingShuffle = nil; return nil }
+        upcomingShuffle = (list.id, current, pick)
+        return entry(pick)
     }
 
     // MARK: Import, export and shutdown
@@ -589,7 +621,7 @@ extension LibraryController {
     /// Selects an entry through the worker: reuses a matching speculative result when its
     /// source is unchanged, otherwise resolves, prepares a prefix and (for normalized
     /// playback) measures. Only the latest preparationID may commit the selection.
-    private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double = 0) {
+    private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double = 0, shuffle: ShuffleStep = .keep) {
         guard !shuttingDown else { return }
         playlistPreprocessingMayStart = true
         let requestedReference = currentReference(entryID, in: playlistID)
@@ -677,6 +709,7 @@ extension LibraryController {
                       let latest = self.playlist(playlistID)?.entries.first(where: { $0.id == entryID }),
                       latest.trackID == track.id, self.track(track.id)?.reference == track.reference else { return }
                 var next = self.document
+                self.recordShuffle(&next, entry: entryID, playlist: playlistID, step: shuffle)
                 next.currentPlaylistID = playlistID; next.currentEntryID = entryID
                 if let i = next.tracks.firstIndex(where: { $0.id == track.id }) { next.tracks[i].reference = resolved.reference }
                 if intent.autoPlay {
@@ -841,6 +874,10 @@ extension LibraryController {
     var failure: (any Error)?
     init(entry: UUID, reference: TrackReference, trackID: UUID? = nil) { self.entry = entry; self.reference = reference; self.trackID = trackID }
 }
+
+/// How a selection changes the shuffle cycle: next, previous and resuming keep it (`keep`),
+/// choosing a row adds the row (`add`), and playing a whole list starts a new cycle (`restart`).
+enum ShuffleStep { case keep, add, restart }
 
 /// MainActor-owned intent; only the current selection can be upgraded by a row click.
 @MainActor private final class SelectionIntent {

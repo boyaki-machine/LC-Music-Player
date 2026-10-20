@@ -41,9 +41,24 @@ public struct LibraryDocument: Codable, Equatable, Sendable {
     public var playlists: [MusicPlaylist]
     public var currentPlaylistID: UUID?
     public var currentEntryID: UUID?
+    /// The shuffle cycle of each playlist. Optional, so older files without it still load.
+    public var shuffleCycles: [ShuffleCycle]?
     public init() {
         let list = MusicPlaylist(name: "ひと息")
         playlists = [list]; currentPlaylistID = list.id
+    }
+    /// Drops what no longer exists: cycles of deleted playlists and entries removed from a playlist.
+    /// A stale cycle is never a reason to reject the document.
+    public func prunedShuffleCycles() -> LibraryDocument {
+        guard let cycles = shuffleCycles else { return self }
+        var next = self, seen = Set<UUID>()
+        next.shuffleCycles = cycles.compactMap { cycle in
+            guard let list = playlists.first(where: { $0.id == cycle.playlistID }), seen.insert(list.id).inserted else { return nil }
+            var cycle = cycle; cycle.reconcile(with: list)
+            return cycle.played.isEmpty ? nil : cycle
+        }
+        if next.shuffleCycles?.isEmpty == true { next.shuffleCycles = nil }
+        return next
     }
     public func validate() throws {
         guard schemaVersion == 1 else { throw LibraryFailure.futureVersion }
