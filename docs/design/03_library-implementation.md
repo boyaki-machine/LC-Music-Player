@@ -32,10 +32,11 @@
 | `ShuffleCycle` | ランダム再生の一巡で再生したエントリ（再生した順、library.jsonに保存） |
 | `DeviceVolumeMemory` | 出力デバイスごとのアプリ内音量とシステム音量の記憶・復元 |
 | `SleepTimer` | 睡眠タイマーの曲数・再生を終えた曲数・フェードの倍率 |
+| `TrackTags`／`AssetTagReader` | アルバムのタグ（アルバム名・アルバムアーティスト・アーティスト・ディスク・トラック）と、その読み取り |
 
 - 音源IDとエントリIDを分け、同じ音源をリストへ複数回登録できるようにする。
 - 同じファイルの再登録はパスを正規化して既存の音源へまとめる。ファイル内容のハッシュによる同一判定は行わない。
-- 表示名はファイル名から拡張子を除いた値、またはM3U8のEXTINFタイトルを使う。埋め込みタグやアートワークは読み取らない。
+- 表示名はファイル名から拡張子を除いた値、またはM3U8のEXTINFタイトルを使う。埋め込みタグはアルバムでまとめるためだけに読み、表示名には使わない。アートワークは読み取らない。
 
 ## 4. 実装
 
@@ -168,6 +169,9 @@
 
 ### 音源のフォルダ分け
 
+- `SourceFolderGroup.groups`は、まず`albumKey`が同じ曲が2曲以上あるアルバムをまとまりにする。アルバムの中はディスク（なければ1）、トラック（なければ番号のある曲の後）、登録順で並べる。アーティストの違う同名のアルバムは、見出しにアーティストを添える。
+- アルバムにまとまらなかった曲だけで、次のフォルダの規則を判定する。同じフォルダの他の曲がアルバムに入ったときは、残りの曲の数で判定する。
+- まとまりの種類（`Kind`）は「デフォルト」・フォルダ（「ミュージック」を含む）・アルバムで、並びは「デフォルト」「ミュージック」、アルバム（名前順）、フォルダ（パス順）とする。
 - `LibraryTrack.registration`は任意のfile/folderで、registrationを持たないschemaVersion 1のデータはnilとして読み込む。
 - `SourceFolderGroup.groups`で最終URLの親ディレクトリを正規化して使う。folderの音源を含むか、2曲以上の音源を含む親ディレクトリをグループにする。それ以外（同じフォルダの曲がほかにないファイル登録・M3U8・登録方法が不明なデータ）は「デフォルト」にまとめる。
 - グループ化は表示だけで決め、registrationを書き換えない。既存のライブラリにもそのまま効き、曲を除外して1曲に戻ると「デフォルト」へ戻る。
@@ -175,8 +179,18 @@
 - フォルダはパス順、各フォルダ内は元の登録順とする。同名フォルダでもフルパスが違えば別グループとする。
 - `DisclosureGroup`で初期状態は閉じ、見出しにフォルダ名・曲数、配下にインデントした音源行を表示する。パス文字列は見出しやツールチップに出さない。
 - 折りたたみは表示状態だけで、JSONやプレイリストを変更しない。
-- 音源タブの`SourceFolderList`だけが、フォルダのグループの見出しに除外ボタンを出す（曲の追加画面と「デフォルト」には出さない）。確認の後、`excludeTracks(_:)`がグループの全曲を1回の保存でライブラリと全プレイリストから外す。現在の再生対象が含まれる場合は選択を解除する。2曲以上を除外したときは件数を通知する。
+- 音源タブの`SourceFolderList`だけが、アルバムとフォルダのグループの見出しに除外ボタンを出す（曲の追加画面と「デフォルト」には出さない）。確認の後、`excludeTracks(_:)`がグループの全曲を1回の保存でライブラリと全プレイリストから外す。現在の再生対象が含まれる場合は選択を解除する。2曲以上を除外したときは件数を通知する。
 - 参照切れも元の場所に残し、ブックマークの更新後は更新した場所で表示する。
+
+### アルバムのタグ
+
+- `LibraryTrack.tags`は任意の項目で、nilは未読を表す。タグを読んでアルバムがなかった曲は空の`TrackTags`を持ち、読み直さない。tagsを持たないschemaVersion 1のデータはそのまま読み込む。
+- `AssetTagReader`は、ファイルを`AVURLAsset`のメタデータで読む。ID3（MP3・WAVの`id3 `チャンク・AIFFの`ID3 `チャンク）、iTunes（M4A）、Vorbis comment（FLAC）に対応する。アルバム名とアーティストは共通キー、アルバムアーティスト・ディスク・トラックは形式ごとの識別子（ID3のTPE2・TPOS・TRCK、iTunesのaART・disk・trkn、VorbisのALBUMARTIST・DISCNUMBER・TRACKNUMBER）で取る。番号は「3/10」の形とiTunesのバイナリの形を読む。WAVのLIST INFOのアルバム（IPRD）はAVFoundationが返さないため読まない。
+- 「ミュージック」の曲は、persistent IDで`MPMediaItem`を引き、アルバム名・アルバムアーティスト・アーティスト・ディスク番号・トラック番号を使う（`MediaLibraryLookup.tags(forPersistentID:)`）。
+- タグは信頼できない入力として扱う。制御文字を空白にし、前後の空白を除き、200文字で切る。番号は1〜9999だけを使う。
+- `LibraryController`は、起動・登録の完了・参照の修復の後に、tagsがnilの曲を64曲ずつ裏で読み、読んだ分を1回の保存で現在の文書へ書き込む。登録中は書き込まず、登録の完了後に読み直す。読めなかった曲（参照切れ・読み取りの失敗）はその起動の間は再び読まず、次の起動で読み直す。修復ではtagsを未読に戻す。
+- 読み取りは`tagReader`を渡したときだけ行う。アプリは`AssetTagReader`を渡し、テストは既定（読み取りなし）か偽物を使う。
+- アルバムの同一性は、アルバム名と、アルバムアーティスト（なければアーティスト）の組で決める。大文字・小文字と全角・半角は区別しない（`TrackTags.albumKey`）。
 
 ### 睡眠タイマー
 
@@ -217,6 +231,7 @@
 - 次曲送りと遅延通知、M3U8の往復、ネイティブ描画と初期スクロールが動作する。
 - ランダム再生の一巡が全エントリの順列で、各エントリが各位置に偏りなく現れ、前後・自然送り・曲行の選択・編集・設定の保存が要件どおりに動き、アプリを開き直しても一巡が続く（`ShuffleTests`）。
 - 出力デバイスごとの音量が記憶・復元され、接続や再生開始の直後のシステム音量の跳ね上がりを打ち消し、音量ボタン1段程度の変更と猶予後の変更は利用者の操作として記憶を更新する（`DeviceVolumeTests`）。
+- タグが形式ごとに読め、信頼できない値が整えられ、登録・起動・修復の後に保存され、読んだ曲は読み直さない（`TrackTagsTests`・`LibraryTagReadingTests`）。アルバムが2曲以上でまとまり、ファイルと「ミュージック」の曲が1つになり、残りの曲がフォルダの規則に従い、順序と同名のアルバムの見出しが要件どおりになる（`SourceGroupTests`）。
 - 睡眠タイマーが、今の曲を1曲目として指定した曲数で止まり、終了を知らせ、リストの末尾でも止まる。フェードはアプリ内音量を変えずに出力だけを下げ、オフでは途中の段を踏んで元に戻り、戻している途中でオンにしても急に上がらない。曲数は保存し、オン・オフは保存しない（`SleepTimerTests`）。
 - 準備の状態文は、0.3秒より短い準備では出ず、長い準備では遅れて出て、終われば消える（`NextPreparationTests`の`quickPreparationNeverShowsTheNotice`・`slowPreparationShowsTheNoticeAfterTheDelay`）。
 
@@ -227,6 +242,7 @@
 ./scripts/swift.sh test --filter ReferenceAndStoreTests
 ./scripts/swift.sh test --filter Shuffle
 ./scripts/swift.sh test --filter SleepTimer
+./scripts/swift.sh test --filter 'TrackTagsTests|LibraryTagReadingTests|SourceGroupTests'
 ./scripts/swift.sh test --filter LibraryEditingTests
 ./scripts/swift.sh test --filter LibraryOrganizationTests
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --filter ShufflePlaybackTests

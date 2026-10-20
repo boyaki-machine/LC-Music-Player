@@ -7,14 +7,16 @@ import PlaybackCore
 final class FakeMediaLibrary: MediaLibraryLookup, @unchecked Sendable {
     private let lock = NSLock()
     private var songs: [UInt64: MediaLibrarySong] = [:]
-    func add(_ id: UInt64, ext: String = "m4a", duration: TimeInterval = 180,
-             dateAdded: Date = Date(timeIntervalSince1970: 1_700_000_000)) -> URL {
+    private var albums: [UInt64: TrackTags] = [:]
+    @discardableResult func add(_ id: UInt64, ext: String = "m4a", duration: TimeInterval = 180,
+             dateAdded: Date = Date(timeIntervalSince1970: 1_700_000_000), tags: TrackTags = TrackTags()) -> URL {
         let url = URL(string: "ipod-library://item/item.\(ext)?id=\(id)")!
-        lock.withLock { songs[id] = MediaLibrarySong(assetURL: url, duration: duration, dateAdded: dateAdded) }
+        lock.withLock { songs[id] = MediaLibrarySong(assetURL: url, duration: duration, dateAdded: dateAdded); albums[id] = tags }
         return url
     }
-    func remove(_ id: UInt64) { _ = lock.withLock { songs.removeValue(forKey: id) } }
+    func remove(_ id: UInt64) { _ = lock.withLock { songs.removeValue(forKey: id); albums.removeValue(forKey: id) } }
     func song(forPersistentID id: UInt64) -> MediaLibrarySong? { lock.withLock { songs[id] } }
+    func tags(forPersistentID id: UInt64) -> TrackTags? { lock.withLock { albums[id] } }
 }
 
 @Suite @MainActor struct MediaLibraryTests {

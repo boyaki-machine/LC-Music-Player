@@ -28,23 +28,40 @@ public struct MediaLibrarySong: Equatable, Sendable {
 /// Finds songs of the Music library. Only iOS has one; tests supply their own.
 public protocol MediaLibraryLookup: Sendable {
     func song(forPersistentID id: UInt64) -> MediaLibrarySong?
+    /// The album of a song, or nil when the song cannot be found.
+    func tags(forPersistentID id: UInt64) -> TrackTags?
 }
 extension MediaLibraryLookup {
     public func assetURL(forPersistentID id: UInt64) -> URL? { song(forPersistentID: id)?.assetURL }
+    public func tags(forPersistentID id: UInt64) -> TrackTags? { nil }
 }
 public struct SystemMediaLibrary: MediaLibraryLookup {
     public init() {}
     public func song(forPersistentID id: UInt64) -> MediaLibrarySong? {
         #if os(iOS)
-        guard MPMediaLibrary.authorizationStatus() == .authorized else { return nil }
-        let query = MPMediaQuery.songs()
-        query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: id), forProperty: MPMediaItemPropertyPersistentID))
-        guard let item = query.items?.first, !item.hasProtectedAsset, !item.isCloudItem, let url = item.assetURL else { return nil }
+        guard let item = Self.item(id), !item.hasProtectedAsset, !item.isCloudItem, let url = item.assetURL else { return nil }
         return MediaLibrarySong(assetURL: url, duration: item.playbackDuration, dateAdded: item.dateAdded)
         #else
         return nil
         #endif
     }
+    public func tags(forPersistentID id: UInt64) -> TrackTags? {
+        #if os(iOS)
+        guard let item = Self.item(id) else { return nil }
+        return TrackTags(album: item.albumTitle, albumArtist: item.albumArtist, artist: item.artist,
+                         disc: item.discNumber, track: item.albumTrackNumber)
+        #else
+        return nil
+        #endif
+    }
+    #if os(iOS)
+    private static func item(_ id: UInt64) -> MPMediaItem? {
+        guard MPMediaLibrary.authorizationStatus() == .authorized else { return nil }
+        let query = MPMediaQuery.songs()
+        query.addFilterPredicate(MPMediaPropertyPredicate(value: NSNumber(value: id), forProperty: MPMediaItemPropertyPersistentID))
+        return query.items?.first
+    }
+    #endif
 }
 
 @MainActor public struct BookmarkFileReferences: FileReferenceProvider {
