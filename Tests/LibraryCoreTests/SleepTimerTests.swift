@@ -39,12 +39,13 @@ import PlaybackCore
 }
 
 @Suite(.serialized) @MainActor struct SleepTimerPlaybackTests {
-    private func model(_ fixture: Fixture, count: Int, preferences: MemoryPreferences = MemoryPreferences())
+    private func model(_ fixture: Fixture, count: Int, preferences: MemoryPreferences = MemoryPreferences(),
+                       restore: Duration = .milliseconds(300))
         async throws -> (LibraryController, PlaybackController, () -> TestBackend?) {
         var backends: [TestBackend] = []
         let playback = PlaybackController(makeBackend: { _ in let b = TestBackend(); backends.append(b); return b })
         let model = LibraryController(playback: playback, store: MemoryStore(), references: TestReferences(),
-                                      preferences: preferences, sleepFadeInterval: .milliseconds(5))
+                                      preferences: preferences, sleepFadeInterval: .milliseconds(5), sleepRestoreDuration: restore)
         let list = try #require(model.document.currentPlaylistID)
         await model.importFiles(try (0..<count).map { try fixture.file("\($0).wav") }, into: list)
         return (model, playback, { backends.last })
@@ -71,7 +72,7 @@ import PlaybackCore
         #expect(next.sleepTimerCount == 2 && next.sleepTimer == nil)
     }
 
-    @Test func fadeLowersOnlyTheOutputAndTurningItOffRestoresTheVolume() async throws {
+    @Test func fadeLowersOnlyTheOutputAndTurningItOffBringsTheVolumeBackGradually() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
         let (model, playback, backend) = try await model(fixture, count: 3)
         defer { model.shutdown() }
@@ -86,10 +87,47 @@ import PlaybackCore
         #expect(playback.volume == 0.5)
         playback.setVolume(0.4)
         #expect(abs(output.volume - 0.4 * playback.fadeGain) < 0.001)
+        let lowered = output.volume
         model.setSleepTimer(false)
-        #expect(output.volume == 0.4 && playback.fadeGain == 1)
+        // No jump: the volume climbs steadily and reaches the listener's level after the restore time.
+        #expect(output.volume <= lowered + 0.01)
+        var heard = [output.volume]
+        let started = ContinuousClock.now
+        while output.volume < 0.4, ContinuousClock.now < started + .seconds(5) {
+            try await Task.sleep(for: .milliseconds(20)); heard.append(output.volume)
+        }
+        let took = started.duration(to: .now)
+        #expect(output.volume == 0.4 && playback.fadeGain == 1 && playback.volume == 0.4)
+        #expect(zip(heard, heard.dropFirst()).allSatisfy { $1 >= $0 - 0.0001 })
+        #expect(heard.filter { $0 > lowered + 0.01 && $0 < 0.39 }.count >= 3, "no steps between \(lowered) and 0.4: \(heard)")
+        #expect(took >= .milliseconds(250), "restored in \(took)")
         output.onEvent?(.finished)
         #expect(model.currentIndex == 1 && playback.state == .playing)
+    }
+
+    @Test func turningTheTimerBackOnWhileTheVolumeReturnsWaitsForIt() async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let (model, playback, backend) = try await model(fixture, count: 3, restore: .milliseconds(400))
+        defer { model.shutdown() }
+        model.playPlaylist(try #require(model.document.currentPlaylistID))
+        model.setSleepTimerCount(1)
+        let output = try #require(backend())
+        output.currentTime = 8
+        try await sleepWait { playback.fadeGain < 0.1 }
+        model.setSleepTimer(false)
+        try await Task.sleep(for: .milliseconds(100))
+        let midway = playback.fadeGain
+        #expect(midway > 0.05 && midway < 0.6)
+        // A new timer starts at full volume, so it waits rather than jumping up to it.
+        model.setSleepTimer(true)
+        model.setSleepTimerCount(2)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(playback.fadeGain < 0.9 && playback.fadeGain >= midway)
+        try await sleepWait { playback.fadeGain > 0.99 }
+        #expect(model.sleepTimer?.count == 2)
+        // The timer is not ended by the restore: its fade takes over once the volume is back.
+        output.currentTime = 10
+        try await sleepWait { playback.fadeGain < 0.99 }
     }
 
     @Test func theEndOfTheListEndsTheTimerAndATapStartsWithTheKeptCount() async throws {
