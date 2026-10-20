@@ -54,6 +54,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         installMenus()
         deviceVolume = DeviceVolumeMemory(playback: playback, system: CoreAudioOutputVolume())
         library.restore()
+        // The sleep timer ends the evening by quitting, which also releases the audio device.
+        library.onSleepTimerFinished = { NSApp.terminate(nil) }
         showPlayer()
     }
     private func makeWindow(size: CGSize, title: String) -> NSWindow {

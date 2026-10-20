@@ -413,6 +413,67 @@ extension LibraryNativeViewTests {
         library.setShufflesPlayback(false)
         try await Task.sleep(for: .milliseconds(100))
         #expect(litPixels(try render()) == 0)
+
+        // The sleep timer sits beside shuffle: it lights while it runs, and a click turns it off and on.
+        library.setSleepTimer(true)
+        try await Task.sleep(for: .milliseconds(100))
+        let timerOn = try render()
+        try snapshot(timerOn, "sleep-timer-on.png")
+        #expect(litPixels(timerOn) > 20)
+        let scale = CGFloat(timerOn.pixelsHigh) / host.bounds.height
+        var lit: [CGFloat] = []
+        for y in Int(42 * scale)..<Int(64 * scale) {
+            for x in timerOn.pixelsWide / 2..<timerOn.pixelsWide {
+                guard let color = timerOn.colorAt(x: x, y: y) else { continue }
+                if color.greenComponent > 0.6, color.greenComponent - color.redComponent > 0.15 { lit.append(CGFloat(x)) }
+            }
+        }
+        let timerX = lit.reduce(0, +) / CGFloat(max(1, lit.count)) / scale
+        // Shuffle is off and dark here, so the lit pixels are the timer's, right of the middle and left of the count.
+        #expect(timerX > host.bounds.width / 2 && timerX < host.bounds.width - 20)
+        func click() async throws {
+            let location = NSPoint(x: timerX, y: host.bounds.height - 53)
+            func event(_ type: NSEvent.EventType) throws -> NSEvent {
+                try #require(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            }
+            window.sendEvent(try event(.leftMouseDown)); window.sendEvent(try event(.leftMouseUp))
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        try await click()
+        let timerOff = try render()
+        #expect(library.sleepTimer == nil && litPixels(timerOff) == 0)
+        try await click()
+        #expect(library.sleepTimer?.count == SleepTimer.defaultCount)
+        // With both lit, the widest empty run between lit columns is the space between the two icons.
+        library.setShufflesPlayback(true)
+        try await Task.sleep(for: .milliseconds(100))
+        let both = try render()
+        try snapshot(both, "shuffle-and-sleep-timer-on.png")
+        var columns = Set<Int>()
+        for y in Int(42 * scale)..<Int(64 * scale) {
+            for x in both.pixelsWide / 2..<both.pixelsWide {
+                guard let color = both.colorAt(x: x, y: y) else { continue }
+                if color.greenComponent > 0.6, color.greenComponent - color.redComponent > 0.15 { columns.insert(x) }
+            }
+        }
+        let sorted = columns.sorted()
+        let gap = zip(sorted, sorted.dropFirst()).map { CGFloat($1 - $0) / scale }.max() ?? 0
+        #expect(gap >= 36, "gap between the icons \(gap)pt")
+        // The entry count (grey text) starts as far right of the timer as the timer is from shuffle.
+        let timerRight = try #require(sorted.last)
+        var countLeft: Int?
+        for x in timerRight + 1..<both.pixelsWide {
+            for y in Int(42 * scale)..<Int(64 * scale) {
+                guard let color = both.colorAt(x: x, y: y) else { continue }
+                if color.redComponent > 0.4, abs(color.redComponent - color.greenComponent) < 0.06 { countLeft = x; break }
+            }
+            if countLeft != nil { break }
+        }
+        let countGap = CGFloat(try #require(countLeft) - timerRight) / scale
+        #expect(abs(countGap - gap) <= 2, "timer to count \(countGap)pt, shuffle to timer \(gap)pt")
+        library.setShufflesPlayback(false)
+        library.setSleepTimer(false)
     }
 }
 
@@ -515,6 +576,61 @@ extension LibraryNativeViewTests {
         presentation.setVisualizationDesign(.ermineChorus)
         let ermine = try await accentCenter("ermine")
         #expect(ermine > led + 0.1, "led \(led), ermine \(ermine)")
+    }
+
+    @Test func alwaysOnIconSitsAboveTheCardsAndLightsGreenOrAmber() async throws {
+        var applied: [Bool] = []
+        let display = AlwaysOnDisplay(power: PowerStatus(level: 0.8, charging: false), monitor: { _ in }, apply: { applied.append($0) })
+        let library = LibraryController(playback: PlaybackController(), store: UIStore(LibraryDocument()), references: UIReferences())
+        let presentation = PlayerPresentation(preferences: MemoryPreferences(), alwaysOnDisplay: display)
+        presentation.toggleExtension(); presentation.section = .visualization
+        let actions = LibraryActions(files: { _ in }, folder: {}, repair: { _ in }, importPlaylist: {}, exportPlaylist: { _ in })
+        let host = NSHostingView(rootView: ExtensionView(playback: library.playback, presentation: presentation, library: library, actions: actions))
+        host.frame = CGRect(origin: .zero, size: WindowLayout.extensionSize)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host; window.setFrameOrigin(CGPoint(x: -10000, y: -10000)); window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        /// Lit pixels in the top-right corner below the tabs: (green, amber) counts and their mean position in points.
+        func icon(_ name: String) async throws -> (green: Int, amber: Int, center: CGPoint) {
+            host.layoutSubtreeIfNeeded(); host.display()
+            try await Task.sleep(for: .milliseconds(150))
+            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
+                try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                try #require(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: directory).appendingPathComponent("always-on-\(name).png"))
+            }
+            let scale = CGFloat(rep.pixelsHigh) / host.bounds.height
+            var green = 0, amber = 0, sum = CGPoint.zero
+            for y in Int(30 * scale)..<Int(80 * scale) {
+                for x in rep.pixelsWide * 3 / 4..<rep.pixelsWide {
+                    guard let c = rep.colorAt(x: x, y: y) else { continue }
+                    if c.greenComponent > 0.6, c.greenComponent - c.redComponent > 0.15, c.greenComponent - c.blueComponent > 0.08 { green += 1 }
+                    else if c.redComponent > 0.7, c.redComponent - c.blueComponent > 0.3 { amber += 1 }
+                    else { continue }
+                    sum.x += CGFloat(x); sum.y += CGFloat(y)
+                }
+            }
+            let n = CGFloat(max(1, green + amber))
+            return (green, amber, CGPoint(x: sum.x / n / scale, y: sum.y / n / scale))
+        }
+        let off = try await icon("off")
+        #expect(off.green == 0 && off.amber == 0)
+        display.setRequested(true)
+        let on = try await icon("on")
+        #expect(on.green > 20 && on.amber == 0 && applied == [true])
+        display.powerChanged(PowerStatus(level: 0.25, charging: false))
+        let low = try await icon("low-battery")
+        #expect(low.amber > 20 && low.green == 0 && applied == [true, false])
+        // A click on the icon turns it off.
+        let location = NSPoint(x: on.center.x, y: host.bounds.height - on.center.y)
+        func event(_ type: NSEvent.EventType) throws -> NSEvent {
+            try #require(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        window.sendEvent(try event(.leftMouseDown)); window.sendEvent(try event(.leftMouseUp))
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!display.isRequested)
     }
 }
 #endif

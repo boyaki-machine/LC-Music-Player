@@ -18,32 +18,33 @@ Sources/
 │   ├── PlayerView.swift               アプリ向けのメイン画面の入口
 │   ├── AppVersion.swift               正式名称とInfo.plistからのバージョン表示
 │   ├── TransportStateMapping.swift    再生の状態からウィジェットの状態への対応
+│   ├── AlwaysOnDisplay.swift          iPhoneの常時表示（自動ロックを止める判定と電池の監視）
 │   ├── Acknowledgements/
 │   │   └── Acknowledgements.swift     ライセンスの表示モデル・View
 │   └── Players/
-│       └── LCMP_default_GEQ/          このPlayer UIの実装一式
-│           ├── LCMPDefaultGEQ.swift   ID・名前・解析設定・表示データへの変換
-│           ├── LCMPDefaultGEQPlayerView.swift  メイン画面と操作部
-│           ├── PlayerPresentation.swift       画面の状態とdriverの所有
-│           ├── ExtensionView.swift            拡張画面
-│           ├── WindowLayout.swift             ウィンドウの配置の計算
-│           ├── PlayerFrame.swift              画面の枠（macOSのウィンドウ・iPhoneのカード・全画面・パネル）と文字の大きさ
-│           ├── NativeControls.swift           移動・シーク・音量の入力（macOS）
-│           ├── TouchControls.swift            同じ名前の入力部品のiOS版（タッチ）
-│           ├── VolumeControls.swift           音量の操作曲線・内部のフォーカス境界
-│           ├── PlaylistClickSurface.swift     マウスのクリック回数・行のドラッグ
-│           ├── LibraryControls.swift          リストの操作・グラス等
-│           ├── SourceFolderList.swift         音源のフォルダ一覧
-│           ├── QuickTooltip.swift             省略されたタイトルの表示
-│           └── Visualization/
-│               ├── VisualizationDesign.swift      デザインの種類・表示名・共通の解析設定・driverの契約
-│               ├── VisualizationThumbnail.swift   表示タブのカードのサムネイル
-│               ├── PlaybackVisualization.swift    再生・解析と描画の接続、デザインの切り替え
-│               ├── LCMPDefaultGEQView.swift       蛍光管LEDのSwiftUI/Canvasとrenderer
-│               ├── LCMPDefaultGEQScale.swift      dBFSから表示感度への変換
-│               ├── SpectrumPresentation.swift     提示待ち・16×24セル・残光
-│               ├── VisualizationDriver.swift      蛍光管LEDのMainActorの受信・時計
-│               └── ErmineChorus/                  オコジョ合唱団（原画・キャラクタ・演出・指揮役・描画・driver・View）
+│       ├── LCMP_default_GEQ/          このPlayer UIの実装一式
+│       │   ├── LCMPDefaultGEQ.swift   ID・名前・解析設定・表示データへの変換
+│       │   ├── LCMPDefaultGEQPlayerView.swift  メイン画面と操作部
+│       │   ├── PlayerPresentation.swift       画面の状態とdriverの所有
+│       │   ├── ExtensionView.swift            拡張画面
+│       │   ├── WindowLayout.swift             ウィンドウの配置の計算
+│       │   ├── PlayerFrame.swift              画面の枠（macOSのウィンドウ・iPhoneのカード・全画面・パネル）と文字の大きさ
+│       │   ├── NativeControls.swift           移動・シーク・音量の入力（macOS）
+│       │   ├── TouchControls.swift            同じ名前の入力部品のiOS版（タッチ）
+│       │   ├── VolumeControls.swift           音量の操作曲線・内部のフォーカス境界
+│       │   ├── PlaylistClickSurface.swift     マウスのクリック回数・行のドラッグ
+│       │   ├── LibraryControls.swift          リストの操作・グラス・ランダム再生・睡眠タイマー・常時表示の切替等
+│       │   ├── SourceFolderList.swift         音源のフォルダ一覧
+│       │   ├── QuickTooltip.swift             省略されたタイトルの表示
+│       │   └── Visualization/
+│       │       ├── VisualizationDesign.swift      デザインの種類・表示名・共通の解析設定・driverの契約
+│       │       ├── VisualizationThumbnail.swift   表示タブのカードのサムネイル
+│       │       ├── PlaybackVisualization.swift    再生・解析と描画の接続、デザインの切り替え
+│       │       ├── LCMPDefaultGEQView.swift       蛍光管LEDのSwiftUI/Canvasとrenderer
+│       │       ├── LCMPDefaultGEQScale.swift      dBFSから表示感度への変換
+│       │       ├── SpectrumPresentation.swift     提示待ち・16×24セル・残光
+│       │       └── VisualizationDriver.swift      蛍光管LEDのMainActorの受信・時計
+│       └── Micrigaike_Kojoes/         MICRIGAIKE コジョーズ（オコジョ合唱団）の一式：原画・キャラクタ・演出・指揮役・描画・サムネイル・driver・View
 ├── VisualizationKit/
 │   └── Shared/
 │       ├── SpectrumSample.swift       UIに依存しない表示用レベル・時刻の値型
@@ -61,22 +62,26 @@ Sources/
 Tests/PlayerUITests/
 ├── Acknowledgements/
 │   └── AcknowledgementsTests.swift
-└── Players/LCMP_default_GEQ/
-    ├── NativeViewTests.swift
-    ├── PlayerInteractionTests.swift
-    ├── PreprocessingSettingsTests.swift
-    ├── WindowLayoutTests.swift
-    ├── FolderTooltipTests.swift
-    ├── VisualizationIntegrationTests.swift
-    └── Visualization/
-        ├── PresentationTests.swift
-        ├── ErmineChorusTests.swift
-        └── VisualizationPerformanceTests.swift
+├── AlwaysOnDisplayTests.swift
+└── Players/
+    ├── LCMP_default_GEQ/
+    │   ├── NativeViewTests.swift
+    │   ├── PlayerInteractionTests.swift
+    │   ├── PreprocessingSettingsTests.swift
+    │   ├── WindowLayoutTests.swift
+    │   ├── FolderTooltipTests.swift
+    │   ├── VisualizationIntegrationTests.swift
+    │   └── Visualization/
+    │       ├── PresentationTests.swift
+    │       └── VisualizationPerformanceTests.swift
+    └── Micrigaike_Kojoes/
+        └── ErmineChorusTests.swift
 ```
 
 配置の規約は次のとおりとする。
 
 - **1つのPlayer UIの実装は、可視化も含めて`PlayerUI/Players/<実装ID>/`の1つのフォルダ配下へまとめる。** 内部の整理には`Visualization/`等のサブフォルダを使う。解析設定、表示感度、driver、残光、描画、画面の状態、入力、配置もこの実装の一部である。
+- 独自の世界観を持つ可視化デザイン（MICRIGAIKE コジョーズ等）は、そのデザインを構成するファイル一式を`PlayerUI/Players/<デザインID>/`へまとめる。デザインの種類・切り替え・サムネイルの枠・再生との接続など、複数のデザインで使う部品は、組み込む先のPlayer UIの`Visualization/`に置いたままでよい。
 - `VisualizationKit/Shared/`にはUIに依存しない共通部品だけを置く。個別のPlayer UIの描画を登録したり、個別のView・スケール・driverを参照したりしない。Player UIから共通部品を利用する一方向の依存にする。
 - 音声エンジン・FFT・ライブラリの保存は、それぞれのCoreモジュールへ委ねる。
 - フォルダはSwiftのモジュールや名前空間ではない。Player UIごとのソースは、現在の`PlayerUI`ターゲット内でコンパイルされる。新しい型には実装固有の接頭辞を付け、別の実装で同名の`PlayerPresentation`等を重複して定義しない。
@@ -233,11 +238,11 @@ PlayerUI/Players/
 
 操作部を共通にしたまま、アニメーション領域の表示だけを切り替える場合の手順である。オコジョ合唱団はこの手順で追加した。
 
-1. `Visualization/<デザイン名>/`を作り、描画・状態・driver・Viewを置く。型名にはデザイン固有の接頭辞を付ける。
+1. `PlayerUI/Players/<デザインID>/`を作り、描画・状態・driver・View・サムネイルの描画を置く。型名にはデザイン固有の接頭辞を付ける。
 2. driverは`PlayerVisualizationDriver`（`synchronize(activity:visible:)`、`receive(_:)`、`reset()`）に準拠させ、「寿命の管理と画面への組み込み」の表と同じく、表示中かつ再生中だけ時計を動かす。
-3. `VisualizationDesign`にケース・表示名・説明（カードの2行目）を足し、`VisualizationThumbnail`にサムネイルを描く。`PlayerPresentation`のdriverの所有と`driver(for:)`、`PlaybackVisualization`のViewの切り替えに加える。表示タブのカードは`allCases`から自動で並ぶ。
+3. `VisualizationDesign`にケース・表示名・説明（カードの2行目）を足し、`VisualizationThumbnail`からデザインのフォルダにあるサムネイルの描画を呼ぶ。`PlayerPresentation`のdriverの所有と`driver(for:)`、`PlaybackVisualization`のViewの切り替えに加える。表示タブのカードは`allCases`から自動で並ぶ。
 4. 解析は`VisualizationDesign.configuration`を共有する。切り替えで解析の購読をやり直さないためである。別の帯域数が必要になったら、デザインごとの設定を`PlaybackVisualization`から渡すように変える。
-5. 寿命・描画・切り替えのテストを`Tests/PlayerUITests/Players/<ID>/Visualization/`に置く。
+5. 寿命・描画・切り替えのテストを`Tests/PlayerUITests/Players/<デザインID>/`に置く。
 
 フォルダの分離はソースの責務を示すもので、アクセス制御の隔離ではない。独立した依存関係や配布が必要になったときは、その具体的な要件に合わせてSwiftPMのターゲットの分割を検討する。
 
