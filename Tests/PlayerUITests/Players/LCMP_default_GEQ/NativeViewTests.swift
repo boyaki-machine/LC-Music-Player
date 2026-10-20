@@ -516,5 +516,60 @@ extension LibraryNativeViewTests {
         let ermine = try await accentCenter("ermine")
         #expect(ermine > led + 0.1, "led \(led), ermine \(ermine)")
     }
+
+    @Test func alwaysOnIconSitsAboveTheCardsAndLightsGreenOrAmber() async throws {
+        var applied: [Bool] = []
+        let display = AlwaysOnDisplay(power: PowerStatus(level: 0.8, charging: false), monitor: { _ in }, apply: { applied.append($0) })
+        let library = LibraryController(playback: PlaybackController(), store: UIStore(LibraryDocument()), references: UIReferences())
+        let presentation = PlayerPresentation(preferences: MemoryPreferences(), alwaysOnDisplay: display)
+        presentation.toggleExtension(); presentation.section = .visualization
+        let actions = LibraryActions(files: { _ in }, folder: {}, repair: { _ in }, importPlaylist: {}, exportPlaylist: { _ in })
+        let host = NSHostingView(rootView: ExtensionView(playback: library.playback, presentation: presentation, library: library, actions: actions))
+        host.frame = CGRect(origin: .zero, size: WindowLayout.extensionSize)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host; window.setFrameOrigin(CGPoint(x: -10000, y: -10000)); window.orderFront(nil)
+        defer { window.orderOut(nil); window.contentView = nil }
+        /// Lit pixels in the top-right corner below the tabs: (green, amber) counts and their mean position in points.
+        func icon(_ name: String) async throws -> (green: Int, amber: Int, center: CGPoint) {
+            host.layoutSubtreeIfNeeded(); host.display()
+            try await Task.sleep(for: .milliseconds(150))
+            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
+                try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                try #require(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: directory).appendingPathComponent("always-on-\(name).png"))
+            }
+            let scale = CGFloat(rep.pixelsHigh) / host.bounds.height
+            var green = 0, amber = 0, sum = CGPoint.zero
+            for y in Int(30 * scale)..<Int(80 * scale) {
+                for x in rep.pixelsWide * 3 / 4..<rep.pixelsWide {
+                    guard let c = rep.colorAt(x: x, y: y) else { continue }
+                    if c.greenComponent > 0.6, c.greenComponent - c.redComponent > 0.15, c.greenComponent - c.blueComponent > 0.08 { green += 1 }
+                    else if c.redComponent > 0.7, c.redComponent - c.blueComponent > 0.3 { amber += 1 }
+                    else { continue }
+                    sum.x += CGFloat(x); sum.y += CGFloat(y)
+                }
+            }
+            let n = CGFloat(max(1, green + amber))
+            return (green, amber, CGPoint(x: sum.x / n / scale, y: sum.y / n / scale))
+        }
+        let off = try await icon("off")
+        #expect(off.green == 0 && off.amber == 0)
+        display.setRequested(true)
+        let on = try await icon("on")
+        #expect(on.green > 20 && on.amber == 0 && applied == [true])
+        display.powerChanged(PowerStatus(level: 0.25, charging: false))
+        let low = try await icon("low-battery")
+        #expect(low.amber > 20 && low.green == 0 && applied == [true, false])
+        // A click on the icon turns it off.
+        let location = NSPoint(x: on.center.x, y: host.bounds.height - on.center.y)
+        func event(_ type: NSEvent.EventType) throws -> NSEvent {
+            try #require(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+        }
+        window.sendEvent(try event(.leftMouseDown)); window.sendEvent(try event(.leftMouseUp))
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!display.isRequested)
+    }
 }
 #endif

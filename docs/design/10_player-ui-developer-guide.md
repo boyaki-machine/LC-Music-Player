@@ -18,6 +18,7 @@ Sources/
 │   ├── PlayerView.swift               アプリ向けのメイン画面の入口
 │   ├── AppVersion.swift               正式名称とInfo.plistからのバージョン表示
 │   ├── TransportStateMapping.swift    再生の状態からウィジェットの状態への対応
+│   ├── AlwaysOnDisplay.swift          iPhoneの常時表示（自動ロックを止める判定と電池の監視）
 │   ├── Acknowledgements/
 │   │   └── Acknowledgements.swift     ライセンスの表示モデル・View
 │   └── Players/
@@ -61,6 +62,7 @@ Sources/
 Tests/PlayerUITests/
 ├── Acknowledgements/
 │   └── AcknowledgementsTests.swift
+├── AlwaysOnDisplayTests.swift
 └── Players/
     ├── LCMP_default_GEQ/
     │   ├── NativeViewTests.swift

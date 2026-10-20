@@ -31,7 +31,7 @@ struct LCMPiOSApp: App {
 @MainActor @Observable final class AppModel {
     let playback = PlaybackController()
     let library: LibraryController
-    let presentation = PlayerPresentation()
+    let presentation = PlayerPresentation(alwaysOnDisplay: .device())
     @ObservationIgnored private var session: AudioSessionController?
     @ObservationIgnored private var surfaces: ControlSurfaceController?
     @ObservationIgnored private var deviceVolume: DeviceVolumeMemory?

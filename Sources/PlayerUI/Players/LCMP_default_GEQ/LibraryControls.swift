@@ -235,3 +235,21 @@ struct ShuffleToggle: View {
             .accessibilityValue(isOn ? "オン" : "オフ").accessibilityAddTraits(isOn ? .isSelected : [])
     }
 }
+
+/// Always-on display for watching the animation on a stand. Lit like an LED while the screen is
+/// kept on; amber while it is on but released because the battery is low.
+struct AlwaysOnToggle: View {
+    static let heldBackColor = Color(red: 1, green: 0.74, blue: 0.32)
+    let display: AlwaysOnDisplay
+    var body: some View {
+        let color: Color = display.keepsAwake ? ShuffleToggle.litColor : display.isHeldBackByBattery ? Self.heldBackColor : .white.opacity(0.3)
+        Button { display.setRequested(!display.isRequested) } label: {
+            Image(systemName: display.isRequested ? "sun.max.fill" : "sun.max").font(.ui(15, weight: .medium))
+                .foregroundStyle(color)
+                .shadow(color: display.isRequested ? color.opacity(0.6) : .clear, radius: 4)
+                .frame(width: 44, height: 32).contentShape(Rectangle())
+        }.buttonStyle(.plain).help("常時表示").accessibilityLabel("常時表示")
+            .accessibilityValue(display.keepsAwake ? "オン" : display.isHeldBackByBattery ? "電池残量が少ないため解除中" : "オフ")
+            .accessibilityAddTraits(display.isRequested ? .isSelected : [])
+    }
+}

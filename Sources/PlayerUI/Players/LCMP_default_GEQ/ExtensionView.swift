@@ -101,6 +101,9 @@ public struct ExtensionView: View {
                 case .playlist: playlistContent
                 case .source: sourceContent
                 case .visualization:
+                    if let display = presentation.alwaysOnDisplay {
+                        HStack { Spacer(); AlwaysOnToggle(display: display) }
+                    }
                     ScrollView {
                         VStack(spacing: 8) {
                             ForEach(VisualizationDesign.allCases, id: \.self) { designCard($0) }

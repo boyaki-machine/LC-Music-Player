@@ -33,6 +33,8 @@ public final class PlayerPresentation {
     /// Hides the songs already in the playlist on the add screen. Off by default; the choice is kept.
     public private(set) var hidesAddedTracks: Bool
     static let hidesAddedTracksKey = "hideAddedTracks"
+    /// Keeps the screen on while the animation is watched; nil where the screen has no auto-lock (the Mac).
+    @ObservationIgnored public let alwaysOnDisplay: AlwaysOnDisplay?
     public var visualizationVisible = true {
         didSet {
             // Stop immediately, even if an ordered-out hosting view no longer updates.
@@ -40,8 +42,9 @@ public final class PlayerPresentation {
         }
     }
     public init(seekHideDelay: Duration = .seconds(2), volumeHideDelay: Duration = .seconds(15),
-                preferences: any PreferenceStoring = UserDefaults.standard) {
+                preferences: any PreferenceStoring = UserDefaults.standard, alwaysOnDisplay: AlwaysOnDisplay? = nil) {
         self.seekHideDelay = seekHideDelay; self.volumeHideDelay = volumeHideDelay
+        self.alwaysOnDisplay = alwaysOnDisplay
         self.preferences = preferences
         visualizationDesign = (preferences.object(forKey: VisualizationDesign.preferenceKey) as? String)
             .flatMap(VisualizationDesign.init(rawValue:)) ?? .fluorescentLED

@@ -122,6 +122,12 @@
 - 長押しの成立前に指が動くと、タップと長押しは失敗し、一覧のスクロールが動く。成立した後の指の動きは行の移動として扱い、ウィンドウ座標の縦の移動量を並べ替えに渡す。
 - SwiftUIのジェスチャー（長押しの後にドラッグを続ける形。`UIGestureRecognizerRepresentable`で付けた長押しを含む）は、行の上から始めたスクロールを妨げるため使わない。
 
+### 常時表示
+
+- `AlwaysOnDisplay`（PlayerUI）が、利用者の切替と電池の状態から自動ロックを止めるかを決める。止めるのは、オンで、かつ充電中（満充電を含む）か電池残量が30%を超えるときである。電池残量が分からないとき（シミュレータ）は止める。
+- `AlwaysOnDisplay.device()`は、オンの間だけ`UIDevice.isBatteryMonitoringEnabled`を有効にし、電池残量と充電状態の通知を受ける。判定が変わったときだけ`UIApplication.isIdleTimerDisabled`を設定する。
+- `AppModel`が`PlayerPresentation(alwaysOnDisplay:)`へ渡す。macOS版は渡さないので、表示タブに切替が出ない。
+
 ### 画面の回転
 
 - 縦置きと横置きは別のプレイヤーの画面を作るため、回転で画面が入れ替わる。新しい画面が出てから古い画面が消える順序でも描画を止めないよう、`PlayerPresentation`が可視化を表示している画面の数を数え、最後の1つが消えたときだけ描画を止める。
@@ -150,12 +156,13 @@
 | iPhoneのアイコンが不透明な1024pxの正方形である | `scripts/test_app_icon.py` |
 | ビルドの段がライセンスとバージョンを入れる | `scripts/test_ios_resources.py` |
 | 再生の状態との対応、記号の点灯、App Groupがないときの状態 | `ControlSurfacesTests`（macOSとiOSで実行。記号は画面外に描いて緑の画素を数える） |
+| 常時表示の判定（30%・充電中・残量不明）と、自動ロックの設定が判定の変化のときだけ行われること、表示タブの記号の緑・琥珀の点灯 | `AlwaysOnDisplayTests`、`VisualizationDesignCardTests`の`alwaysOnIconSitsAboveTheCardsAndLightsGreenOrAmber` |
 | ☰のリンクで拡張画面が開く | `make ios-uitest`（`ControlSurfaceTests`） |
 | 音源タブの登録ボタン（ファイル・フォルダ・ミュージック）が1行に同じ高さで並び、名前が折り返さない | `make ios-uitest`（`SourceButtonsTests`。幅の狭い機種（iPhone SE、375pt）では、シミュレータの画面で目視する） |
 | ウィジェットの見た目 | DEBUGの起動引数`-LCMPControlSurfaces YES`で各状態の見本を並べて撮影し、UI・UX設計と見比べる |
 | 縦置き・横置き・拡張を閉じた全画面の配置 | シミュレータで起動引数（`-LCMPImportPaths`・`-LCMPAutoplay`・`-LCMPOrientation`・`-LCMPExtension`）を付けて撮影し、UI・UX設計と見比べる |
 | バックグラウンドで再生が続く | 再生中に他のアプリへ切り替え、音が続くことと、アプリがMediaPlaybackの権利を持ち続けることを確かめる |
-| 実機での動作 | 実機で、ライブラリの曲の選択と再生（一度測った曲は、アプリの再起動後も測り直さずに鳴り始める）、再生中の回転、書類の選択（このiPhone内・iCloud Drive・OneDrive）、ロック中の再生、中断（電話・他のアプリの音声）からの一時停止、Bluetoothの接続の変化での停止、イヤホンとスピーカーで音量が別々に戻ること・つなぎ直して再生したときにいきなり大きくならないこと、ロック画面の表示がアプリ名だけであること、Dynamic Islandにシステムの「再生中」が出て長押しで操作できること、ウィジェット（小・中）のボタンで操作でき☰で拡張画面が開くことを確かめる |
+| 実機での動作 | 実機で、ライブラリの曲の選択と再生（一度測った曲は、アプリの再起動後も測り直さずに鳴り始める）、再生中の回転、書類の選択（このiPhone内・iCloud Drive・OneDrive）、ロック中の再生、中断（電話・他のアプリの音声）からの一時停止、Bluetoothの接続の変化での停止、イヤホンとスピーカーで音量が別々に戻ること・つなぎ直して再生したときにいきなり大きくならないこと、ロック画面の表示がアプリ名だけであること、Dynamic Islandにシステムの「再生中」が出て長押しで操作できること、ウィジェット（小・中）のボタンで操作でき☰で拡張画面が開くこと、常時表示をオンにすると自動ロックの時間を過ぎても画面が消えず、充電していない30%以下では消えることを確かめる |
 
 ## 6. 参照
 
