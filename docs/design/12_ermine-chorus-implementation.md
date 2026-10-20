@@ -66,6 +66,8 @@
 
 ## 3. 方式
 
+構成するファイルは`Sources/PlayerUI/Players/Micrigaike_Kojoes/`にまとめる。デザインの種類（`VisualizationDesign`）・切り替え（`PlaybackVisualization`）・カードの枠（`VisualizationThumbnail`）は蛍光管LEDと共通の部品として、`LCMP_default_GEQ/Visualization/`に置く。
+
 | 部品 | 責務 |
 | --- | --- |
 | `ErmineChorusKeys.swift` | 原画（`ErmineKey`）の数値と、中割り（`ErmineInbetweener`）、腕のポーズ（`ErmineArmPose`）とその中割り |
@@ -77,6 +79,7 @@
 | `ErmineChorusRenderer.swift` | 舞台・体・顔・効果のセルを、SwiftUIの`GraphicsContext`で重ねて描く |
 | `ErmineChorusDriver.swift` | 30fpsの時計、提示待ち、寿命の管理 |
 | `ErmineChorusView.swift` | Canvasと支援技術への公開 |
+| `ErmineChorusThumbnail.swift` | 表示タブのカードに描く1の頭と胸 |
 
 ```mermaid
 flowchart LR
@@ -137,7 +140,7 @@ flowchart LR
 
 ### 自動テスト
 
-`Tests/PlayerUITests/Players/LCMP_default_GEQ/Visualization/ErmineChorusTests.swift`で次を確かめる。
+`Tests/PlayerUITests/Players/Micrigaike_Kojoes/ErmineChorusTests.swift`で次を確かめる。
 
 - 全原画の定義、上げた前足が頭の後ろに回ること、中割りのイーズとカット。
 - 16帯域から5つの音域への振り分け、音域ごとの感度、無音とノイズで歌わないこと。

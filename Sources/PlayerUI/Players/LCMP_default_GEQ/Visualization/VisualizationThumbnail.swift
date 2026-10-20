@@ -8,7 +8,7 @@ struct VisualizationThumbnail: View {
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(LCMPDefaultGEQRenderer.background))
             switch design {
             case .fluorescentLED: Self.drawLED(context, size: size)
-            case .ermineChorus: Self.drawErmine(context, size: size)
+            case .ermineChorus: ErmineChorusRenderer.drawThumbnail(context, size: size)
             }
         }
         .accessibilityHidden(true)
@@ -26,14 +26,5 @@ struct VisualizationThumbnail: View {
                 context.fill(Path(rect), with: .color(lit ? color : color.opacity(0.13)))
             }
         }
-    }
-
-    private static func drawErmine(_ original: GraphicsContext, size: CGSize) {
-        guard let member = ErmineCast.members.first(where: { $0.id == 1 }) else { return }
-        var context = original
-        // Head and chest of ermine 1, as on the stage.
-        context.translateBy(x: size.width / 2, y: size.height * 1.85)
-        context.scaleBy(x: size.height / 58, y: size.height / 58)
-        ErmineChorusRenderer.drawErmine(context, drawing: ErmineDrawing(pose: ErmineKeyName.idleA.key, frame: ErmineFrame()), member: member)
     }
 }
