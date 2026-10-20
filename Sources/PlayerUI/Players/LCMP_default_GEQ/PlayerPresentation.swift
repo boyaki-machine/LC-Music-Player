@@ -30,6 +30,9 @@ public final class PlayerPresentation {
     @ObservationIgnored public let ermineChorusDriver = ErmineChorusDriver()
     public private(set) var visualizationDesign: VisualizationDesign
     @ObservationIgnored private let preferences: any PreferenceStoring
+    /// Hides the songs already in the playlist on the add screen. Off by default; the choice is kept.
+    public private(set) var hidesAddedTracks: Bool
+    static let hidesAddedTracksKey = "hideAddedTracks"
     public var visualizationVisible = true {
         didSet {
             // Stop immediately, even if an ordered-out hosting view no longer updates.
@@ -42,6 +45,11 @@ public final class PlayerPresentation {
         self.preferences = preferences
         visualizationDesign = (preferences.object(forKey: VisualizationDesign.preferenceKey) as? String)
             .flatMap(VisualizationDesign.init(rawValue:)) ?? .fluorescentLED
+        hidesAddedTracks = preferences.bool(forKey: Self.hidesAddedTracksKey)
+    }
+    public func setHidesAddedTracks(_ hides: Bool) {
+        hidesAddedTracks = hides
+        preferences.set(hides, forKey: Self.hidesAddedTracksKey)
     }
     var activeVisualizationDriver: any PlayerVisualizationDriver { driver(for: visualizationDesign) }
     /// Views currently showing the visualization. Turning an iPhone replaces the player view, and
