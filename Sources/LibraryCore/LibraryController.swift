@@ -619,6 +619,11 @@ import AudioProcessingCore
 
 // MARK: - Album tags
 
+extension LibraryTrack {
+    /// Not read yet, or read by an older reader without finding an album.
+    var needsTags: Bool { tags.map { $0.album == nil && ($0.version ?? 1) < TrackTags.currentVersion } ?? true }
+}
+
 extension LibraryController {
     /// Reads the tags of tracks that have none yet in the background and saves them in batches,
     /// so new and older tracks join their albums. Tags never block an import or another edit:
@@ -628,7 +633,7 @@ extension LibraryController {
         tagTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                let pending = Array(self.document.tracks.lazy.filter { $0.tags == nil && !self.tagFailures.contains($0.id) }.prefix(Self.tagBatchSize))
+                let pending = Array(self.document.tracks.lazy.filter { $0.needsTags && !self.tagFailures.contains($0.id) }.prefix(Self.tagBatchSize))
                 if pending.isEmpty { break }
                 var read: [UUID: TrackTags] = [:]
                 for track in pending {
@@ -648,8 +653,8 @@ extension LibraryController {
         guard editsEnabled, !isBusy else { return false }
         guard !read.isEmpty else { return true }
         var next = document
-        for i in next.tracks.indices where next.tracks[i].tags == nil {
-            if let tags = read[next.tracks[i].id] { next.tracks[i].tags = tags }
+        for i in next.tracks.indices where next.tracks[i].needsTags {
+            if var tags = read[next.tracks[i].id] { tags.version = TrackTags.currentVersion; next.tracks[i].tags = tags }
         }
         do { try next.validate(); try store.save(next); publish(next); return true }
         catch { return false }
