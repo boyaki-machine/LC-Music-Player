@@ -33,7 +33,7 @@ Sources/
 │       │   ├── TouchControls.swift            同じ名前の入力部品のiOS版（タッチ）
 │       │   ├── VolumeControls.swift           音量の操作曲線・内部のフォーカス境界
 │       │   ├── PlaylistClickSurface.swift     マウスのクリック回数・行のドラッグ
-│       │   ├── LibraryControls.swift          リストの操作・グラス等
+│       │   ├── LibraryControls.swift          リストの操作・グラス・ランダム再生・睡眠タイマー・常時表示の切替等
 │       │   ├── SourceFolderList.swift         音源のフォルダ一覧
 │       │   ├── QuickTooltip.swift             省略されたタイトルの表示
 │       │   └── Visualization/

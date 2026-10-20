@@ -218,10 +218,14 @@ public struct ExtensionView: View {
         case .list:
             HStack(spacing: 0) {
                 Text(viewed?.id == library.document.currentPlaylistID ? "現在の再生リスト" : "プレイリスト").fontWeight(.medium); Spacer()
-                // Playback mode toggles (a future repeat joins here), spaced apart against mistaken taps.
-                HStack(spacing: 12) {
+                // Playback mode toggles (a future repeat joins here), spaced apart against mistaken taps by a finger.
+                HStack(spacing: 28) {
                     ShuffleToggle(isOn: library.shufflesPlayback) { library.setShufflesPlayback(!library.shufflesPlayback) }
-                }.padding(.trailing, 14)
+                    SleepTimerToggle(timer: library.sleepTimer, count: library.sleepTimerCount,
+                                     toggle: { library.setSleepTimer(library.sleepTimer == nil) }, choose: library.setSleepTimerCount)
+                }
+                // Leaves as much room before the count as between the lit pictograms (about 42pt).
+                .padding(.trailing, 37)
                 Text("\(viewed?.entries.count ?? 0)曲").foregroundStyle(.secondary)
             }
             HStack {

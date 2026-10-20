@@ -14,6 +14,10 @@ public final class PlaybackController {
     public private(set) var message = "音楽ファイルを選択してください。"
     public private(set) var volume: Float = 0.25
     public private(set) var isMuted = false
+    /// An extra factor on the app volume, used by the sleep timer's fade. It never changes
+    /// `volume`, so the volume remembered for each output device stays the listener's choice.
+    public private(set) var fadeGain: Float = 1
+    private var outputVolume: Float { volume * fadeGain }
     public private(set) var normalizationRequired = false
     public var normalizationPlan: NormalizationPlan? { normalizationReady ? backend?.normalizationPlan : nil }
     @ObservationIgnored private var normalizationReady = false
@@ -69,7 +73,7 @@ public final class PlaybackController {
             let nextLease = try access ?? fileAccess.acquire(url)
             defer { withExtendedLifetime(nextLease) {} }
             let next = try makeBackend(url)
-            next.volume = volume
+            next.volume = outputVolume
             try committing()
             endRun()
             backend = next
@@ -95,7 +99,7 @@ public final class PlaybackController {
             try committing()
             endRun()
             backend = AudioEngineBackend(url: url, duration: duration, supportsSeeking: supportsSeeking)
-            backend?.volume = volume
+            backend?.volume = outputVolume
             selectedURL = url; self.duration = duration; state = .ready
             error = nil; message = "再生できます。"; connectAnalysis()
             return true
@@ -117,7 +121,7 @@ public final class PlaybackController {
             lease = access
             selectedURL = prepared.source.url
             duration = next.duration
-            next.volume = volume
+            next.volume = outputVolume
             state = .ready
             error = nil
             message = "再生できます。"
@@ -195,8 +199,14 @@ public final class PlaybackController {
         volume = min(1, max(0, value))
         isMuted = false
         if volume > 0 { volumeBeforeMute = volume }
-        backend?.volume = volume
+        backend?.volume = outputVolume
         onVolumeChange?()
+    }
+
+    public func setFadeGain(_ gain: Float) {
+        guard gain.isFinite else { return }
+        fadeGain = min(1, max(0, gain))
+        backend?.volume = outputVolume
     }
 
     public func toggleMute() {
@@ -208,7 +218,7 @@ public final class PlaybackController {
             isMuted = true
             volume = 0
         }
-        backend?.volume = volume
+        backend?.volume = outputVolume
         onVolumeChange?()
     }
 

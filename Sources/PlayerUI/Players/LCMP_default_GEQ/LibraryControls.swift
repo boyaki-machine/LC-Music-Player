@@ -2,6 +2,7 @@
 import AppKit
 #endif
 import SwiftUI
+import LibraryCore
 
 #if os(macOS)
 /// Fixed native button rectangles keep thin glyphs easy to click.
@@ -233,6 +234,51 @@ struct ShuffleToggle: View {
                 .frame(width: 32, height: 28).contentShape(Rectangle()).padding(.vertical, -6)
         }.buttonStyle(.plain).help("ランダム再生").accessibilityLabel("ランダム再生")
             .accessibilityValue(isOn ? "オン" : "オフ").accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
+/// Sleep timer: a tap starts or stops it, a long press chooses how many songs to play.
+/// Lit like the shuffle LED while it runs, with the songs left beside the moon.
+struct SleepTimerToggle: View {
+    let timer: SleepTimer?
+    let count: Int
+    let toggle: () -> Void
+    let choose: (Int) -> Void
+    @State private var choosing = false
+    var body: some View {
+        let isOn = timer != nil
+        HStack(spacing: 2) {
+            Image(systemName: isOn ? "moon.zzz.fill" : "moon.zzz").font(.ui(13, weight: .medium))
+            if let timer { Text("\(timer.remainingSongs)").font(.ui(10, weight: .semibold)).monospacedDigit() }
+        }
+        .foregroundStyle(isOn ? ShuffleToggle.litColor : .white.opacity(0.3))
+        .shadow(color: isOn ? ShuffleToggle.litColor.opacity(0.6) : .clear, radius: 4)
+        .frame(minWidth: 32, minHeight: 28).contentShape(Rectangle()).padding(.vertical, -6)
+        .onTapGesture(perform: toggle)
+        .onLongPressGesture(minimumDuration: 0.5) { choosing = true }
+        .popover(isPresented: $choosing, arrowEdge: .bottom) { choices }
+        .help("スリープタイマー（長押しで曲数を選ぶ）")
+        .accessibilityElement().accessibilityAddTraits(.isButton).accessibilityLabel("スリープタイマー")
+        .accessibilityValue(timer.map { "オン、残り\($0.remainingSongs)曲" } ?? "オフ、\(count)曲")
+        .accessibilityAddTraits(isOn ? .isSelected : [])
+        .accessibilityAction(.default, toggle)
+        .accessibilityAction(named: "曲数を選ぶ") { choosing = true }
+    }
+    private var choices: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("再生する曲数").font(.ui(11)).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.vertical, 6)
+            ForEach(SleepTimer.choices, id: \.self) { value in
+                Button { choosing = false; choose(value) } label: {
+                    HStack {
+                        Text("\(value)曲")
+                        Spacer(minLength: 24)
+                        if value == (timer?.count ?? count) { Image(systemName: "checkmark").foregroundStyle(ShuffleToggle.litColor) }
+                    }.padding(.horizontal, 14).frame(minHeight: 36).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityAddTraits(value == (timer?.count ?? count) ? .isSelected : [])
+            }
+        }
+        .padding(.vertical, 6).frame(minWidth: 140)
+        .presentationCompactAdaptation(.popover)
     }
 }
 

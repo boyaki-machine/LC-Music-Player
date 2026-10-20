@@ -413,6 +413,67 @@ extension LibraryNativeViewTests {
         library.setShufflesPlayback(false)
         try await Task.sleep(for: .milliseconds(100))
         #expect(litPixels(try render()) == 0)
+
+        // The sleep timer sits beside shuffle: it lights while it runs, and a click turns it off and on.
+        library.setSleepTimer(true)
+        try await Task.sleep(for: .milliseconds(100))
+        let timerOn = try render()
+        try snapshot(timerOn, "sleep-timer-on.png")
+        #expect(litPixels(timerOn) > 20)
+        let scale = CGFloat(timerOn.pixelsHigh) / host.bounds.height
+        var lit: [CGFloat] = []
+        for y in Int(42 * scale)..<Int(64 * scale) {
+            for x in timerOn.pixelsWide / 2..<timerOn.pixelsWide {
+                guard let color = timerOn.colorAt(x: x, y: y) else { continue }
+                if color.greenComponent > 0.6, color.greenComponent - color.redComponent > 0.15 { lit.append(CGFloat(x)) }
+            }
+        }
+        let timerX = lit.reduce(0, +) / CGFloat(max(1, lit.count)) / scale
+        // Shuffle is off and dark here, so the lit pixels are the timer's, right of the middle and left of the count.
+        #expect(timerX > host.bounds.width / 2 && timerX < host.bounds.width - 20)
+        func click() async throws {
+            let location = NSPoint(x: timerX, y: host.bounds.height - 53)
+            func event(_ type: NSEvent.EventType) throws -> NSEvent {
+                try #require(NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            }
+            window.sendEvent(try event(.leftMouseDown)); window.sendEvent(try event(.leftMouseUp))
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        try await click()
+        let timerOff = try render()
+        #expect(library.sleepTimer == nil && litPixels(timerOff) == 0)
+        try await click()
+        #expect(library.sleepTimer?.count == SleepTimer.defaultCount)
+        // With both lit, the widest empty run between lit columns is the space between the two icons.
+        library.setShufflesPlayback(true)
+        try await Task.sleep(for: .milliseconds(100))
+        let both = try render()
+        try snapshot(both, "shuffle-and-sleep-timer-on.png")
+        var columns = Set<Int>()
+        for y in Int(42 * scale)..<Int(64 * scale) {
+            for x in both.pixelsWide / 2..<both.pixelsWide {
+                guard let color = both.colorAt(x: x, y: y) else { continue }
+                if color.greenComponent > 0.6, color.greenComponent - color.redComponent > 0.15 { columns.insert(x) }
+            }
+        }
+        let sorted = columns.sorted()
+        let gap = zip(sorted, sorted.dropFirst()).map { CGFloat($1 - $0) / scale }.max() ?? 0
+        #expect(gap >= 36, "gap between the icons \(gap)pt")
+        // The entry count (grey text) starts as far right of the timer as the timer is from shuffle.
+        let timerRight = try #require(sorted.last)
+        var countLeft: Int?
+        for x in timerRight + 1..<both.pixelsWide {
+            for y in Int(42 * scale)..<Int(64 * scale) {
+                guard let color = both.colorAt(x: x, y: y) else { continue }
+                if color.redComponent > 0.4, abs(color.redComponent - color.greenComponent) < 0.06 { countLeft = x; break }
+            }
+            if countLeft != nil { break }
+        }
+        let countGap = CGFloat(try #require(countLeft) - timerRight) / scale
+        #expect(abs(countGap - gap) <= 2, "timer to count \(countGap)pt, shuffle to timer \(gap)pt")
+        library.setShufflesPlayback(false)
+        library.setSleepTimer(false)
     }
 }
 

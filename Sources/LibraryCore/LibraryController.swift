@@ -34,6 +34,15 @@ import AudioProcessingCore
     /// The entry picked to follow `after`, kept so that preparing the next entry and moving to it agree.
     @ObservationIgnored private var upcomingShuffle: (playlist: UUID, after: UUID, pick: UUID)?
     @ObservationIgnored private var random: AnyRandomNumberGenerator
+    /// The running sleep timer, or nil while it is off. Turning it on is not kept across launches.
+    public private(set) var sleepTimer: SleepTimer?
+    /// The song count the timer starts with; the choice is kept.
+    public private(set) var sleepTimerCount = SleepTimer.defaultCount
+    static let sleepTimerCountKey = "sleepTimerSongCount"
+    /// Called after the sleep timer has stopped playback. The Mac app quits here.
+    @ObservationIgnored public var onSleepTimerFinished: (@MainActor () -> Void)?
+    @ObservationIgnored private var sleepFadeTask: Task<Void, Never>?
+    @ObservationIgnored private let sleepFadeInterval: Duration
     public private(set) var preparationStage: String?
     @ObservationIgnored private var measuredLevels: TrackAudioMetrics?
     @ObservationIgnored private var normalizationNeedsPreparation = false
@@ -64,8 +73,9 @@ import AudioProcessingCore
                 preprocessingEnabled: Bool = false, playlistPreprocessingEnabled: Bool = false, preferences: any PreferenceStoring = UserDefaults.standard,
                 preprocessor: any AudioPreprocessing = AudioPreprocessor.shared,
                 random: any RandomNumberGenerator = SystemRandomNumberGenerator(),
-                preparationNoticeDelay: Duration = .milliseconds(300)) {
+                preparationNoticeDelay: Duration = .milliseconds(300), sleepFadeInterval: Duration = .milliseconds(500)) {
         self.playback = playback; self.store = store; self.references = references
+        self.sleepFadeInterval = sleepFadeInterval
         self.preparationNoticeDelay = preparationNoticeDelay
         self.preprocessor = preprocessor; self.random = AnyRandomNumberGenerator(random)
         self.preprocessingEnabled = preprocessingEnabled; self.preferences = preferences
@@ -80,6 +90,7 @@ import AudioProcessingCore
         measuresMaximumVolume = preferences.bool(forKey: "measureMaximumVolume")
         normalizesVolume = preferences.bool(forKey: "normalizeVolume")
         shufflesPlayback = preferences.bool(forKey: "shufflePlayback")
+        if let count = preferences.object(forKey: Self.sleepTimerCountKey) as? Int, SleepTimer.choices.contains(count) { sleepTimerCount = count }
         if let target = preferences.object(forKey: "normalizationTargetLUFS") as? Double,
            let settings = try? NormalizationSettings(targetLUFS: target) { normalizationSettings = settings }
         playback.requireNormalization(normalizesVolume)
@@ -92,6 +103,7 @@ import AudioProcessingCore
         }
         playback.onNaturalFinish = { [weak self] in
             guard let self else { return }
+            if self.sleepTimerEndsWithThisSong() { return }
             if self.isPreparing { return }
             if self.isBusy { self.pendingAdvance = true } else { self.move(1, autoPlay: true) }
         }
@@ -109,6 +121,7 @@ import AudioProcessingCore
     public func playlist(_ id: UUID?) -> MusicPlaylist? { document.playlists.first { $0.id == id } }
     public func track(_ id: UUID) -> LibraryTrack? { trackIndex[id].map { document.tracks[$0] } }
     private func publish(_ next: LibraryDocument) {
+        if next.currentEntryID != document.currentEntryID, document.currentEntryID != nil { sleepTimer?.songChanged() }
         document = next
         trackIndex = Self.positions(next.tracks)
     }
@@ -378,6 +391,57 @@ import AudioProcessingCore
         return entry(pick)
     }
 
+    // MARK: Sleep timer
+
+    /// Starts the timer with the chosen count, counting the current song as the first, or turns it off.
+    public func setSleepTimer(_ enabled: Bool) {
+        guard !shuttingDown, enabled != (sleepTimer != nil) else { return }
+        if enabled {
+            // A stopped or finished song starts again from the top, so it counts from its start.
+            let started = playback.state == .playing || playback.state == .paused
+            sleepTimer = SleepTimer(count: sleepTimerCount, startFraction: started ? currentSongFraction : 0)
+            runSleepFade()
+        } else { endSleepTimer() }
+    }
+    /// Choosing a count keeps it for next time and starts the timer; a running timer keeps its played songs.
+    public func setSleepTimerCount(_ count: Int) {
+        guard !shuttingDown, SleepTimer.choices.contains(count) else { return }
+        sleepTimerCount = count; preferences.set(count, forKey: Self.sleepTimerCountKey)
+        if sleepTimer == nil { setSleepTimer(true) } else { sleepTimer?.setCount(count); applySleepFade() }
+    }
+    private var currentSongFraction: Double {
+        playback.duration > 0 ? playback.currentTime / playback.duration : 0
+    }
+    /// At the natural end of the last song (or of the list), stops instead of moving on.
+    private func sleepTimerEndsWithThisSong() -> Bool {
+        guard let timer = sleepTimer, timer.isOnLastSong || adjacentEntry(1) == nil else { return false }
+        endSleepTimer()
+        playback.stop()
+        onSleepTimerFinished?()
+        return true
+    }
+    private func endSleepTimer() {
+        sleepFadeTask?.cancel(); sleepFadeTask = nil
+        sleepTimer = nil
+        playback.setFadeGain(1)
+    }
+    private func applySleepFade() {
+        guard let timer = sleepTimer else { return }
+        playback.setFadeGain(timer.gain(currentFraction: currentSongFraction))
+    }
+    /// One clock follows the song position while the timer runs; it does nothing else.
+    private func runSleepFade() {
+        sleepFadeTask?.cancel()
+        let interval = sleepFadeInterval
+        sleepFadeTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.sleepTimer != nil else { return }
+                self.applySleepFade()
+                do { try await Task.sleep(for: interval) } catch { return }
+            }
+        }
+    }
+
     // MARK: Import, export and shutdown
 
     private func retirePlaylistWorkForImport() async {
@@ -403,6 +467,7 @@ import AudioProcessingCore
         playback.onActivityChange = nil
         pendingAdvance = false; editsEnabled = false
         playback.onNaturalFinish = nil
+        sleepFadeTask?.cancel(); sleepFadeTask = nil
         playback.close()
         logger.notice("Library shutdown finished after \(String(describing: started.duration(to: .now)), privacy: .public)")
     }

@@ -140,6 +140,8 @@ PCMFeeder（専用キュー）→ AVAudioPlayerNode → AVAudioMixerNode（出�
 
 手動音量はPlaybackCoreが担当する。PlayerUIが操作を受け、`PlaybackController.setVolume`／`toggleMute`が値と状態を管理し、AudioEngineBackendが`mainMixerNode.outputVolume`へ反映する。音量・ミュートの変更は再生を続けたまま行う。PlayerUIは音量バーの操作位置を小音量側の曲線から実倍率へ変換してこのAPIへ渡し、再生層は非線形の操作位置を保持しない。
 
+睡眠タイマーのフェードは`PlaybackController.setFadeGain`で渡す0〜1の倍率で、main mixerにはアプリ内音量×この倍率を設定する。`volume`は変えないので、音量の表示と出力デバイスごとの音量の記憶には影響しない。音源を選び直しても倍率は保つ。
+
 自動補正の固定ゲインはmainMixerより前の専用段で適用し、手動音量とは別の倍率として管理する。詳細は[音量自動調整の実装設計](06_volume-normalization-implementation.md)に記載する。
 
 ### デコーダの選択
