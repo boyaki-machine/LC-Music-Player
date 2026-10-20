@@ -31,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private let playback = PlaybackController()
     private lazy var library = LibraryController(playback: playback, preprocessingEnabled: true, playlistPreprocessingEnabled: true, preprocessor: AudioPreprocessor(cache: .application))
     private let presentation = PlayerPresentation()
+    /// Restores each output device's app volume; the Mac's system volume is never written.
+    private var deviceVolume: DeviceVolumeMemory?
     private var mainWindow: NSWindow!
     private var extensionWindow: NSWindow!
     private let acknowledgements = AcknowledgementsWindowController()
@@ -50,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         extensionWindow.delegate = self
         mainWindow.center()
         installMenus()
+        deviceVolume = DeviceVolumeMemory(playback: playback, system: CoreAudioOutputVolume())
         library.restore()
         showPlayer()
     }
