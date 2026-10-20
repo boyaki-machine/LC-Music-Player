@@ -32,7 +32,7 @@
 | `ShuffleCycle` | ランダム再生の一巡で再生したエントリ（再生した順、library.jsonに保存） |
 | `DeviceVolumeMemory` | 出力デバイスごとのアプリ内音量とシステム音量の記憶・復元 |
 | `SleepTimer` | 睡眠タイマーの曲数・再生を終えた曲数・フェードの倍率 |
-| `TrackTags`／`AssetTagReader` | アルバムのタグ（アルバム名・アルバムアーティスト・アーティスト・ディスク・トラック）と、その読み取り |
+| `TrackTags`／`AssetTagReader`／`RIFFInfo` | アルバムのタグ（アルバム名・アルバムアーティスト・アーティスト・ディスク・トラック）と、その読み取り（WAVのLIST INFOを含む） |
 
 - 音源IDとエントリIDを分け、同じ音源をリストへ複数回登録できるようにする。
 - 同じファイルの再登録はパスを正規化して既存の音源へまとめる。ファイル内容のハッシュによる同一判定は行わない。
@@ -184,8 +184,11 @@
 
 ### アルバムのタグ
 
-- `LibraryTrack.tags`は任意の項目で、nilは未読を表す。タグを読んでアルバムがなかった曲は空の`TrackTags`を持ち、読み直さない。tagsを持たないschemaVersion 1のデータはそのまま読み込む。
-- `AssetTagReader`は、ファイルを`AVURLAsset`のメタデータで読む。ID3（MP3・WAVの`id3 `チャンク・AIFFの`ID3 `チャンク）、iTunes（M4A）、Vorbis comment（FLAC）に対応する。アルバム名とアーティストは共通キー、アルバムアーティスト・ディスク・トラックは形式ごとの識別子（ID3のTPE2・TPOS・TRCK、iTunesのaART・disk・trkn、VorbisのALBUMARTIST・DISCNUMBER・TRACKNUMBER）で取る。番号は「3/10」の形とiTunesのバイナリの形を読む。WAVのLIST INFOのアルバム（IPRD）はAVFoundationが返さないため読まない。
+- `LibraryTrack.tags`は任意の項目で、nilは未読を表す。タグを読んでアルバムがなかった曲は空の`TrackTags`を持ち、読み直さない。ただし`TrackTags.version`（読み取り方の版、nilは1）が`TrackTags.currentVersion`より古く、アルバムがなかった曲は、新しい読み取り方で一度だけ読み直す（版2でWAVのLIST INFOに対応した）。読んだ値には現在の版を付けて保存する。tagsを持たないschemaVersion 1のデータはそのまま読み込む。
+- `AssetTagReader`は、ファイルを`AVURLAsset`のメタデータで読む。ID3（MP3・WAVの`id3 `チャンク・AIFFの`ID3 `チャンク）、iTunes（M4A）、Vorbis comment（FLAC）に対応する。アルバム名とアーティストは共通キー、アルバムアーティスト・ディスク・トラックは形式ごとの識別子（ID3のTPE2・TPOS・TRCK、iTunesのaART・disk・trkn、VorbisのALBUMARTIST・DISCNUMBER・TRACKNUMBER）で取る。番号は「3/10」の形とiTunesのバイナリの形を読む。
+- WAVのLIST INFOのアルバム（`IPRD`）はAVFoundationが返さないため、`RIFFInfo`で読む。RIFF/WAVEの先頭のチャンクの見出しだけを順にたどり（音声のデータは読み飛ばす）、種類が`INFO`の`LIST`から`IPRD`（アルバム）・`IART`（アーティスト）・`ITRK`（なければ`IPRT`、トラック番号）を取る。AVFoundation（ID3チャンク）の値を優先し、足りない項目だけを補う。
+- LIST INFOは信頼できない入力として扱う。たどるチャンクは256個まで、LIST INFOは64KiBまでとし、ファイルの終わりを超える大きさのチャンクに当たったらそこで打ち切る。RIFF/WAVEでないファイルは読まない。異常があってもLIST INFOがないものとして扱う。値は最初のNULまでとする。
+- LIST INFOの文字コードには決まりがないため、UTF-8として正しければUTF-8、だめならShift_JIS（CP932）、それでもだめならWindows-1252で読む。Windows-1252の文字列でも、Shift_JISとして正しいバイト列なら日本語として読まれることがある。
 - 「ミュージック」の曲は、persistent IDで`MPMediaItem`を引き、アルバム名・アルバムアーティスト・アーティスト・ディスク番号・トラック番号を使う（`MediaLibraryLookup.tags(forPersistentID:)`）。
 - タグは信頼できない入力として扱う。制御文字を空白にし、前後の空白を除き、200文字で切る。番号は1〜9999だけを使う。
 - `LibraryController`は、起動・登録の完了・参照の修復の後に、tagsがnilの曲を64曲ずつ裏で読み、読んだ分を1回の保存で現在の文書へ書き込む。登録中は書き込まず、登録の完了後に読み直す。読めなかった曲（参照切れ・読み取りの失敗）はその起動の間は再び読まず、次の起動で読み直す。修復ではtagsを未読に戻す。
@@ -231,6 +234,7 @@
 - 次曲送りと遅延通知、M3U8の往復、ネイティブ描画と初期スクロールが動作する。
 - ランダム再生の一巡が全エントリの順列で、各エントリが各位置に偏りなく現れ、前後・自然送り・曲行の選択・編集・設定の保存が要件どおりに動き、アプリを開き直しても一巡が続く（`ShuffleTests`）。
 - 出力デバイスごとの音量が記憶・復元され、接続や再生開始の直後のシステム音量の跳ね上がりを打ち消し、音量ボタン1段程度の変更と猶予後の変更は利用者の操作として記憶を更新する（`DeviceVolumeTests`）。
+- WAVのLIST INFOのアルバム・アーティスト・トラック番号が読め、ID3を優先し、文字コードをUTF-8・Shift_JIS・Windows-1252の順に試し、壊れたRIFF（途中で切れる・大きさが終わりを超える・上限を超える・WAVEでない）でも落ちずにLIST INFOなしとして扱う（`RIFFInfoTests`）。
 - タグが形式ごとに読め、信頼できない値が整えられ、登録・起動・修復の後に保存され、読んだ曲は読み直さない（`TrackTagsTests`・`LibraryTagReadingTests`）。アルバムが2曲以上でまとまり、ファイルと「ミュージック」の曲が1つになり、残りの曲がフォルダの規則に従い、順序と同名のアルバムの見出しが要件どおりになる（`SourceGroupTests`）。
 - 睡眠タイマーが、今の曲を1曲目として指定した曲数で止まり、終了を知らせ、リストの末尾でも止まる。フェードはアプリ内音量を変えずに出力だけを下げ、オフでは途中の段を踏んで元に戻り、戻している途中でオンにしても急に上がらない。曲数は保存し、オン・オフは保存しない（`SleepTimerTests`）。
 - 準備の状態文は、0.3秒より短い準備では出ず、長い準備では遅れて出て、終われば消える（`NextPreparationTests`の`quickPreparationNeverShowsTheNotice`・`slowPreparationShowsTheNoticeAfterTheDelay`）。
@@ -242,7 +246,7 @@
 ./scripts/swift.sh test --filter ReferenceAndStoreTests
 ./scripts/swift.sh test --filter Shuffle
 ./scripts/swift.sh test --filter SleepTimer
-./scripts/swift.sh test --filter 'TrackTagsTests|LibraryTagReadingTests|SourceGroupTests'
+./scripts/swift.sh test --filter 'TrackTagsTests|LibraryTagReadingTests|RIFFInfoTests|SourceGroupTests'
 ./scripts/swift.sh test --filter LibraryEditingTests
 ./scripts/swift.sh test --filter LibraryOrganizationTests
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --filter ShufflePlaybackTests

@@ -10,6 +10,11 @@ public struct TrackTags: Codable, Equatable, Sendable {
     public var artist: String?
     public var disc: Int?
     public var track: Int?
+    /// The reader version that produced these tags; nil for the first version. A track read by an
+    /// older version without finding an album is read again, since a newer reader may find one.
+    public var version: Int?
+    /// 2: WAV files' INFO list.
+    public static let currentVersion = 2
     /// Tags are untrusted input: text is trimmed, stripped of control characters and shortened,
     /// and numbers outside 1...9999 are dropped.
     public init(album: String? = nil, albumArtist: String? = nil, artist: String? = nil, disc: Int? = nil, track: Int? = nil) {
@@ -59,8 +64,16 @@ public struct AssetTagReader: TrackTagReading {
             guard let field = Field(item), fields[field] == nil, let value = try? await item.load(.value) else { continue }
             fields[field] = value
         }
-        return TrackTags(album: fields[.album] as? String, albumArtist: fields[.albumArtist] as? String, artist: fields[.artist] as? String,
-                         disc: fields[.disc].flatMap(Self.number), track: fields[.track].flatMap(Self.number))
+        var tags = TrackTags(album: fields[.album] as? String, albumArtist: fields[.albumArtist] as? String, artist: fields[.artist] as? String,
+                             disc: fields[.disc].flatMap(Self.number), track: fields[.track].flatMap(Self.number))
+        // AVFoundation returns no album from a WAV file's INFO list. Its values fill only what the
+        // ID3 chunk, which takes precedence, leaves out.
+        if url.pathExtension.lowercased() == "wav", tags.album == nil || tags.artist == nil || tags.track == nil,
+           let info = RIFFInfo.read(url) {
+            tags = TrackTags(album: tags.album ?? info.album, albumArtist: tags.albumArtist, artist: tags.artist ?? info.artist,
+                             disc: tags.disc, track: tags.track ?? info.track)
+        }
+        return tags
     }
     private enum Field {
         case album, albumArtist, artist, disc, track

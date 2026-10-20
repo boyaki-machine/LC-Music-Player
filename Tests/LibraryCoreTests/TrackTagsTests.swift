@@ -193,7 +193,8 @@ private func addVorbisComments(_ url: URL, _ comments: [String]) throws {
         let model = model(store, reader)
         await model.importFiles([try file("a.mp3"), try file("b.mp3")])
         await model.waitForTags()
-        #expect(model.document.tracks.map(\.tags) == [TrackTags(album: "Album", track: 1), TrackTags()])
+        func current(_ tags: TrackTags) -> TrackTags { var tags = tags; tags.version = TrackTags.currentVersion; return tags }
+        #expect(model.document.tracks.map(\.tags) == [current(TrackTags(album: "Album", track: 1)), current(TrackTags())])
         #expect(store.document.tracks.map(\.tags) == model.document.tracks.map(\.tags))
         // Read tags, even empty ones, are not read again on the next launch.
         let again = self.model(store, reader)
@@ -248,5 +249,27 @@ private func addVorbisComments(_ url: URL, _ comments: [String]) throws {
         await model.importFiles([try file("a.mp3")])
         await model.waitForTags()
         #expect(model.document.tracks.first?.tags == nil)
+    }
+
+    @Test func tracksReadByAnOlderReaderWithoutAnAlbumAreReadOnceMore() async throws {
+        let store = MemoryStore()
+        let old = try file("old.wav"), found = try file("found.wav")
+        var oldEmpty = LibraryTrack(name: "old", reference: TrackReference(bookmark: Data(old.absoluteString.utf8), lastKnownURL: old), tags: TrackTags())
+        let withAlbum = LibraryTrack(name: "found", reference: TrackReference(bookmark: Data(found.absoluteString.utf8), lastKnownURL: found),
+                                     tags: TrackTags(album: "Known"))
+        oldEmpty.tags?.version = nil
+        store.document.tracks = [oldEmpty, withAlbum]
+        let reader = FakeTagReader(); reader.set("old.wav", TrackTags(album: "Info Album"))
+        let model = model(store, reader)
+        await model.waitForTags()
+        #expect(model.track(oldEmpty.id)?.tags?.album == "Info Album")
+        #expect(model.track(oldEmpty.id)?.tags?.version == TrackTags.currentVersion)
+        // A track that already has an album is not read again.
+        #expect(reader.readCount("found.wav") == 0)
+        // Once read by the current reader, an empty result is final.
+        reader.set("old.wav", TrackTags())
+        store.document.tracks[0].tags = TrackTags(); store.document.tracks[0].tags?.version = TrackTags.currentVersion
+        await self.model(store, reader).waitForTags()
+        #expect(reader.readCount("old.wav") == 1)
     }
 }
