@@ -43,6 +43,9 @@ import AudioProcessingCore
     @ObservationIgnored public var onSleepTimerFinished: (@MainActor () -> Void)?
     @ObservationIgnored private var sleepFadeTask: Task<Void, Never>?
     @ObservationIgnored private let sleepFadeInterval: Duration
+    /// Turning the timer off while it has lowered the volume brings the volume back over this time.
+    @ObservationIgnored private let sleepRestoreDuration: Duration
+    @ObservationIgnored private var sleepRestoreTask: Task<Void, Never>?
     public private(set) var preparationStage: String?
     @ObservationIgnored private var measuredLevels: TrackAudioMetrics?
     @ObservationIgnored private var normalizationNeedsPreparation = false
@@ -73,9 +76,10 @@ import AudioProcessingCore
                 preprocessingEnabled: Bool = false, playlistPreprocessingEnabled: Bool = false, preferences: any PreferenceStoring = UserDefaults.standard,
                 preprocessor: any AudioPreprocessing = AudioPreprocessor.shared,
                 random: any RandomNumberGenerator = SystemRandomNumberGenerator(),
-                preparationNoticeDelay: Duration = .milliseconds(300), sleepFadeInterval: Duration = .milliseconds(500)) {
+                preparationNoticeDelay: Duration = .milliseconds(300), sleepFadeInterval: Duration = .milliseconds(500),
+                sleepRestoreDuration: Duration = .milliseconds(2500)) {
         self.playback = playback; self.store = store; self.references = references
-        self.sleepFadeInterval = sleepFadeInterval
+        self.sleepFadeInterval = sleepFadeInterval; self.sleepRestoreDuration = sleepRestoreDuration
         self.preparationNoticeDelay = preparationNoticeDelay
         self.preprocessor = preprocessor; self.random = AnyRandomNumberGenerator(random)
         self.preprocessingEnabled = preprocessingEnabled; self.preferences = preferences
@@ -401,7 +405,7 @@ import AudioProcessingCore
             let started = playback.state == .playing || playback.state == .paused
             sleepTimer = SleepTimer(count: sleepTimerCount, startFraction: started ? currentSongFraction : 0)
             runSleepFade()
-        } else { endSleepTimer() }
+        } else { endSleepTimer(restoring: true) }
     }
     /// Choosing a count keeps it for next time and starts the timer; a running timer keeps its played songs.
     public func setSleepTimerCount(_ count: Int) {
@@ -415,25 +419,47 @@ import AudioProcessingCore
     /// At the natural end of the last song (or of the list), stops instead of moving on.
     private func sleepTimerEndsWithThisSong() -> Bool {
         guard let timer = sleepTimer, timer.isOnLastSong || adjacentEntry(1) == nil else { return false }
-        endSleepTimer()
+        endSleepTimer(restoring: false)
         playback.stop()
         onSleepTimerFinished?()
         return true
     }
-    private func endSleepTimer() {
+    /// Turning the timer off brings a lowered volume back gradually, so it never jumps up while
+    /// someone listens. After the timer has stopped playback the volume is reset at once.
+    private func endSleepTimer(restoring: Bool) {
         sleepFadeTask?.cancel(); sleepFadeTask = nil
         sleepTimer = nil
-        playback.setFadeGain(1)
+        if restoring, playback.fadeGain < 1 { restoreSleepFade() }
+        else { sleepRestoreTask?.cancel(); sleepRestoreTask = nil; playback.setFadeGain(1) }
+    }
+    /// Rises evenly in decibels from the current level to full volume over `sleepRestoreDuration`.
+    private func restoreSleepFade() {
+        sleepRestoreTask?.cancel()
+        let startDB = 20 * log10(Double(max(playback.fadeGain, 0.001)))
+        let duration = sleepRestoreDuration, step = Duration.milliseconds(50)
+        let started = ContinuousClock.now
+        sleepRestoreTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                let elapsed = started.duration(to: .now) / duration
+                guard let self else { return }
+                if elapsed >= 1 { self.playback.setFadeGain(1); self.sleepRestoreTask = nil; return }
+                self.playback.setFadeGain(Float(pow(10, startDB * (1 - elapsed) / 20)))
+                do { try await Task.sleep(for: step) } catch { return }
+            }
+        }
     }
     private func applySleepFade() {
-        guard let timer = sleepTimer else { return }
+        // While a lowered volume is still coming back, the new timer waits for it to finish.
+        guard let timer = sleepTimer, sleepRestoreTask == nil else { return }
         playback.setFadeGain(timer.gain(currentFraction: currentSongFraction))
     }
     /// One clock follows the song position while the timer runs; it does nothing else.
     private func runSleepFade() {
         sleepFadeTask?.cancel()
         let interval = sleepFadeInterval
+        let restoring = sleepRestoreTask
         sleepFadeTask = Task { @MainActor [weak self] in
+            await restoring?.value
             while !Task.isCancelled {
                 guard let self, self.sleepTimer != nil else { return }
                 self.applySleepFade()
@@ -468,6 +494,7 @@ import AudioProcessingCore
         pendingAdvance = false; editsEnabled = false
         playback.onNaturalFinish = nil
         sleepFadeTask?.cancel(); sleepFadeTask = nil
+        sleepRestoreTask?.cancel(); sleepRestoreTask = nil
         playback.close()
         logger.notice("Library shutdown finished after \(String(describing: started.duration(to: .now)), privacy: .public)")
     }
