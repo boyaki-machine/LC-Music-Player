@@ -199,7 +199,7 @@ public struct ExtensionView: View {
             }
             .confirmationDialog("「\(confirmFolder?.name ?? "")」の\(confirmFolder?.tracks.count ?? 0)曲を、ライブラリと各プレイリストから除外します。元ファイルは削除しません。",
                                 isPresented: Binding(get: { confirmFolder != nil }, set: { if !$0 { confirmFolder = nil } })) {
-                Button("フォルダを除外", role: .destructive) { if let group = confirmFolder { library.excludeTracks(group.tracks.map(\.id)) }; confirmFolder = nil }
+                Button("\(confirmFolder?.kindName ?? "フォルダ")を除外", role: .destructive) { if let group = confirmFolder { library.excludeTracks(group.tracks.map(\.id)) }; confirmFolder = nil }
             }
         }
     }

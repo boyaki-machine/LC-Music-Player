@@ -29,7 +29,7 @@ final class PlayerWindow: NSWindow {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation {
     private let playback = PlaybackController()
-    private lazy var library = LibraryController(playback: playback, preprocessingEnabled: true, playlistPreprocessingEnabled: true, preprocessor: AudioPreprocessor(cache: .application))
+    private lazy var library = LibraryController(playback: playback, preprocessingEnabled: true, playlistPreprocessingEnabled: true, preprocessor: AudioPreprocessor(cache: .application), tagReader: AssetTagReader())
     private let presentation = PlayerPresentation()
     /// Restores each output device's app volume; the Mac's system volume is never written.
     private var deviceVolume: DeviceVolumeMemory?

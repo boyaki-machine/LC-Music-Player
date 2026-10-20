@@ -20,8 +20,10 @@ public struct LibraryTrack: Codable, Equatable, Identifiable, Sendable {
     public var name: String
     public var reference: TrackReference
     public var registration: TrackRegistration?
-    public init(id: UUID = UUID(), name: String, reference: TrackReference, registration: TrackRegistration? = nil) {
-        self.id = id; self.name = name; self.reference = reference; self.registration = registration
+    /// The album tags, or nil until they have been read. Older files without them still load.
+    public var tags: TrackTags?
+    public init(id: UUID = UUID(), name: String, reference: TrackReference, registration: TrackRegistration? = nil, tags: TrackTags? = nil) {
+        self.id = id; self.name = name; self.reference = reference; self.registration = registration; self.tags = tags
     }
 }
 public struct PlaylistEntry: Codable, Equatable, Identifiable, Sendable {

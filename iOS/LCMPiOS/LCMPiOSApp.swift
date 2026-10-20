@@ -48,7 +48,7 @@ struct LCMPiOSApp: App {
         let store = JSONLibraryStore(url: JSONLibraryStore.defaultURL)
         #endif
         library = LibraryController(playback: playback, store: store, preprocessingEnabled: true, playlistPreprocessingEnabled: true,
-                                    preprocessor: AudioPreprocessor(cache: cache))
+                                    preprocessor: AudioPreprocessor(cache: cache), tagReader: AssetTagReader())
         session = AudioSessionController(playback: playback, library: library)
         deviceVolume = DeviceVolumeMemory(playback: playback, system: AudioSessionOutputVolume(setter: SystemVolumeSlider.shared.set))
         library.restore()

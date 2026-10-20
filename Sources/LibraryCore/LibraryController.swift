@@ -70,6 +70,11 @@ import AudioProcessingCore
     @ObservationIgnored private var measuredTrack: UUID?
     @ObservationIgnored private var pendingAdvance = false
     @ObservationIgnored private var shuttingDown = false
+    @ObservationIgnored private let tagReader: (any TrackTagReading)?
+    @ObservationIgnored private var tagTask: Task<Void, Never>?
+    /// Tracks whose tags could not be read in this run. They are tried again on the next launch.
+    @ObservationIgnored private var tagFailures: Set<UUID> = []
+    static let tagBatchSize = 64
 
     public init(playback: PlaybackController, store: any LibraryPersistence = JSONLibraryStore(url: JSONLibraryStore.defaultURL),
                 references: any FileReferenceProvider = BookmarkFileReferences(),
@@ -77,8 +82,8 @@ import AudioProcessingCore
                 preprocessor: any AudioPreprocessing = AudioPreprocessor.shared,
                 random: any RandomNumberGenerator = SystemRandomNumberGenerator(),
                 preparationNoticeDelay: Duration = .milliseconds(300), sleepFadeInterval: Duration = .milliseconds(500),
-                sleepRestoreDuration: Duration = .milliseconds(2500)) {
-        self.playback = playback; self.store = store; self.references = references
+                sleepRestoreDuration: Duration = .milliseconds(2500), tagReader: (any TrackTagReading)? = nil) {
+        self.playback = playback; self.store = store; self.references = references; self.tagReader = tagReader
         self.sleepFadeInterval = sleepFadeInterval; self.sleepRestoreDuration = sleepRestoreDuration
         self.preparationNoticeDelay = preparationNoticeDelay
         self.preprocessor = preprocessor; self.random = AnyRandomNumberGenerator(random)
@@ -102,6 +107,7 @@ import AudioProcessingCore
         if preprocessingEnabled { playback.onActivityChange = { [weak self] in self?.updatePreprocessing() } }
         do { publish(try store.load().prunedShuffleCycles()); message = store.recoveryMessage; auditMeasurementCache() }
         catch { self.error = error.localizedDescription; editsEnabled = false }
+        readMissingTags()
         if playlistPreprocessing != nil {
             Task { [weak self] in self?.resumePlaylistPreprocessing() }
         }
@@ -231,8 +237,10 @@ import AudioProcessingCore
         do {
             guard SupportedAudio.accepts(url) else { throw PlaybackError.unsupportedFormat }
             var next = document; next.tracks[i].reference = try references.makeReference(url)
+            // The replacement file may carry other tags.
+            next.tracks[i].tags = nil
             if commit(next) {
-                unavailable[id] = nil
+                unavailable[id] = nil; tagFailures.remove(id); readMissingTags()
                 if currentTrack?.id == id, playback.state == .empty,
                    let list = document.currentPlaylistID, let entry = document.currentEntryID {
                     selectEntry(entry, in: list)
@@ -480,6 +488,7 @@ import AudioProcessingCore
     }
     private func finishImport() {
         isBusy = false
+        readMissingTags()
         if playlistPreprocessing != nil { resumePlaylistPreprocessing(retryFailures: true) }
         if pendingAdvance { pendingAdvance = false; if playback.state == .finished { move(1, autoPlay: true) } }
     }
@@ -495,6 +504,7 @@ import AudioProcessingCore
         playback.onNaturalFinish = nil
         sleepFadeTask?.cancel(); sleepFadeTask = nil
         sleepRestoreTask?.cancel(); sleepRestoreTask = nil
+        tagTask?.cancel(); tagTask = nil
         playback.close()
         logger.notice("Library shutdown finished after \(String(describing: started.duration(to: .now)), privacy: .public)")
     }
@@ -605,6 +615,47 @@ import AudioProcessingCore
             message = "M3U8を書き出しました。"; error = nil
         } catch { self.error = error.localizedDescription }
     }
+}
+
+// MARK: - Album tags
+
+extension LibraryController {
+    /// Reads the tags of tracks that have none yet in the background and saves them in batches,
+    /// so new and older tracks join their albums. Tags never block an import or another edit:
+    /// a batch that meets an import is dropped and read again when the import has finished.
+    private func readMissingTags() {
+        guard let tagReader, tagTask == nil, editsEnabled else { return }
+        tagTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let pending = Array(self.document.tracks.lazy.filter { $0.tags == nil && !self.tagFailures.contains($0.id) }.prefix(Self.tagBatchSize))
+                if pending.isEmpty { break }
+                var read: [UUID: TrackTags] = [:]
+                for track in pending {
+                    guard let resolved = try? self.references.resolve(track.reference) else { self.tagFailures.insert(track.id); continue }
+                    let tags = await tagReader.tags(for: resolved.url)
+                    withExtendedLifetime(resolved.lease) {}
+                    if Task.isCancelled { return }
+                    if let tags { read[track.id] = tags } else { self.tagFailures.insert(track.id) }
+                }
+                if !self.saveTags(read) { break }
+            }
+            if !Task.isCancelled { self?.tagTask = nil }
+        }
+    }
+    /// Saves read tags onto the current document. Tracks removed meanwhile are skipped.
+    private func saveTags(_ read: [UUID: TrackTags]) -> Bool {
+        guard editsEnabled, !isBusy else { return false }
+        guard !read.isEmpty else { return true }
+        var next = document
+        for i in next.tracks.indices where next.tracks[i].tags == nil {
+            if let tags = read[next.tracks[i].id] { next.tracks[i].tags = tags }
+        }
+        do { try next.validate(); try store.save(next); publish(next); return true }
+        catch { return false }
+    }
+    /// Waits for the tags being read now. For tests.
+    func waitForTags() async { while let task = tagTask { await task.value } }
 }
 
 // MARK: - Volume measurement and normalization
