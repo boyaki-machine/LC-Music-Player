@@ -310,7 +310,8 @@ import AudioProcessingCore
             var next = document
             recordShuffle(&next, entry: entryID, playlist: playlistID, step: shuffle)
             next.currentPlaylistID = playlistID; next.currentEntryID = entryID
-            if let i = next.tracks.firstIndex(where: { $0.id == track.id }) { next.tracks[i].reference = resolved.reference }
+            // Only a refreshed reference is written: an unchanged library keeps sharing its storage.
+            if let i = trackIndex[track.id], next.tracks[i].reference != resolved.reference { next.tracks[i].reference = resolved.reference }
             // Decoder and file lease are prepared first; disk failure keeps the old audio intact.
             let success = playback.select(resolved.url, using: resolved.lease) { if next != document { try store.save(next) } }
             guard success else { self.error = playback.error?.localizedDescription; return false }
@@ -913,7 +914,8 @@ extension LibraryController {
                 var next = self.document
                 self.recordShuffle(&next, entry: entryID, playlist: playlistID, step: shuffle)
                 next.currentPlaylistID = playlistID; next.currentEntryID = entryID
-                if let i = next.tracks.firstIndex(where: { $0.id == track.id }) { next.tracks[i].reference = resolved.reference }
+                // Only a refreshed reference is written: an unchanged library keeps sharing its storage.
+                if let i = self.trackIndex[track.id], next.tracks[i].reference != resolved.reference { next.tracks[i].reference = resolved.reference }
                 if intent.autoPlay {
                     guard self.playback.selectPrepared(prepared, using: resolved.lease, metrics: levels,
                         settings: self.normalizationSettings, committing: {
