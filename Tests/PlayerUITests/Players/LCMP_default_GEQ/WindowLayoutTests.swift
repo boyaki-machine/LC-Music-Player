@@ -20,6 +20,15 @@ struct WindowLayoutTests {
         #expect(model.seekVisible)
         model.closeOverlays()
     }
+    #if os(macOS)
+    /// Covered, on another Space, minimized, closed or with the display asleep, the window draws nothing.
+    @Test func onlyAVisibleUncoveredWindowShowsTheVisualization() {
+        #expect(WindowLayout.showsVisualization(isVisible: true, isMiniaturized: false, occlusion: .visible))
+        #expect(!WindowLayout.showsVisualization(isVisible: true, isMiniaturized: false, occlusion: []))
+        #expect(!WindowLayout.showsVisualization(isVisible: true, isMiniaturized: true, occlusion: .visible))
+        #expect(!WindowLayout.showsVisualization(isVisible: false, isMiniaturized: false, occlusion: .visible))
+    }
+    #endif
     @Test func extensionFitsBelowAtScreenEdgesAndNegativeCoordinates() {
         for screen in [CGRect(x: 0, y: 0, width: 1440, height: 900), CGRect(x: -1280, y: -200, width: 1280, height: 800)] {
             for origin in [CGPoint(x: screen.minX - 50, y: screen.minY), CGPoint(x: screen.maxX, y: screen.maxY)] {

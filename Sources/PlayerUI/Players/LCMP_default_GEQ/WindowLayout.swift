@@ -26,3 +26,15 @@ public enum WindowLayout {
         return (fitted, CGRect(x: x, y: fitted.minY - gap - height, width: main.width, height: height))
     }
 }
+
+#if os(macOS)
+import AppKit
+
+extension WindowLayout {
+    /// Whether the player window shows its drawing. Behind other windows, on another Space, minimized
+    /// or with the display asleep nothing is drawn, so analysis and the drawing clock stop too.
+    public static func showsVisualization(isVisible: Bool, isMiniaturized: Bool, occlusion: NSWindow.OcclusionState) -> Bool {
+        isVisible && !isMiniaturized && occlusion.contains(.visible)
+    }
+}
+#endif

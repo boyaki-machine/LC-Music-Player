@@ -110,6 +110,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func applicationDidChangeScreenParameters(_ notification: Notification) { arrange() }
     func windowWillMiniaturize(_ notification: Notification) { extensionWindow.orderOut(nil); presentation.closeOverlays(); setVisualizationVisible(false) }
     func windowDidDeminiaturize(_ notification: Notification) { showPlayer() }
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        guard notification.object as? NSWindow === mainWindow else { return }
+        setVisualizationVisible(WindowLayout.showsVisualization(isVisible: mainWindow.isVisible, isMiniaturized: mainWindow.isMiniaturized,
+                                                                occlusion: mainWindow.occlusionState))
+    }
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         if sender === extensionWindow { if presentation.extensionVisible { toggleExtension() }; return false }
         extensionWindow.orderOut(nil)

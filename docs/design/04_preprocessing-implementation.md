@@ -37,8 +37,11 @@ LibraryCore（参照解決・再生順序・設定・取消）
 
 ### キュー
 
-- 単一のutility DispatchQueueが、デコーダのopenと読み取りを担当する。
-- 処理の優先度は、要求したタスクの優先度に従う。user-initiated以上のタスク（曲の選択など利用者が待つ要求）からの要求はuser-initiatedで、それ以外はutilityで実行する。次曲の準備・プレイリストの事前測定・最大音量の表示の測定は、utilityのタスクから要求する。同じ音源の測定へ優先度の高い要求が合流すると、その測定の残りのチャンクを高い優先度で進める（`PreprocessingPriorityTests`）。
+- 単一の直列のDispatchQueueが、デコーダのopenと読み取りを担当する。キュー自体にはQoSを持たせない。キューのQoSは処理の下限になり、background の要求も utility で動いてしまうためである。
+- 処理の優先度は、要求したタスクの優先度に従う。user-initiated以上のタスク（曲の選択など利用者が待つ要求）からの要求はuser-initiated、backgroundのタスクからの要求はbackground、それ以外はutilityで実行する。次曲の準備・最大音量の表示の測定、プレイリストの事前測定のうち現在の曲と前後の曲はutility、それ以外の曲の事前測定はbackgroundのタスクから要求する。同じ音源の測定へ優先度の高い要求が合流すると、その測定の残りのチャンクを高い優先度で進める（`PreprocessingPriorityTests`）。
+- Apple siliconでは、backgroundの処理は高効率コアだけで動く。10分の曲の測定は、utilityの約1.0秒・約5.1J（CPUのエネルギー）に対し、backgroundでは約6.3秒・約0.8Jになる。
+- 事前測定の途中の曲を利用者が選んで前面へ引き継いだときは、`AudioPreprocessing.promote(_:)`でその取消の印を持つ進行中の測定をuser-initiatedへ引き上げる。まだキューに届いていない要求は、待つ側が引き上げたタスクの優先度で実行される。タスクの`value`を待つと、待たれたタスクは待つ側の優先度へ引き上げられる。backgroundのまま進めたい処理を、優先度の高いタスクから待たない。
+- 低電力モードのとき、または熱の状態が`serious`以上のときは、事前測定は現在の曲と前後の曲だけにし、状態が戻ったら（`NSProcessInfoPowerStateDidChange`・`thermalStateDidChangeNotification`）残りを続ける。充電中だけ進める方式（iOSの`BGProcessingTask`）は採らない。事前測定はアプリの実行中に行い、バックグラウンドでの起動とファイルへのアクセスの扱いが増えるためである。
 - 全曲測定は1チャンクごとに再投入し、後から到着した先頭準備を長い測定全体の後ろへ待たせない。
 - I/Oや測定を音声のrender callbackへ追加しない。
 - `PreparationCancellation`はチャンク間で確認する。タスクの取消に加えて世代IDを照合し、古い曲・設定・順序の結果を公開しない。

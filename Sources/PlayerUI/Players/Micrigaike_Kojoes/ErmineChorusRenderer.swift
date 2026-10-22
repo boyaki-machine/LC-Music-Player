@@ -54,13 +54,26 @@ enum ErmineChorusRenderer {
         context.stroke(beam, with: .color(ErminePalette.ink), lineWidth: 1)
     }
 
+    /// The letters' widths, laid out once for each display scale (layout rounds them to its pixels):
+    /// the font and the letters never change, and laying text out is most of the cost of the sign.
+    nonisolated(unsafe) private static var measuredNeonWidths: [CGFloat: [CGFloat]] = [:]
+    private static let neonWidthsLock = NSLock()
+    static func neonWidths(_ context: GraphicsContext, font: Font) -> [CGFloat] {
+        let scale = context.environment.displayScale
+        return neonWidthsLock.withLock {
+            if let widths = measuredNeonWidths[scale] { return widths }
+            let widths = ErmineStage.neonText.map { context.resolve(Text(String($0)).font(font)).measure(in: CGSize(width: 100, height: 100)).width }
+            measuredNeonWidths[scale] = widths
+            return widths
+        }
+    }
+
     /// The band's name in pink neon tubes, hung from the beam. A letter flickers only on a high note.
     static func drawNeon(_ context: GraphicsContext, brightness: [Double]) {
         var c = context
         c.translateBy(x: neonCenter.x, y: neonCenter.y); c.rotate(by: neonTilt)
         let font = Font.system(size: 14, weight: .heavy, design: .rounded)
-        let letters = ErmineStage.neonText.map { c.resolve(Text(String($0)).font(font)) }
-        let widths = letters.map { $0.measure(in: CGSize(width: 100, height: 100)).width }
+        let widths = neonWidths(c, font: font)
         let total = widths.reduce(0, +)
         // Strings to the beam and the tube lines above and below the letters.
         var strings = Path()

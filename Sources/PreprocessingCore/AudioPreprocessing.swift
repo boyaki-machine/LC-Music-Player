@@ -9,4 +9,10 @@ public protocol AudioPreprocessing: Sendable {
     func measureLevels(_ url: URL, profile: MeasurementProfile,
                        cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackAudioMetrics
     func reconcileCacheOwners(_ owners: Set<UUID>) async
+    /// A listener now waits for the work this cancellation belongs to: what is left runs at user-initiated QoS.
+    func promote(_ cancellation: PreparationCancellation)
+}
+
+public extension AudioPreprocessing {
+    func promote(_ cancellation: PreparationCancellation) {}
 }

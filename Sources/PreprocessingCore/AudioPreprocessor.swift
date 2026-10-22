@@ -9,11 +9,17 @@ import LevelDSP
 /// priority; background preparation runs in utility tasks and stays at utility.
 public final class AudioPreprocessor: AudioPreprocessing {
     public static let shared = AudioPreprocessor()
-    private let queue = DispatchQueue(label: "local.lcmp.preprocessing", qos: .utility)
+    /// No QoS of its own: a queue's QoS is a floor under its work, which would keep background
+    /// requests off the efficiency cores. Each request brings its QoS (`requestedQoS`).
+    private let queue = DispatchQueue(label: "local.lcmp.preprocessing")
     private let state: PreprocessingState
     /// A standalone instance has no persistent side effects unless configured.
     /// The priority of work requested by the current task.
-    static var requestedQoS: DispatchQoS { Task.currentPriority >= .userInitiated ? .userInitiated : .utility }
+    /// Background requests run at background QoS, which Apple silicon keeps on the efficiency cores.
+    static var requestedQoS: DispatchQoS {
+        let priority = Task.currentPriority
+        return priority >= .userInitiated ? .userInitiated : priority <= .background ? .background : .utility
+    }
     public init(cache: MeasurementCacheConfiguration? = nil, collectMeasurementTimings: Bool = false) {
         state = PreprocessingState(cache: cache.map(MeasurementCache.init), collectTimings: collectMeasurementTimings)
         LoudnessMeter.cleanAbandonedFiles()
@@ -24,6 +30,25 @@ public final class AudioPreprocessor: AudioPreprocessing {
     public func reconcileCacheOwners(_ owners: Set<UUID>) async {
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
             queue.async { try? self.state.cache?.reconcile(owners); c.resume() }
+        }
+    }
+    /// Scans already running for this cancellation continue at user-initiated QoS. A request that has
+    /// not reached the queue yet reads the raised priority of the task that a listener now awaits.
+    public func promote(_ cancellation: PreparationCancellation) {
+        queue.async(qos: .userInitiated) {
+            for job in self.state.levels.values where job.waiters.contains(where: { $0.cancellation === cancellation }) { job.raise(.userInitiated) }
+            for job in self.state.peaks.values where job.waiters.contains(where: { $0.cancellation === cancellation }) { job.raise(.userInitiated) }
+        }
+    }
+    /// The QoS class a request from the current task runs at, for tests.
+    func executionQoS() async -> qos_class_t {
+        let qos = Self.requestedQoS
+        return await withCheckedContinuation { c in queue.async(qos: qos, flags: .enforceQoS) { c.resume(returning: qos_class_self()) } }
+    }
+    /// The QoS of the running scans this cancellation waits for, for tests.
+    func scanQoS(_ cancellation: PreparationCancellation) async -> [DispatchQoS.QoSClass] {
+        await withCheckedContinuation { c in
+            queue.async { c.resume(returning: self.state.levels.values.filter { $0.waiters.contains { $0.cancellation === cancellation } }.map(\.qos.qosClass)) }
         }
     }
     public func measureLevels(_ url: URL, profile: MeasurementProfile,
