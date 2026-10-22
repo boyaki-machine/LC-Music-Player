@@ -9,6 +9,16 @@ import PlaybackCore
     #expect(predicate())
 }
 
+/// Counts the tracks resolved for playback.
+@MainActor private final class CountingResolveReferences: FileReferenceProvider {
+    let base = TestReferences()
+    private(set) var resolvedCount = 0
+    func beginAccess(_ url: URL) -> FileLease { base.beginAccess(url) }
+    func makeReference(_ url: URL) throws -> TrackReference { try base.makeReference(url) }
+    func resolve(_ reference: TrackReference) throws -> ResolvedTrack { try base.resolve(reference) }
+    func resolved(_ reference: TrackReference) async throws -> ResolvedTrack { resolvedCount += 1; return try base.resolve(reference) }
+}
+
 @Suite(.serialized) @MainActor struct PreprocessingIntegrationTests {
     @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_TEST_AUDIO_OUTPUT"] == "1"),
           arguments: ["tone.wav", "tone.aiff", "tone-aac.m4a", "tone-alac.m4a", "tone.mp3", "tone.flac", "tone-96k-24bit.wav", "tone-96k-24bit.flac"])
@@ -101,7 +111,8 @@ import PlaybackCore
         #expect(!playback.selectPrepared(prepared, using: FileLease {}))
     }
 
-    @Test func backgroundSelectionRetainsOnlyMetadataAndHonorsCancelAndSaveFailure() async throws {
+    /// An idle selection keeps one prepared start and its access, for the play that follows; a stop releases them.
+    @Test func backgroundSelectionHoldsOnePreparedStartAndHonorsCancelAndSaveFailure() async throws {
         let fixture = try Fixture(); defer { fixture.cleanup() }
         let store = MemoryStore(), refs = TestReferences()
         let defaults = MemoryPreferences()
@@ -116,13 +127,14 @@ import PlaybackCore
         await Task.yield()
         try await waitFor { !model.isPreparing }
         #expect(playback.state == .ready && model.currentIndex == 0)
-        try await waitFor { refs.scopes.active == 0 }
+        #expect(refs.scopes.active == 1 && model.preparedNextEntryID == entries[0].id)
         #expect(model.peakMeasurement == .disabled && model.currentTrackPeak == nil)
         model.selectEntry(entries[1].id, in: list)
         model.stop()
         try await Task.sleep(for: .milliseconds(80))
         #expect(model.currentIndex == 0 && !model.isPreparing && playback.state == .stopped)
-        #expect(refs.scopes.active == 0)
+        try await waitFor { refs.scopes.active == 0 }
+        #expect(model.preparedNextEntryID == nil)
         store.fail = true
         model.selectEntry(entries[1].id, in: list)
         try await waitFor { !model.isPreparing }
@@ -137,6 +149,28 @@ import PlaybackCore
         #expect(defaults.bool(forKey: "measureMaximumVolume"))
         model.setMeasuresMaximumVolume(false)
         #expect(!defaults.bool(forKey: "measureMaximumVolume") && model.currentTrackPeak == nil)
+    }
+
+    /// Play after an idle selection starts from the held start: the track is not resolved again.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_TEST_AUDIO_OUTPUT"] == "1"))
+    func playAfterIdleSelectionUsesTheHeldStart() async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let refs = CountingResolveReferences(), playback = PlaybackController(); playback.setVolume(0)
+        let model = LibraryController(playback: playback, store: MemoryStore(), references: refs, preprocessingEnabled: true,
+                                      preferences: MemoryPreferences())
+        defer { model.shutdown() }
+        let list = try #require(model.document.currentPlaylistID)
+        await model.importFiles([try audioFile(fixture.root, name: "a.wav", duration: 5)], into: list)
+        let entry = try #require(model.playlist(list)?.entries.first)
+        model.selectEntry(entry.id, in: list)
+        try await waitFor { !model.isPreparing && playback.state == .ready }
+        let resolvedBeforePlay = refs.resolvedCount
+        model.togglePlayPause()
+        try await waitFor { playback.state == .playing }
+        #expect(refs.resolvedCount == resolvedBeforePlay)
+        #expect(refs.base.scopes.active == 1)
+        model.stop()
+        try await waitFor { refs.base.scopes.active == 0 }
     }
 
     @Test func preparedSelectionProtectsAccessUntilStop() async throws {

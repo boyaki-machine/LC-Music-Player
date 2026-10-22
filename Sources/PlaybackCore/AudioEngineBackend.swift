@@ -5,7 +5,7 @@ import AudioProcessingCore
 
 @MainActor
 public final class AudioEngineBackend: PlaybackBackend {
-    isolated deinit { stop() }
+    isolated deinit { stopRun(retiring: false) }
 
     public let duration: TimeInterval
     public let supportsSeeking: Bool
@@ -29,11 +29,39 @@ public final class AudioEngineBackend: PlaybackBackend {
         processingChain?.levelNode.globalGain = 0
     }
 
-    /// The format the output device renders: the profile of every measurement.
+    /// The format the output device renders: the profile of every measurement. Reading it builds an
+    /// engine (a few milliseconds), so the result is kept until the output's device, rate or
+    /// channels change, which `OutputSignature` reads in microseconds.
     public static func measurementProfile() throws -> MeasurementProfile {
-        let format = AVAudioEngine().mainMixerNode.outputFormat(forBus: 0)
-        return try MeasurementProfile(sampleRate: format.sampleRate, channels: format.channelCount)
+        try cachedProfile(for: OutputSignature.current()) {
+            let format = outputGraphFormat(of: AVAudioEngine())
+            return try MeasurementProfile(sampleRate: format.sampleRate, channels: format.channelCount)
+        }
     }
+    private static var profileCache: (signature: OutputSignature, profile: MeasurementProfile)?
+    /// The kept profile while the signature stays the same; an unknown signature always reads again.
+    static func cachedProfile(for signature: OutputSignature?, read: () throws -> MeasurementProfile) throws -> MeasurementProfile {
+        if let cached = profileCache, let signature, cached.signature == signature { return cached.profile }
+        let profile = try read()
+        profileCache = signature.map { ($0, profile) }
+        return profile
+    }
+    /// The format the graph renders in, from the converter to the main mixer: the output device's
+    /// rate, in at most two channels. It connects the main mixer to the output in the device's own
+    /// format. A new engine otherwise reports a default format (44.1kHz on a 48kHz Mac) until it
+    /// starts, and a graph built in it would convert the audio twice: to that rate and back.
+    static func outputGraphFormat(of engine: AVAudioEngine) -> AVAudioFormat {
+        let device = engine.outputNode.outputFormat(forBus: 0)
+        guard device.sampleRate > 0, device.channelCount > 0,
+              let output = AVAudioFormat(standardFormatWithSampleRate: device.sampleRate, channels: device.channelCount),
+              let graph = AVAudioFormat(standardFormatWithSampleRate: device.sampleRate, channels: min(2, device.channelCount)) else {
+            return engine.mainMixerNode.outputFormat(forBus: 0)
+        }
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: output)
+        return graph
+    }
+    /// The engine of the current run, for tests.
+    var currentEngine: AVAudioEngine? { run?.engine }
     public var volume: Float = 0.25 {
         didSet { run?.graph.setVolume(volume) }
     }
@@ -209,67 +237,130 @@ public final class AudioEngineBackend: PlaybackBackend {
         try start(at: pendingTime)
     }
 
+    /// The decoder for a run from `seconds`: the prepared one first, in the profile when normalizing.
+    private func openDecoder(at seconds: TimeInterval) throws -> any PCMDecoding {
+        var decoder: any PCMDecoding
+        if let preparedDecoder {
+            decoder = preparedDecoder
+            self.preparedDecoder = nil
+        } else { decoder = try AudioDecoderFactory.open(url) }
+        if let metrics = normalizationMetrics {
+            do { decoder = try ProfileDecoder(base: decoder, profile: metrics.profile, frameLength: metrics.levels.frameCount) }
+            catch { try? decoder.close(); throw error }
+        }
+        if seconds > 0 {
+            let frame = AVAudioFramePosition(seconds * decoder.processingFormat.sampleRate)
+            do { try decoder.seek(to: min(frame, decoder.length - 1)) }
+            catch { try? decoder.close(); throw error }
+        }
+        return decoder
+    }
+
+    /// Events of a run reach the owner only while that run is current.
+    private func sender(for id: UUID) -> @Sendable (PlaybackEvent) -> Void {
+        { [weak self] event in
+            Task { @MainActor in
+                guard let self, self.run?.id == id else { return }
+                self.onEvent?(event)
+            }
+        }
+    }
+
+    private func observeConfiguration(of engine: AVAudioEngine, send: @escaping @Sendable (PlaybackEvent) -> Void) -> NSObjectProtocol {
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in send(.outputChanged) }
+    }
+
+    private func reportRenderSchedule(_ engine: AVAudioEngine) {
+        guard let onRenderScheduled else { return }
+        let latency = engine.outputNode.presentationLatency + engine.outputNode.outputPresentationLatency
+        onRenderScheduled(mach_absolute_time() + AVAudioTime.hostTime(forSeconds: max(0, latency)))
+    }
+
     private func start(at seconds: TimeInterval) throws {
         do {
-            var decoder: any PCMDecoding
-            if let preparedDecoder {
-                decoder = preparedDecoder
-                self.preparedDecoder = nil
-            } else { decoder = try AudioDecoderFactory.open(url) }
-            if let metrics = normalizationMetrics {
-                do { decoder = try ProfileDecoder(base: decoder, profile: metrics.profile, frameLength: metrics.levels.frameCount) }
-                catch { try? decoder.close(); throw error }
-            }
-            if seconds > 0 {
-                let frame = AVAudioFramePosition(seconds * decoder.processingFormat.sampleRate)
-                do { try decoder.seek(to: min(frame, decoder.length - 1)) }
-                catch { try? decoder.close(); throw error }
-            }
-            let engine = AVAudioEngine()
-            let outputFormat = engine.mainMixerNode.outputFormat(forBus: 0)
+            let decoder = try openDecoder(at: seconds)
+            // The engine the previous track left running, while it still renders the current output.
+            let handoff = Self.takeHandoff()
+            let engine = handoff?.engine ?? AVAudioEngine()
+            // A new engine reports the format its graph is built in before it starts; a running one
+            // may report the device's instead, so a taken engine keeps the format of its graph.
+            let outputFormat = handoff?.graph.format ?? Self.outputGraphFormat(of: engine)
             if let metrics = normalizationMetrics {
                 do {
                     try metrics.source.validate()
                     guard try MeasurementProfile(sampleRate: outputFormat.sampleRate, channels: outputFormat.channelCount) == metrics.profile else {
                         throw AudioProcessingFailure.outputChanged
                     }
-                } catch { try? decoder.close(); throw error }
+                } catch { try? decoder.close(); handoff?.stop(); throw error }
             }
             guard let observationFormat = AVAudioFormat(standardFormatWithSampleRate: outputFormat.sampleRate,
                                                          channels: outputFormat.channelCount) else {
-                try? decoder.close()
+                try? decoder.close(); handoff?.stop()
                 throw PlaybackError.playbackFailed("解析接続用の音声形式を作成できません。")
             }
             // Retire the old run before transferring the decoder to the feeder.
-            stop()
+            stopRun(retiring: false)
             let id = UUID()
-            let send: @Sendable (PlaybackEvent) -> Void = { [weak self] event in
-                Task { @MainActor in
-                    guard let self, self.run?.id == id else { return }
-                    self.onEvent?(event)
-                }
-            }
-            let player = AVAudioPlayerNode()
-            let graph = PlaybackGraph(engine: engine, player: player, sourceFormat: decoder.processingFormat,
+            let send = sender(for: id)
+            let graph: PlaybackGraph
+            if let handoff {
+                // Only the player changes; the level gain is set while no audio flows.
+                graph = handoff.graph.taking(sourceFormat: decoder.processingFormat, plan: normalizationPlan)
+                analysisSource = handoff.source
+            } else {
+                graph = PlaybackGraph(engine: engine, player: AVAudioPlayerNode(), sourceFormat: decoder.processingFormat,
                                       observationFormat: observationFormat, plan: normalizationPlan)
+            }
+            let player = graph.player
             graph.setVolume(volume)
             let feeder = PCMFeeder(decoder: decoder, player: player,
                                    finished: { send(.finished) },
                                    failed: { send(.failed(.playbackFailed($0.localizedDescription))) })
-            let observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
-                                                                  object: engine, queue: nil) { _ in send(.outputChanged) }
+            let observer = observeConfiguration(of: engine, send: send)
             pendingTime = seconds
             run = Run(id: id, engine: engine, player: player, graph: graph, feeder: feeder, startTime: seconds, observer: observer)
             processingChain = graph.chain
             analysisNode = graph.observation
             try feeder.prime()
-            engine.prepare()
-            try engine.start()
-            player.play()
-            if let onRenderScheduled {
-                let latency = engine.outputNode.presentationLatency + engine.outputNode.outputPresentationLatency
-                onRenderScheduled(mach_absolute_time() + AVAudioTime.hostTime(forSeconds: max(0, latency)))
+            if !engine.isRunning {
+                engine.prepare()
+                try engine.start()
             }
+            player.play()
+            reportRenderSchedule(engine)
+            startAnalysis()
+        } catch {
+            stop()
+            throw PlaybackError.playbackFailed(error.localizedDescription)
+        }
+    }
+
+    /// Seeking while playing keeps the running engine and graph: only the player restarts with a
+    /// new feeder from the new position. Stopping and building an engine cost about 60ms more.
+    private func reposition(to seconds: TimeInterval) throws {
+        guard let old = run, old.engine.isRunning else { return try start(at: seconds) }
+        do {
+            let decoder = try openDecoder(at: seconds)
+            guard decoder.processingFormat == old.player.outputFormat(forBus: 0) else {
+                try? decoder.close(); return try start(at: seconds)
+            }
+            endAnalysis()
+            NotificationCenter.default.removeObserver(old.observer)
+            // Cancelled first, so the callbacks of the buffers the stop releases do nothing.
+            old.feeder.cancel()
+            old.player.stop()
+            old.feeder.close()
+            let id = UUID()
+            let send = sender(for: id)
+            let feeder = PCMFeeder(decoder: decoder, player: old.player,
+                                   finished: { send(.finished) },
+                                   failed: { send(.failed(.playbackFailed($0.localizedDescription))) })
+            pendingTime = seconds
+            run = Run(id: id, engine: old.engine, player: old.player, graph: old.graph, feeder: feeder, startTime: seconds,
+                      observer: observeConfiguration(of: old.engine, send: send))
+            try feeder.prime()
+            old.player.play()
+            reportRenderSchedule(old.engine)
             startAnalysis()
         } catch {
             stop()
@@ -282,12 +373,12 @@ public final class AudioEngineBackend: PlaybackBackend {
             throw PlaybackError.playbackFailed("この再生位置へ移動できません。")
         }
         if run != nil && !paused {
-            try start(at: seconds)
+            try reposition(to: seconds)
         } else {
             let wasPaused = paused
             let prepared = preparedDecoder
             preparedDecoder = nil
-            stop()
+            stopRun(retiring: false)
             preparedDecoder = prepared
             pendingTime = seconds
             paused = wasPaused
@@ -322,7 +413,19 @@ public final class AudioEngineBackend: PlaybackBackend {
         startAnalysis()
     }
 
+    /// Stops the run and any engine left for the next track, so that the output, and on iOS the
+    /// audio session, can be released after it.
     public func stop() {
+        stopRun(retiring: false)
+        Self.takeHandoff()?.stop()
+    }
+
+    /// Another track takes over: the player falls silent at once, and the running engine is left
+    /// for the next track's run, which then starts in about the time of a seek instead of stopping
+    /// one engine and starting another (about 80ms). An engine nobody takes stops after a moment.
+    public func retire() { stopRun(retiring: true) }
+
+    private func stopRun(retiring: Bool) {
         #if DEBUG
         stopProbe()
         #endif
@@ -337,8 +440,12 @@ public final class AudioEngineBackend: PlaybackBackend {
             NotificationCenter.default.removeObserver(run.observer)
             run.feeder.cancel()
             run.player.stop()
-            run.engine.stop()
             run.feeder.close()
+            if retiring, run.engine.isRunning {
+                Self.leave(Handoff(engine: run.engine, graph: run.graph, source: analysisSource, output: OutputSignature.current()))
+            } else {
+                run.engine.stop()
+            }
         }
         analysisSource = nil
         analysisNode = nil
@@ -346,21 +453,66 @@ public final class AudioEngineBackend: PlaybackBackend {
     }
 }
 
+/// A running engine, with its graph and the render source of its observation node, that a track
+/// left for the next one. The render source outlives the engine that calls it.
+@MainActor private struct Handoff {
+    let engine: AVAudioEngine
+    let graph: PlaybackGraph
+    let source: AnalysisRenderSource?
+    /// The output when the engine was left; another output needs another engine.
+    let output: OutputSignature?
+    func stop() { engine.stop(); withExtendedLifetime(source) {} }
+}
+
+extension AudioEngineBackend {
+    /// How long an engine waits for the next track before it stops.
+    static let handoffLifetime = Duration.seconds(1)
+    private static var handoff: Handoff?
+    private static var handoffExpiry: Task<Void, Never>?
+    /// Whether an engine waits for the next track, for tests.
+    static var hasHandoff: Bool { handoff != nil }
+
+    fileprivate static func leave(_ next: Handoff) {
+        takeHandoff()?.stop()
+        handoff = next
+        let engine = ObjectIdentifier(next.engine)
+        handoffExpiry = Task { @MainActor in
+            try? await Task.sleep(for: handoffLifetime)
+            guard !Task.isCancelled, let left = handoff, ObjectIdentifier(left.engine) == engine else { return }
+            takeHandoff()?.stop()
+        }
+    }
+
+    /// The waiting engine, if it still runs on the same output.
+    fileprivate static func takeHandoff() -> Handoff? {
+        handoffExpiry?.cancel(); handoffExpiry = nil
+        guard let left = handoff else { return nil }
+        handoff = nil
+        guard left.engine.isRunning, let output = left.output, output == OutputSignature.current() else { left.stop(); return nil }
+        return left
+    }
+}
+
 /// The nodes between the player and the output, built the same way for playback and for the
 /// offline tests: player → format mixer → observation → level gain → main mixer (app volume).
 @MainActor struct PlaybackGraph {
     let engine: AVAudioEngine
+    let player: AVAudioPlayerNode
+    /// Converts the source format to the output's; the player is its only input.
+    let converter: AVAudioMixerNode
     /// Zero filters, zero global gain: a pass-through AU with a public
     /// render-notification API. Future compensation belongs downstream.
     let observation: AVAudioUnitEQ
     let chain: AudioProcessingChain
+    /// The format from the converter to the main mixer.
+    let format: AVAudioFormat
 
     init(engine: AVAudioEngine, player: AVAudioPlayerNode, sourceFormat: AVAudioFormat,
          observationFormat: AVAudioFormat, plan: NormalizationPlan?) {
-        self.engine = engine
+        self.engine = engine; self.player = player; format = observationFormat
         observation = AVAudioUnitEQ(numberOfBands: 0)
         chain = AudioProcessingChain(plan: plan)
-        let converter = AVAudioMixerNode()
+        converter = AVAudioMixerNode()
         for node in [player, converter, observation, chain.levelNode] as [AVAudioNode] { engine.attach(node) }
         engine.connect(player, to: converter, format: sourceFormat)
         engine.connect(converter, to: observation, format: observationFormat)
@@ -372,6 +524,24 @@ public final class AudioEngineBackend: PlaybackBackend {
     /// mixer, which ramps a change over about 20ms instead of stepping the waveform. The level
     /// gain steps at once and is therefore fixed before the engine starts.
     func setVolume(_ volume: Float) { engine.mainMixerNode.outputVolume = volume }
+
+    private init(_ graph: PlaybackGraph, player: AVAudioPlayerNode) {
+        engine = graph.engine; self.player = player; converter = graph.converter
+        observation = graph.observation; chain = graph.chain; format = graph.format
+    }
+
+    /// The same graph for another track, with the player stopped. A source of another format gets
+    /// a new player on the converter, whose input may change while the engine runs.
+    func taking(sourceFormat: AVAudioFormat, plan: NormalizationPlan?) -> PlaybackGraph {
+        chain.levelNode.globalGain = Float(plan?.gainDB ?? 0)
+        guard player.outputFormat(forBus: 0) != sourceFormat else { return self }
+        let next = AVAudioPlayerNode()
+        engine.disconnectNodeOutput(player)
+        engine.detach(player)
+        engine.attach(next)
+        engine.connect(next, to: converter, format: sourceFormat)
+        return PlaybackGraph(self, player: next)
+    }
 }
 
 /// Owns the decoder after a run starts. Decoding and scheduling happen only on `queue`,
