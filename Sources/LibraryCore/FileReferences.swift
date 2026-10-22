@@ -14,6 +14,14 @@ public struct ResolvedTrack {
     func beginAccess(_ url: URL) -> FileLease
     func makeReference(_ url: URL) throws -> TrackReference
     func resolve(_ reference: TrackReference) throws -> ResolvedTrack
+    /// Checks that each reference can still be opened, on another thread where the provider can.
+    /// Each result is the refreshed reference of a readable track, or nil for an unavailable one.
+    func availability(of references: [TrackReference]) async -> [TrackReference?]
+}
+extension FileReferenceProvider {
+    public func availability(of references: [TrackReference]) async -> [TrackReference?] {
+        references.map { try? resolve($0).reference }
+    }
 }
 /// A song of the Music library that is stored on the device and readable (no DRM).
 public struct MediaLibrarySong: Equatable, Sendable {
@@ -68,26 +76,38 @@ public struct SystemMediaLibrary: MediaLibraryLookup {
     // macOS bookmarks carry an explicit read-only security scope. iOS bookmarks of picked
     // documents carry their access implicitly and still need start/stop around each use.
     #if os(macOS)
-    private static let creation: URL.BookmarkCreationOptions = [.withSecurityScope, .securityScopeAllowOnlyReadAccess]
-    private static let resolution: URL.BookmarkResolutionOptions = [.withSecurityScope, .withoutUI, .withoutMounting]
+    nonisolated private static let creation: URL.BookmarkCreationOptions = [.withSecurityScope, .securityScopeAllowOnlyReadAccess]
+    nonisolated private static let resolution: URL.BookmarkResolutionOptions = [.withSecurityScope, .withoutUI, .withoutMounting]
     #else
-    private static let creation: URL.BookmarkCreationOptions = []
-    private static let resolution: URL.BookmarkResolutionOptions = [.withoutUI]
+    nonisolated private static let creation: URL.BookmarkCreationOptions = []
+    nonisolated private static let resolution: URL.BookmarkResolutionOptions = [.withoutUI]
     #endif
     private let mediaLibrary: any MediaLibraryLookup
     public init(mediaLibrary: any MediaLibraryLookup = SystemMediaLibrary()) { self.mediaLibrary = mediaLibrary }
-    public func beginAccess(_ url: URL) -> FileLease {
+    public func beginAccess(_ url: URL) -> FileLease { Self.access(url) }
+    public func makeReference(_ url: URL) throws -> TrackReference { try Self.reference(url, mediaLibrary: mediaLibrary) }
+    public func resolve(_ reference: TrackReference) throws -> ResolvedTrack { try Self.resolved(reference, mediaLibrary: mediaLibrary) }
+    /// Resolving a security-scoped bookmark makes the system check the app's own signature, which
+    /// takes long enough that a whole library would hold the main thread for seconds.
+    public func availability(of references: [TrackReference]) async -> [TrackReference?] {
+        let mediaLibrary = mediaLibrary
+        return await Task.detached(priority: .utility) {
+            references.map { try? Self.resolved($0, mediaLibrary: mediaLibrary).reference }
+        }.value
+    }
+
+    nonisolated private static func access(_ url: URL) -> FileLease {
         let started = url.startAccessingSecurityScopedResource()
         return FileLease { if started { url.stopAccessingSecurityScopedResource() } }
     }
-    public func makeReference(_ url: URL) throws -> TrackReference {
+    nonisolated private static func reference(_ url: URL, mediaLibrary: any MediaLibraryLookup) throws -> TrackReference {
         if url.scheme == SupportedAudio.mediaLibraryScheme {
             let reference = TrackReference(bookmark: nil, lastKnownURL: url)
             guard let id = reference.mediaItemID, mediaLibrary.assetURL(forPersistentID: id) != nil else { throw LibraryFailure.inaccessible }
             return reference
         }
         guard url.isFileURL else { throw LibraryFailure.inaccessible }
-        let lease = beginAccess(url)
+        let lease = access(url)
         defer { withExtendedLifetime(lease) {} }
         guard (try url.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true,
               FileManager.default.isReadableFile(atPath: url.path) else { throw LibraryFailure.inaccessible }
@@ -95,7 +115,7 @@ public struct SystemMediaLibrary: MediaLibraryLookup {
                                         includingResourceValuesForKeys: nil, relativeTo: nil)
         return TrackReference(bookmark: data, lastKnownURL: url.standardizedFileURL)
     }
-    public func resolve(_ reference: TrackReference) throws -> ResolvedTrack {
+    nonisolated private static func resolved(_ reference: TrackReference, mediaLibrary: any MediaLibraryLookup) throws -> ResolvedTrack {
         // A library song is looked up by its ID each time; it needs no file access scope.
         if let id = reference.mediaItemID {
             guard let url = mediaLibrary.assetURL(forPersistentID: id) else { throw LibraryFailure.unavailable }
@@ -106,11 +126,11 @@ public struct SystemMediaLibrary: MediaLibraryLookup {
         var stale = false
         let url = try URL(resolvingBookmarkData: data, options: Self.resolution,
                           relativeTo: nil, bookmarkDataIsStale: &stale)
-        let lease = beginAccess(url)
+        let lease = access(url)
         guard (try url.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true,
               FileManager.default.isReadableFile(atPath: url.path) else { throw LibraryFailure.unavailable }
         var updated = reference; updated.lastKnownURL = url.standardizedFileURL
-        if stale { updated = try makeReference(url) }
+        if stale { updated = try Self.reference(url, mediaLibrary: mediaLibrary) }
         return ResolvedTrack(url: url, reference: updated, lease: lease)
     }
 }
