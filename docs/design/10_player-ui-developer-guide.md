@@ -178,7 +178,7 @@ playback.configureAnalysis(configuration)
 
 ### 寿命の管理と画面への組み込み
 
-`PlayerPresentation`がデザインごとにdriverを1つずつ所有し、SwiftUIのbodyの評価ごとに生成しない。動かすのは表示中のデザインのdriverだけで、切り替えると旧デザインのdriverを直ちに止める。`PlaybackVisualization`が状態を中継し、`LCMPApp`はウィンドウの開閉・最小化から、表示可否と解析の購読を更新する。
+`PlayerPresentation`がデザインごとにdriverを1つずつ所有し、SwiftUIのbodyの評価ごとに生成しない。動かすのは表示中のデザインのdriverだけで、切り替えると旧デザインのdriverを直ちに止める。`PlaybackVisualization`が状態を中継し、`LCMPApp`はウィンドウの開閉・最小化と、ウィンドウが見えるかどうか（`NSWindow.occlusionState`、判定は`WindowLayout.showsVisualization`）から、表示可否と解析の購読を更新する。
 
 | 変更 | 接続側の処理 |
 | --- | --- |
@@ -188,7 +188,7 @@ playback.configureAnalysis(configuration)
 | 再開 | `.playing`への遷移で旧状態を破棄し、新しい世代の解析から開始する |
 | 停止・自然終了・再生失敗 | `.inactive`で消灯し、待ち・描画の時計を解放する |
 | シーク・解析の再設定等 | `analysisResetID`の変更で`reset()`し、旧表示を破棄する。`analysisFrame`がすでにnilでも省略しない |
-| 閉じる・最小化 | `visualizationVisible = false`で直ちにdriverを止め、解析設定をnilにする。音声の再生は続ける |
+| 閉じる・最小化・ウィンドウが見えなくなる | `visualizationVisible = false`で直ちにdriverを止め、解析設定をnilにする。音声の再生は続ける |
 | 復帰 | 表示可否と解析設定を戻し、現在の再生状態から再開する |
 | 終了 | 非表示の処理に加え、再生・ライブラリの終了処理を実行する |
 

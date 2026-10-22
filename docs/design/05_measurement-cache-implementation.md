@@ -23,7 +23,7 @@
 | --- | --- |
 | `MeasurementCacheConfiguration` | 保存先、OSの識別、音源識別のadapter、容量・件数・期限、測定・変換の版 |
 | `MeasurementVersions` | 測定の方式（`algorithm`）と変換（`conversion`）の版。測定結果を変えうるコードの変更で上げる |
-| `MeasurementCache` | 前処理のutilityキューだけが操作するSQLite接続。検索・検証・更新・回収 |
+| `MeasurementCache` | 前処理の直列キューだけが操作するSQLite接続。検索・検証・更新・回収 |
 | `AudioPreprocessor` | 現在曲・次曲・プレイリスト巡回に共通の`measureLevels`／`measure`で、キャッシュの参照と測定要求の合流を行う |
 | `LibraryController` | 音源IDを測定へ渡し、正常なライブラリの読み込み・編集の保存の後に、有効な音源ID集合を渡す。キャッシュからライブラリへは依存しない |
 
