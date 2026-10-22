@@ -30,7 +30,10 @@ public final class AnalysisSession: @unchecked Sendable {
     private var rightScratch = Array(repeating: Float(0), count: 16384)
     private var frameSequence: UInt64 = 0
     private var nextDelivery = -Double.infinity
-    private var pending: (left: [Float], right: [Float], sample: Double?, host: Double?, latency: Double?)?
+    /// The newest complete window, copied into storage allocated once; `pending` holds its timing.
+    private var pendingLeft: [Float] = []
+    private var pendingRight: [Float] = []
+    private var pending: (sample: Double?, host: Double?, latency: Double?)?
 
     public init(configuration: AnalysisConfiguration) throws {
         analyzer = try SpectrumAnalyzer(configuration: configuration)
@@ -42,6 +45,8 @@ public final class AnalysisSession: @unchecked Sendable {
         timer = DispatchSource.makeTimerSource(queue: worker)
         leftWindow.reserveCapacity(configuration.fftSize)
         rightWindow.reserveCapacity(configuration.fftSize)
+        pendingLeft = Array(repeating: 0, count: configuration.fftSize)
+        pendingRight = Array(repeating: 0, count: configuration.fftSize)
         timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .milliseconds(1))
         timer.setEventHandler { [weak self] in self?.drain() }
         timer.resume()
@@ -159,7 +164,10 @@ public final class AnalysisSession: @unchecked Sendable {
             rightWindow.append(contentsOf: rightScratch[offset..<(offset + count)])
             offset += count
             if leftWindow.count == n {
-                pending = (leftWindow, rightWindow, windowStartSample, windowStartHost, windowLatency)
+                // Copied, not shared: sharing would make the next append copy the whole window anew.
+                pendingLeft.withUnsafeMutableBufferPointer { _ = $0.update(fromContentsOf: leftWindow) }
+                pendingRight.withUnsafeMutableBufferPointer { _ = $0.update(fromContentsOf: rightWindow) }
+                pending = (windowStartSample, windowStartHost, windowLatency)
                 let hop = min(n / 2, max(1, Int(rate / Double(analyzer.configuration.framesPerSecond))))
                 leftWindow.removeFirst(hop); rightWindow.removeFirst(hop)
                 windowStartSample = windowStartSample.map { $0 + Double(hop) }
@@ -175,7 +183,7 @@ public final class AnalysisSession: @unchecked Sendable {
         guard now >= nextDelivery, let pending else { return }
         self.pending = nil
         let started = now
-        guard let result = analyzer.analyze(left: pending.left, right: pending.right, sampleRate: rate) else { return }
+        guard let result = analyzer.analyze(left: pendingLeft, right: pendingRight, sampleRate: rate) else { return }
         let completed = AVAudioTime.seconds(forHostTime: mach_absolute_time())
         frameSequence &+= 1
         let timing = AnalysisTiming(windowStartSample: pending.sample,

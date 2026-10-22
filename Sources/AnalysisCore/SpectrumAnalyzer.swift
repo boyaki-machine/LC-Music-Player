@@ -9,8 +9,10 @@ public final class SpectrumAnalyzer {
     private let logSize: vDSP_Length
     private let window: [Float]
     private let powerScale: Float
+    /// The windowed samples, then their transform's even and odd halves.
     private var real: [Float]
-    private var imaginary: [Float]
+    private var even: [Float]
+    private var odd: [Float]
     private var sanitized: [Float]
     private var magnitudes: [Float]
     private var cachedRate: Double = 0
@@ -29,7 +31,8 @@ public final class SpectrumAnalyzer {
         // One-sided power factor 2 and channel average factor 1/2 cancel.
         powerScale = 1 / (Float(n) * window.reduce(0) { $0 + $1 * $1 })
         real = Array(repeating: 0, count: n)
-        imaginary = Array(repeating: 0, count: n)
+        even = Array(repeating: 0, count: n / 2)
+        odd = Array(repeating: 0, count: n / 2)
         sanitized = Array(repeating: 0, count: n)
         magnitudes = Array(repeating: 0, count: n / 2 + 1)
     }
@@ -84,13 +87,23 @@ public final class SpectrumAnalyzer {
                 }
             }
             rms.append(channelRMS); peak.append(channelPeak)
-            real.withUnsafeMutableBufferPointer { re in
-                imaginary.withUnsafeMutableBufferPointer { im in
-                    vDSP_vclr(im.baseAddress!, 1, vDSP_Length(n))
-                    var complex = DSPSplitComplex(realp: re.baseAddress!, imagp: im.baseAddress!)
-                    vDSP_fft_zip(setup, &complex, 1, logSize, FFTDirection(FFT_FORWARD))
+            // A real transform of half the size: the samples go in as the even and odd halves of
+            // n/2 complex values. Its output is twice the complex transform's, with the Nyquist
+            // bin in the first imaginary slot, so each power is a quarter and the two ends are split.
+            real.withUnsafeBufferPointer { re in
+                even.withUnsafeMutableBufferPointer { ev in
+                    odd.withUnsafeMutableBufferPointer { od in
+                    var complex = DSPSplitComplex(realp: ev.baseAddress!, imagp: od.baseAddress!)
+                    re.baseAddress!.withMemoryRebound(to: DSPComplex.self, capacity: n / 2) {
+                        vDSP_ctoz($0, 2, &complex, 1, vDSP_Length(n / 2))
+                    }
+                    vDSP_fft_zrip(setup, &complex, 1, logSize, FFTDirection(FFT_FORWARD))
                     magnitudes.withUnsafeMutableBufferPointer { mag in
-                        vDSP_zvmags(&complex, 1, mag.baseAddress!, 1, vDSP_Length(n / 2 + 1))
+                        let nyquist = od[0], dc = ev[0]
+                        vDSP_zvmags(&complex, 1, mag.baseAddress!, 1, vDSP_Length(n / 2))
+                        mag[0] = dc * dc; mag[n / 2] = nyquist * nyquist
+                        var quarter: Float = 0.25
+                        vDSP_vsmul(mag.baseAddress!, 1, &quarter, mag.baseAddress!, 1, vDSP_Length(n / 2 + 1))
                         for band in ranges.indices {
                             let range = ranges[band]
                             guard !range.isEmpty else { continue }
@@ -100,6 +113,7 @@ public final class SpectrumAnalyzer {
                             if range.contains(n / 2) { sum -= mag[n / 2] / 2 }
                             powers[band] += sum * powerScale
                         }
+                    }
                     }
                 }
             }

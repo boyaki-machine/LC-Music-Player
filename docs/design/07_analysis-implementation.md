@@ -42,7 +42,7 @@ PCMFeeder → AVAudioPlayerNode
 
 `AnalysisConfiguration`は、帯域数8〜128、更新頻度15/30/60Hz、FFTサイズ1024/2048/4096/8192点を受け付ける。既定は32帯域・30Hz・2048点である。表示の実装は初期化・切替時に`PlaybackController.configureAnalysis`を呼び、nilで購読を解除できる。
 
-- Accelerate/vDSPのFFTと周期的なHann窓を使う。DCを除き、20Hz〜min(20kHz, Nyquist)を対数の帯域に分ける。
+- Accelerate/vDSPの実数FFT（`vDSP_fft_zrip`）と周期的なHann窓を使う。入力は実数なので、半分の長さの複素FFTで求め、出力の2倍の倍率とNyquistの格納位置を補正する。帯域の値は複素FFTの場合と0.01dB以内で一致する（`RealTransformTests`）。完全な窓は、初めに確保した領域へ写してから解析し、窓ごとにメモリを確保しない。DCを除き、20Hz〜min(20kHz, Nyquist)を対数の帯域に分ける。
 - 入力の平均値（DC）を窓掛けの前に除き、窓の二乗和でパワーを補正し、片側スペクトラムのDC/Nyquist以外を2倍する。左右それぞれで求めたパワーを平均して帯域内を加算する。逆相の左右信号を波形平均して相殺しない。
 - `bandDBFS`は平均二乗値1を0dBFSとし、−100〜0dBFSに制限する。正弦波のpeak 1は、全帯域の合計で約−3.01dBFSになる。汎用の`levels`はこのdBの範囲を0〜1へ写す。可視化は`bandDBFS`から固有の表示範囲へ写し直せる（`LCMP_default_GEQ`は−80〜0dBFSを使う）。狭すぎて独立したFFT binがない帯域は下限値になる。
 - RMSとpeakは、DC除去前の窓内の左右の波形から求める。NaN/Infinityの入力は0として扱う。表示の減衰・残像・ピークホールドは表示側が担当する。
