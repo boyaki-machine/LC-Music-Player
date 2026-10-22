@@ -133,8 +133,9 @@ make dmg DMG_OUTPUT=build/package/LCMP.dmg
 
 1. アプリ、`/Applications`へのシンボリックリンク、`.background/background.tiff`を一時フォルダに並べ、読み書きできるDMG（HFS+）を作ります。
 2. DMGをマウントし、AppleScriptでFinderにウィンドウの大きさ・アイコンの大きさと位置・背景を設定させます。Finderは設定をボリュームの`.DS_Store`に保存します。
+   - Finderは指定したウィンドウの大きさを取りこぼし、既定のウィンドウのまま保存することがあります。そのため、大きさを読み戻して一致するまで設定し直し、保存された`.DS_Store`のウィンドウの大きさ・アイコンの大きさ・2つのアイコンの位置が配置の値と一致するまで待ちます。一致しなければFinderでの設定を数回やり直し、それでも一致しなければ失敗します。
 3. 取り出して、圧縮した読み出し専用のDMG（UDZO）に変換します。
-4. 圧縮したDMGを検証します。チェックサム、アプリの署名（`codesign --verify --deep --strict`）、Applicationsのリンク先、背景と`.DS_Store`の有無、見える項目がアプリとApplicationsだけであることを確かめます。
+4. 圧縮したDMGを検証します。チェックサム、アプリの署名（`codesign --verify --deep --strict`）、Applicationsのリンク先、背景と`.DS_Store`の有無、`.DS_Store`に保存された配置（ウィンドウの大きさ・アイコンの大きさと位置）、見える項目がアプリとApplicationsだけであることを確かめます。
 
 既存のDMGだけを検証することもできます。
 
@@ -159,7 +160,7 @@ make dmg DMG_APP=build/release/LCMP.app DMG_OUTPUT=build/dmg-check/LCMP.dmg
 swift scripts/render-dmg-background.swift assets/DMGBackground.tiff
 ```
 
-- `make test`は、TIFFの2つの画像の大きさと、描画スクリプト・Finderの設定の配置の値が一致することを確かめます（`scripts/test_build_dmg.py`）。
+- `make test`は、TIFFの2つの画像の大きさと、描画スクリプト・Finderの設定の配置の値が一致することを確かめます。`.DS_Store`の読み取りと、配置の食い違い（Finderの既定のウィンドウ・アイコンの位置）を検出することも確かめます（`scripts/test_build_dmg.py`）。
 - Finderのタイトルバーの高さ（`TITLE_BAR`）は、ウィンドウの外枠から内容領域を640×400にするための値です。macOSの更新で背景の下端が欠けたり余白が出たりしたら、実際のウィンドウで測り直します。
 
 ### 署名と公証について
