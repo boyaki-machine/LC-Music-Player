@@ -94,7 +94,9 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
 
     /// Advances the chorus to `now`. Called by the clock; tests call it directly.
     func step(now: Double) {
-        if let index = pending.lastIndex(where: { $0.at <= now }) {
+        // Adopted slightly before the estimated presentation time, as the LED design does.
+        let due = now + VisualizationClock.presentationLead
+        if let index = pending.lastIndex(where: { $0.at <= due }) {
             levels = pending[index].levels; lastData = now
             pending.removeFirst(index + 1)
         }
@@ -103,7 +105,7 @@ public final class ErmineChorusDriver: PlayerVisualizationDriver {
         if waiting || !playing { levels = Array(repeating: 0, count: levels.count) }
         if waitingForData != waiting { waitingForData = waiting }
         let dt = min(0.1, max(0, now - (lastStep ?? now))); lastStep = now
-        ensemble.follow(playing && !waiting ? beats.beat(at: now) : nil)
+        ensemble.follow(playing && !waiting ? beats.beat(at: due) : nil)
         ensemble.update(&directors, dt: dt, playing: playing)
         let world = ErmineWorld(ermine1Intense: directors.first { $0.member.id == 1 }?.intense ?? false, beat: ensemble.beat)
         var next: [ErmineDrawing] = []

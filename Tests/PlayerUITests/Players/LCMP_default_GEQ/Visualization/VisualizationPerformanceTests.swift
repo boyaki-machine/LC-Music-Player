@@ -7,6 +7,7 @@ import SwiftUI
 import Testing
 import AnalysisCore
 import PlaybackCore
+import PreprocessingCore
 import VisualizationKit
 import PlayerUI
 
@@ -24,34 +25,35 @@ import PlayerUI
         try await measure(fft: 2048, seconds: 600, label: "soak-led")
     }
 
-    private func measure(fft: Int, seconds: Double, label: String) async throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-led-\(UUID()).wav")
+    /// The same measurement for heavier sources: compressed, high sample rates, and the volume
+    /// adjustment, which decodes through ProfileDecoder and adds the level gain.
+    @Test(arguments: SourceCondition.allCases)
+    func comparesSourceConditions(_ condition: SourceCondition) async throws {
+        try await measure(fft: 2048, seconds: 6, label: "source-\(condition.rawValue)", source: condition)
+    }
+
+    private func measure(fft: Int, seconds: Double, label: String, source: SourceCondition = .wav48k) async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-led-\(UUID()).\(source.fileExtension)")
         defer { try? FileManager.default.removeItem(at: url) }
-        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2))
-        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 48000))
-        buffer.frameLength = 48000
-        let data = try #require(buffer.floatChannelData)
-        for i in 0..<48000 {
-            let t = Double(i) / 48000
-            data[0][i] = Float(0.08 * sin(2 * .pi * 90 * t) + 0.04 * sin(2 * .pi * 1000 * t))
-            data[1][i] = Float(0.07 * sin(2 * .pi * 440 * t) + 0.03 * sin(2 * .pi * 6000 * t))
-        }
-        do {
-            let file = try AVAudioFile(forWriting: url, settings: format.settings)
-            for _ in 0..<Int(seconds + 5) { try file.write(from: buffer) }
-        }
+        try source.write(url, seconds: Int(seconds + 5))
+        let backend: AudioEngineBackend
+        if source.normalized {
+            let profile = try AudioEngineBackend.measurementProfile()
+            let metrics = try await AudioPreprocessor.shared.measureLevels(url, profile: profile)
+            backend = try AudioEngineBackend(prepared: try await AudioPreprocessor.shared.prepare(url), metrics: metrics)
+        } else { backend = try AudioEngineBackend(url: url) }
+        // The display clock starts with playback, after the measurement above.
         let driver = VisualizationDriver()
         driver.synchronize(activity: .playing, visible: true)
-        let backend = try AudioEngineBackend(url: url)
         backend.volume = 0
         var inputs = 0, missing = 0, drops: UInt64 = 0
-        var rate = 0.0, earlyEnd = false
+        var rate = 0.0, earlyEnd = false, outputLatency = Double.nan
         var age = BoundedHistogram(), compute = BoundedHistogram()
         backend.onEvent = { _ in earlyEnd = true }
         backend.configureAnalysis(try AnalysisConfiguration(bandCount: 16, framesPerSecond: 30, fftSize: fft)) { frame in
             driver.receive(frame)
             inputs += 1; drops = max(drops, frame.droppedBuffers); rate = frame.timing.sampleRate
-            compute.add(frame.computationSeconds)
+            compute.add(frame.computationSeconds); outputLatency = frame.timing.estimatedOutputLatency ?? .nan
             if let center = frame.timing.windowCenterHostTime { age.add(frame.timing.producedHostTime - center) }
         }
         defer { backend.stop(); driver.synchronize(activity: .inactive, visible: false) }
@@ -106,6 +108,7 @@ import PlayerUI
         #expect(inputs == stoppedInputs && !driver.isRunning && driver.presentation.pendingCount == 0)
         let summary: [String: Any] = [
             "label": label, "seconds": elapsed, "fftSize": fft, "observedSampleRate": rate,
+            "estimatedOutputLatencyMs": outputLatency * 1000,
             "received": inputs, "adopted": adopted, "rasterized": rasterized, "uniqueRendered": unique,
             "renderFPS": Double(rasterized) / elapsed, "offscreenRenderP95Ms": render.percentile(0.95) * 1000,
             "drawingCommandsP95Ms": commands.percentile(0.95) * 1000,
@@ -115,6 +118,7 @@ import PlayerUI
             "estimatedPresentationLatenessP50Ms": late.percentile(0.5) * 1000,
             "estimatedPresentationLatenessP95Ms": late.percentile(0.95) * 1000,
             "estimatedPresentationLatenessMaxMs": late.maximum * 1000,
+            "estimatedPresentationEarlinessP95Ms": early.percentile(0.95) * 1000,
             "estimatedPresentationEarlinessMaxMs": early.maximum * 1000,
             "cpuPercentOneCore": cpu, "pendingHighWatermark": highWater,
             "droppedPCM": drops, "missingTicks": missing, "rssSamples": rss,
@@ -131,11 +135,72 @@ import PlayerUI
         #expect(inputs > Int(seconds * 27) && unique > Int(seconds * 20))
         #expect(render.percentile(0.95) < 1 / 30.0)
         #expect(late.count > 0 && late.percentile(0.95) < 0.12)
-        #expect(early.maximum < 0.002)
+        #expect(early.maximum < VisualizationClock.presentationLead + 0.002)
         #expect(highWater <= SpectrumPresentation.capacity && drops == 0 && cpu < 50)
         if seconds >= 600 {
             let warmed = rss.filter { $0["elapsed", default: 0] >= 60 }.compactMap { $0["rssMB"] }
             #expect((warmed.max() ?? 0) - (warmed.min() ?? 0) < 15)
+        }
+    }
+}
+
+/// Generated test sources. Each repeats one second of the same stereo tones.
+enum SourceCondition: String, CaseIterable, Sendable {
+    case wav48k = "wav-48k-float", aac44k = "aac-44k", flac96k = "flac-96k-24bit",
+         wav192k = "wav-192k-24bit", flac96kNormalized = "flac-96k-24bit-normalized"
+
+    var fileExtension: String {
+        switch self {
+        case .wav48k, .wav192k: "wav"
+        case .aac44k: "m4a"
+        case .flac96k, .flac96kNormalized: "flac"
+        }
+    }
+    var normalized: Bool { self == .flac96kNormalized }
+    private var sampleRate: Double {
+        switch self {
+        case .wav48k: 48000
+        case .aac44k: 44100
+        case .flac96k, .flac96kNormalized: 96000
+        case .wav192k: 192000
+        }
+    }
+
+    func write(_ url: URL, seconds: Int) throws {
+        let rate = sampleRate, frames = AVAudioFrameCount(rate)
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames))
+        buffer.frameLength = frames
+        let data = try #require(buffer.floatChannelData)
+        for i in 0..<Int(frames) {
+            let t = Double(i) / rate
+            data[0][i] = Float(0.08 * sin(2 * .pi * 90 * t) + 0.04 * sin(2 * .pi * 1000 * t))
+            data[1][i] = Float(0.07 * sin(2 * .pi * 440 * t) + 0.03 * sin(2 * .pi * 6000 * t))
+        }
+        switch self {
+        case .wav48k:
+            let file = try AVAudioFile(forWriting: url, settings: format.settings)
+            for _ in 0..<seconds { try file.write(from: buffer) }
+        case .wav192k:
+            let settings: [String: Any] = [AVFormatIDKey: kAudioFormatLinearPCM, AVSampleRateKey: rate, AVNumberOfChannelsKey: 2,
+                                           AVLinearPCMBitDepthKey: 24, AVLinearPCMIsFloatKey: false]
+            let file = try AVAudioFile(forWriting: url, settings: settings)
+            for _ in 0..<seconds { try file.write(from: buffer) }
+        case .aac44k:
+            let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: rate, AVNumberOfChannelsKey: 2,
+                                           AVEncoderBitRateKey: 256_000]
+            let file = try AVAudioFile(forWriting: url, settings: settings)
+            for _ in 0..<seconds { try file.write(from: buffer) }
+        case .flac96k, .flac96kNormalized:
+            // AVAudioFile wraps FLAC in a CAF container; Extended Audio File Services write a FLAC file.
+            var flac = AudioStreamBasicDescription(mSampleRate: rate, mFormatID: kAudioFormatFLAC, mFormatFlags: kAppleLosslessFormatFlag_24BitSourceData,
+                                                   mBytesPerPacket: 0, mFramesPerPacket: 4096, mBytesPerFrame: 0, mChannelsPerFrame: 2, mBitsPerChannel: 0, mReserved: 0)
+            var file: ExtAudioFileRef?
+            try #require(ExtAudioFileCreateWithURL(url as CFURL, kAudioFileFLACType, &flac, nil, AudioFileFlags.eraseFile.rawValue, &file) == noErr)
+            var client = format.streamDescription.pointee
+            try #require(ExtAudioFileSetProperty(file!, kExtAudioFileProperty_ClientDataFormat, UInt32(MemoryLayout.size(ofValue: client)), &client) == noErr)
+            for _ in 0..<seconds { try #require(ExtAudioFileWrite(file!, frames, buffer.audioBufferList) == noErr) }
+            try #require(ExtAudioFileDispose(file!) == noErr)
         }
     }
 }

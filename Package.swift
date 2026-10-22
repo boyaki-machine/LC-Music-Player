@@ -28,7 +28,7 @@ let package = Package(
         .testTarget(name: "AudioProcessingCoreTests", dependencies: ["AudioProcessingCore", "PreprocessingCore"]),
         .testTarget(name: "LibraryCoreTests", dependencies: ["LibraryCore", "PlaybackCore"]),
         .testTarget(name: "AnalysisCoreTests", dependencies: ["AnalysisCore", "AnalysisTransport"]),
-        .testTarget(name: "PlayerUITests", dependencies: ["PlayerUI", "VisualizationKit", "PlaybackCore", "AnalysisCore"]),
+        .testTarget(name: "PlayerUITests", dependencies: ["PlayerUI", "VisualizationKit", "PlaybackCore", "PreprocessingCore", "AnalysisCore"]),
         .testTarget(name: "ControlSurfacesTests", dependencies: ["ControlSurfaces", "PlayerUI", "PlaybackCore"]),
         .testTarget(name: "PlaybackCoreTests", dependencies: ["PlaybackCore"],
                     resources: [.copy("Fixtures")]),

@@ -75,9 +75,11 @@ import PlaybackCore
                                          produced: 10 + Double(i) * 0.01, due: 10.1 + Double(i) * 0.01),
                                   now: 10 + Double(i) * 0.01) == true)
         }
-        model.tick(now: 10.099, playing: true)
+        // Adopted `presentationLead` before the presentation time, never earlier.
+        let lead = VisualizationClock.presentationLead
+        model.tick(now: 10.099 - lead, playing: true)
         #expect(model.adoptionCount == 0)
-        model.tick(now: 10.101, playing: true)
+        model.tick(now: 10.101 - lead, playing: true)
         #expect(model.lastAdoption?.sequence == 1 && model.pendingCount == 5)
         model.tick(now: 10.2, playing: true)
         #expect(model.lastAdoption?.sequence == 6 && model.adoptionCount == 2 && model.pendingCount == 0)
