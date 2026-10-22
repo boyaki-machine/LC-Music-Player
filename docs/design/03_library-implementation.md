@@ -130,6 +130,7 @@
 アプリは前処理を有効にしてLibraryControllerを作り、音源の確認と再生開始のデコーダI/Oを背景へ渡す。前処理の動作（先頭PCM、全曲測定の巡回と優先順位、leaseの上限）は[再生前処理の実装設計](04_preprocessing-implementation.md)に記載する。
 
 - `selectEntry`の戻り値trueは、要求を受け付けたことを示す。選択の確定は`isPreparing`がfalseになるまで待つ。
+- 選曲の準備は、先行準備の引き継ぎと取消（`takeOverPreparation`）、先頭PCMの用意（`selectionAudio`）、音量の測定（`selectionLevels`）、確定（`commitSelection`）の段に分かれる。確定しなかった選曲は`endSelection`で後始末する。
 - `showsPreparationNotice`は、`isPreparing`が真になってから一定時間（既定0.3秒、初期化の`preparationNoticeDelay`）続いたときだけ真になり、準備が終われば偽に戻る。画面の状態文はこれに従い、停止の可否は`isPreparing`に従う。
 - 確定の前に対象と参照を再確認し、保存に成功してから選択を公開する。
 - 停止・別の選択・終了は世代を更新して古い要求を取り消す。
@@ -250,7 +251,7 @@
 - 終了コマンドはAppDelegateの専用アクションで受け付け、開いているファイル選択・保存シートを取り消し、オーバーレイと待機タイマーを解除する。
 - `LibraryController.shutdown`は編集と次曲送りを無効にし、音声エンジンと参照アクセスを解放する。その後、アプリは`terminateNow`で終了する。
 - ライブラリは編集時に保存済みのため、終了時の全件保存は行わない。
-- 終了要求、アプリ側の受付、再生エンジンの停止とアクセスの解放、選択の解除、終了直前の時刻を、OSLogのsubsystem `local.lcmp.player`／category `shutdown`へ記録する。曲名やファイルパスはログへ含めない。遅延の調査ではConsoleでこのカテゴリを確認し、入力受付前の遅延と後片付けの遅延を分ける。
+- 終了要求、アプリ側の受付、再生エンジンの停止とアクセスの解放、選択の解除、終了直前の時刻を、OSLogのsubsystem `local.lcmp.player`／category `shutdown`（`Logger.shutdown`）へ記録する。曲名やファイルパスはログへ含めない。遅延の調査ではConsoleでこのカテゴリを確認し、入力受付前の遅延と後片付けの遅延を分ける。
 
 ## 5. 検証
 

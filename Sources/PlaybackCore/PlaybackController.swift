@@ -4,6 +4,11 @@ import OSLog
 import AnalysisCore
 import AudioProcessingCore
 
+/// The shutdown steps and their timings, never song names or paths. Console: subsystem `local.lcmp.player`.
+extension Logger {
+    public static let shutdown = Logger(subsystem: "local.lcmp.player", category: "shutdown")
+}
+
 @Observable
 @MainActor
 public final class PlaybackController {
@@ -252,7 +257,7 @@ public final class PlaybackController {
 
     /// Releases only the current playback resource; library persistence is independent.
     public func close() {
-        let logger = Logger(subsystem: "local.lcmp.player", category: "shutdown")
+        let logger = Logger.shutdown
         let started = ContinuousClock.now
         endRun()
         backend = nil
@@ -304,7 +309,7 @@ public final class PlaybackController {
         selectionID = UUID()
         backend?.onEvent = nil
         if retiring { backend?.retire() } else { backend?.stop() }
-        let logger = Logger(subsystem: "local.lcmp.player", category: "shutdown")
+        let logger = Logger.shutdown
         if hadAccess { logger.notice("Audio run stopped after \(String(describing: started.duration(to: .now)), privacy: .public)") }
         lease = nil
         if hadAccess { logger.notice("Active file access released after \(String(describing: started.duration(to: .now)), privacy: .public)") }

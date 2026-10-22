@@ -204,7 +204,7 @@ import AudioProcessingCore
                 } else { request.resolved = try await references.resolved(request.reference) }
                 let url = request.resolved!.url
                 if prefix {
-                    request.audio = try await worker.prepare(url, cancellation: request.cancellation, seconds: 2, byteLimit: 32 * 1024 * 1024)
+                    request.audio = try await worker.preparePrefix(url, cancellation: request.cancellation)
                 }
                 if measure {
                     request.levels = try await worker.measureLevels(url, profile: profile, cancellation: request.cancellation, ownerID: candidate.track.id)
