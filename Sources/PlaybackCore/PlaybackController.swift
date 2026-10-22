@@ -75,7 +75,7 @@ public final class PlaybackController {
             let next = try makeBackend(url)
             next.volume = outputVolume
             try committing()
-            endRun()
+            endRun(retiring: true)
             backend = next
             connectAnalysis()
             selectedURL = url
@@ -97,7 +97,7 @@ public final class PlaybackController {
         do {
             guard duration.isFinite, duration > 0 else { throw PlaybackError.inaccessibleFile }
             try committing()
-            endRun()
+            endRun(retiring: true)
             backend = AudioEngineBackend(url: url, duration: duration, supportsSeeking: supportsSeeking)
             backend?.volume = outputVolume
             selectedURL = url; self.duration = duration; state = .ready
@@ -115,7 +115,7 @@ public final class PlaybackController {
             guard !normalizationRequired || metrics != nil else { throw AudioProcessingFailure.missingPlan }
             let next = try AudioEngineBackend(prepared: prepared, metrics: metrics, settings: settings)
             do { try committing() } catch { next.stop(); throw error }
-            endRun()
+            endRun(retiring: true)
             backend = next
             normalizationReady = metrics != nil
             lease = access
@@ -266,7 +266,8 @@ public final class PlaybackController {
     }
 
     private func handle(_ event: PlaybackEvent) {
-        endRun()
+        // A finished track is usually followed by the next, which takes over the running output.
+        if case .finished = event { endRun(retiring: true) } else { endRun() }
         switch event {
         case .finished:
             state = .finished
@@ -294,14 +295,15 @@ public final class PlaybackController {
         }
     }
 
-    private func endRun() {
+    /// `retiring`: another track takes over, so the old output may finish stopping elsewhere.
+    private func endRun(retiring: Bool = false) {
         normalizationReady = false
         invalidateAnalysis()
         let started = ContinuousClock.now
         let hadAccess = lease != nil
         selectionID = UUID()
         backend?.onEvent = nil
-        backend?.stop()
+        if retiring { backend?.retire() } else { backend?.stop() }
         let logger = Logger(subsystem: "local.lcmp.player", category: "shutdown")
         if hadAccess { logger.notice("Audio run stopped after \(String(describing: started.duration(to: .now)), privacy: .public)") }
         lease = nil

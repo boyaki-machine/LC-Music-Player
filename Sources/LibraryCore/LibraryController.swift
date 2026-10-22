@@ -922,11 +922,16 @@ extension LibraryController {
                         if next != self.document { try self.store.save(next) }
                     }) else { throw self.playback.error ?? PlaybackError.inaccessibleFile }
                 } else {
-                    // Keep metadata only while idle; do not retain a decoder or a scoped lease.
+                    // The player holds only metadata while idle. The prepared start and its access stay
+                    // with the library, so pressing play starts without resolving and reading again;
+                    // stopping, choosing another entry or quitting releases them.
                     guard self.playback.selectMetadata(url: resolved.url, duration: prepared.duration,
                         supportsSeeking: prepared.supportsSeeking, committing: {
                             if next != self.document { try self.store.save(next) }
                         }) else { throw self.playback.error ?? PlaybackError.inaccessibleFile }
+                    let idle = NextPreparation(entry: entryID, reference: resolved.reference, trackID: track.id)
+                    idle.audio = prepared; idle.resolved = resolved
+                    self.nextPrepared = idle
                 }
                 self.publish(next); self.unavailable[track.id] = nil; self.error = nil; self.message = nil
                 self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
