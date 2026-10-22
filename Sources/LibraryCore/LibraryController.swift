@@ -656,7 +656,8 @@ import AudioProcessingCore
         } catch { self.error = error.localizedDescription }
     }
     /// Writes the list with each track's current location, found and written on another thread.
-    public func exportM3U8(_ playlistID: UUID, to url: URL) async {
+    /// When some files lie outside the list's folder, `outside` asks how to write them; nil writes nothing.
+    public func exportM3U8(_ playlistID: UUID, to url: URL, outside: @MainActor (Int) async -> M3U8OutsidePaths?) async {
         guard url.isFileURL else { error = LibraryFailure.inaccessible.localizedDescription; return }
         guard let list = playlist(playlistID), canEdit else { return }
         let scope = references.beginAccess(url)
@@ -665,7 +666,13 @@ import AudioProcessingCore
             let tracks = list.entries.compactMap { track($0.trackID) }
             let located = await references.located(tracks.map(\.reference))
             let items = zip(tracks, located).map { M3U8Item(url: $1?.lastKnownURL ?? $0.reference.lastKnownURL, title: $0.name) }
-            try await Task.detached(priority: .userInitiated) { try M3U8.encode(items, relativeTo: url).write(to: url, options: .atomic) }.value
+            let count = M3U8.outsideCount(items, relativeTo: url)
+            var paths = M3U8OutsidePaths.fullPath
+            if count > 0 {
+                guard let chosen = await outside(count) else { return }
+                paths = chosen
+            }
+            try await Task.detached(priority: .userInitiated) { try M3U8.encode(items, relativeTo: url, outside: paths).write(to: url, options: .atomic) }.value
             message = "M3U8を書き出しました。"; error = nil
         } catch { self.error = error.localizedDescription }
     }

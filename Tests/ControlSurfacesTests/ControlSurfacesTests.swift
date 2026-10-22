@@ -39,6 +39,25 @@ import PlaybackCore
 
     @Test func theMenuOpensTheExtension() {
         #expect(TransportCommand.menuURL.absoluteString == "lcmp://extension")
+        #expect(AppLink(TransportCommand.menuURL) == .showExtension)
+    }
+}
+
+/// Any web page or app can open `lcmp://`; only the exact links do something.
+@Suite struct AppLinkTests {
+    @Test func theSchemeAcceptsOnlyTheListedLinks() {
+        #expect(AppLink.allCases == [.showExtension])
+        #expect(AppLink.allCases.map(\.url.absoluteString) == ["lcmp://extension"])
+        #expect(AppLink(URL(string: "lcmp://extension")!) == .showExtension)
+    }
+
+    @Test(arguments: [
+        "lcmp://", "lcmp:extension", "lcmp://play", "lcmp://delete", "lcmp://extension/", "lcmp://extension/library",
+        "lcmp://extension?file=/etc/passwd", "lcmp://extension#top", "lcmp://user@extension", "lcmp://extension:80",
+        "lcmp://EXTENSION", "lcmp:///extension", "https://extension", "file:///extension", "lcmpx://extension",
+    ])
+    func otherURLsDoNothing(_ text: String) throws {
+        #expect(AppLink(try #require(URL(string: text))) == nil)
     }
 }
 

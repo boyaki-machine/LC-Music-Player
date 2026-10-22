@@ -111,9 +111,11 @@ struct LCMPiOSApp: App {
         if playback.analysisConfiguration != configuration { playback.configureAnalysis(configuration) }
     }
 
-    /// `lcmp://extension` (the ☰ of the widgets) opens the extension.
+    /// `lcmp://extension` (the ☰ of the widgets) opens the extension; any other URL does nothing.
     func open(_ url: URL) {
-        guard url.scheme == "lcmp" else { return }
-        if url.host() == "extension", !presentation.extensionVisible { toggleExtension() }
+        switch AppLink(url) {
+        case .showExtension: if !presentation.extensionVisible { toggleExtension() }
+        case nil: break
+        }
     }
 }
