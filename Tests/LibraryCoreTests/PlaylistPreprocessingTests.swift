@@ -174,7 +174,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         let f = try Fixture(); defer { f.cleanup() }
         let doc = try playlistFixture(f.root, count: 3), refs = TestReferences()
         let config = MeasurementCacheConfiguration(url: f.root.appendingPathComponent("cache/measurements.sqlite"),
-            program: .init(applicationVersion: "test", build: "1", executableDigest: "test", environment: "test"))
+            platform: .init(system: "test"))
         let worker = PlaylistWorker(cache: config), playback = PlaybackController(makeBackend: { _ in TestBackend() })
         let profile = try MeasurementProfile(sampleRate: 48000, channels: 2)
         await worker.reconcileCacheOwners(Set(doc.tracks.map(\.id)))
@@ -249,7 +249,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         _ = try audioFile(f.root, name: doc.tracks[0].reference.lastKnownURL.lastPathComponent, duration: 5)
         store.document = doc
         let processor = AudioPreprocessor(cache: .init(url: f.root.appendingPathComponent("cache/measurements.sqlite"),
-            program: .init(applicationVersion: "test", build: "1", executableDigest: "display", environment: "test")))
+            platform: .init(system: "test")))
         let defaults = MemoryPreferences()
         let playback = PlaybackController(); playback.setVolume(0)
         let model = LibraryController(playback: playback, store: store, references: refs, preprocessingEnabled: true,

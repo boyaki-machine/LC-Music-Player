@@ -83,7 +83,6 @@ struct CachedMeasurement: Codable {
 final class MeasurementCache {
     let configuration: MeasurementCacheConfiguration
     private var db: SQLiteConnection?
-    private var program: MeasurementProgramIdentity?
     private var activeOwners: Set<UUID>?
     private var lastMaintenance: Date = .distantPast
     init(_ configuration: MeasurementCacheConfiguration) { self.configuration = configuration }
@@ -91,8 +90,7 @@ final class MeasurementCache {
         guard configuration.maximumRecords > 0, configuration.maximumAge.isFinite, configuration.maximumAge > 0,
               let identity = try configuration.sourceIdentity.identity(for: url),
               !identity.locator.isEmpty, !identity.resource.isEmpty, !identity.revision.isEmpty, identity.size > 0 else { return nil }
-        if program == nil { program = try configuration.program ?? MeasurementProgramIdentity.current() }
-        return try MeasurementRequest(source: identity, program: program!, configuration: configuration, profile: profile)
+        return try MeasurementRequest(source: identity, configuration: configuration, profile: profile)
     }
     func validate(_ request: MeasurementRequest, for url: URL) throws {
         guard try configuration.sourceIdentity.identity(for: url) == request.source else { throw PreprocessingFailure.sourceChanged }
@@ -100,8 +98,30 @@ final class MeasurementCache {
     private func connection() throws -> SQLiteConnection {
         if let db { try db.validateSchema(); return db }
         let db = try SQLiteConnection(url: configuration.url, maximumBytes: configuration.maximumBytes)
+        if db.schemaVersion < SQLiteConnection.currentVersion { try migrate(db) }
         self.db = db
         return db
+    }
+    /// Carries the records of schema 1 over to the current key once, so that measurements made by an
+    /// earlier build stay in use. Records that cannot be carried over are dropped and measured again.
+    private func migrate(_ db: SQLiteConnection) throws {
+        try db.transaction(validating: false) {
+            for row in try db.query("SELECT key, context FROM measurements") {
+                guard let old = row[0].data else { continue }
+                if let context = row[1].data, let request = MeasurementRequest.legacy(context, configuration: configuration) {
+                    try db.execute("""
+                        INSERT OR IGNORE INTO measurements(key,context,epoch,payload,checksum,completed,used,managed)
+                            SELECT ?,?,?,payload,checksum,completed,used,managed FROM measurements WHERE key=?
+                        """, [.blob(request.key), .blob(request.context), .blob(request.epoch), .blob(old)])
+                    try db.execute("INSERT OR IGNORE INTO owners(track,key) SELECT track,? FROM owners WHERE key=?",
+                                   [.blob(request.key), .blob(old)])
+                }
+                // Removing the old record also removes its owners.
+                try db.execute("DELETE FROM measurements WHERE key=?", [.blob(old)])
+            }
+            try db.execute("PRAGMA user_version=\(SQLiteConnection.currentVersion)")
+        }
+        db.schemaVersion = SQLiteConnection.currentVersion
     }
     func associateNativePeak(for url: URL, owner: UUID?) throws {
         guard let owner, accepts(owner), let request = try request(url, profile: nil) else { return }
@@ -136,7 +156,7 @@ final class MeasurementCache {
         guard payload.count <= 32768 else { return }
         let db = try connection(), now = Date()
         try db.transaction {
-            // Epoch removes incompatible program/DSP generations without decoding their records.
+            // Epoch removes records of another OS major version or DSP generation without decoding them.
             try db.execute("DELETE FROM measurements WHERE epoch<>?", [.blob(request.epoch)])
             let pageSize = try db.query("PRAGMA page_size").first?.first?.integer ?? 4096
             let pages = try db.query("PRAGMA page_count").first?.first?.integer ?? 0
@@ -203,8 +223,12 @@ struct MeasurementDatabaseFailure: Error {
     init(_ operation: String = "database", code: Int32 = 0, detail: String = "") { self.operation = operation; self.code = code; self.detail = detail }
 }
 final class SQLiteConnection {
+    /// 1 keyed the app's build and the full OS version; 2 keys only what can change a measurement.
+    static let currentVersion = 2
     private var handle: OpaquePointer?
     private var initialized = false
+    /// The schema of the open file. A file of version 1 is migrated by MeasurementCache before use.
+    var schemaVersion = 0
     init(url: URL, maximumBytes: Int) throws {
         let fm = FileManager.default, directory = url.deletingLastPathComponent()
         guard maximumBytes >= 65536 else { throw MeasurementDatabaseFailure() }
@@ -244,9 +268,13 @@ final class SQLiteConnection {
                     try execute("CREATE TABLE owners(track TEXT NOT NULL,key BLOB NOT NULL REFERENCES measurements(key) ON DELETE CASCADE,PRIMARY KEY(track,key)) WITHOUT ROWID")
                     try execute("CREATE INDEX owners_key ON owners(key)")
                     try execute("PRAGMA application_id=1279479120") // LCMP
-                    try execute("PRAGMA user_version=1")
+                    try execute("PRAGMA user_version=\(Self.currentVersion)")
                 }
-            } else { guard version == 1, application == 1279479120 else { throw MeasurementDatabaseFailure() } }
+                schemaVersion = Self.currentVersion
+            } else {
+                guard (1...Self.currentVersion).contains(version), application == 1279479120 else { throw MeasurementDatabaseFailure() }
+                schemaVersion = version
+            }
             let pageSize = try query("PRAGMA page_size").first?.first?.integer ?? 4096
             try execute("PRAGMA max_page_count=\(maximumBytes/pageSize)")
             try execute("PRAGMA journal_size_limit=0")
@@ -255,12 +283,12 @@ final class SQLiteConnection {
     }
     deinit { sqlite3_close(handle) }
     func validateSchema() throws {
-        guard try query("PRAGMA user_version").first?.first?.integer == 1,
+        guard try query("PRAGMA user_version").first?.first?.integer == schemaVersion,
               try query("PRAGMA application_id").first?.first?.integer == 1279479120 else { throw MeasurementDatabaseFailure() }
     }
-    func transaction(_ body: () throws -> Void) throws {
+    func transaction(validating: Bool = true, _ body: () throws -> Void) throws {
         try execute("BEGIN IMMEDIATE")
-        do { if initialized { try validateSchema() }; try body(); try execute("COMMIT") }
+        do { if initialized && validating { try validateSchema() }; try body(); try execute("COMMIT") }
         catch { try? execute("ROLLBACK"); throw error }
     }
     func execute(_ sql: String, _ values: [SQLValue] = []) throws { _ = try query(sql, values) }

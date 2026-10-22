@@ -1,4 +1,5 @@
 import AVFAudio
+import CryptoKit
 import Foundation
 import Testing
 import AudioProcessingCore
@@ -11,7 +12,7 @@ private struct CacheFixture {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-cache-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         configuration = MeasurementCacheConfiguration(url: root.appendingPathComponent("cache/measurements.sqlite"),
-            program: MeasurementProgramIdentity(applicationVersion: "test", build: "1", executableDigest: "test-binary-1", environment: "test"))
+            platform: MeasurementPlatformIdentity(system: "test"))
     }
     func wave(_ name: String = "tone.wav", seconds: Double = 0.6, amplitude: Float = 0.1) throws -> URL {
         let url = root.appendingPathComponent(name)
@@ -111,18 +112,82 @@ private final class ProviderIdentity: MeasurementSourceIdentifying, @unchecked S
         stats = await replaced.statistics()
         #expect(stats.levelScans == 1 && stats.cacheHits == 0)
     }
-    @Test func incompatibleProgramAlgorithmConversionAndOutputMiss() async throws {
+    /// A new build of the app keeps measurements: only the OS major version, the algorithm, the
+    /// conversion and the output profile take part in the key.
+    @Test func incompatiblePlatformAlgorithmConversionAndOutputMiss() async throws {
         let f = try CacheFixture(); defer { f.cleanup() }; let url = try f.wave()
         _ = try await AudioPreprocessor(cache: f.configuration).measureLevels(url, profile: profile())
+        let rebuilt = AudioPreprocessor(cache: f.configuration)
+        _ = try await rebuilt.measureLevels(url, profile: profile())
+        #expect(await rebuilt.statistics().levelScans == 0)
         for version in 0..<4 {
             var config = f.configuration
-            if version == 0 { config.program = .init(applicationVersion: "test", build: "2", executableDigest: "test-binary-2", environment: "test") }
+            if version == 0 { config.platform = .init(system: "test 2") }
             if version == 1 { config.algorithmVersion = 2 }
             if version == 2 { config.conversionVersion = 2 }
             let processor = AudioPreprocessor(cache: config)
             _ = try await processor.measureLevels(url, profile: profile(version == 3 ? 44100 : 48000, version == 3 ? 1 : 2))
             #expect(await processor.statistics().levelScans == 1)
         }
+    }
+    @Test func currentPlatformNamesOnlyTheMajorVersion() {
+        let system = MeasurementPlatformIdentity.current.system
+        #expect(system.hasSuffix(" \(ProcessInfo.processInfo.operatingSystemVersion.majorVersion)"))
+        #expect(!system.contains("."))
+        #expect(MeasurementRequest.legacyMajor("Version 26.0 (Build 25A354)/CoreAudio") == 26)
+        #expect(MeasurementRequest.legacyMajor("Version 15.7.1 (Build 24G231)/CoreAudio") == 15)
+        #expect(MeasurementRequest.legacyMajor("test") == nil)
+    }
+    /// Records of schema 1, keyed by an earlier build, are carried over when Core Audio decoded them
+    /// on the same OS major version with the same algorithm and conversion; others are dropped.
+    @Test func schemaOneRecordsCarryOverOnlyWhenCompatible() async throws {
+        let f = try CacheFixture(); defer { f.cleanup() }
+        let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        var config = f.configuration; config.platform = .current
+        let owner = UUID()
+        let cases: [(name: String, environment: String, algorithm: String, carried: Bool)] = [
+            ("same.wav", "Version \(major).1 (Build 1A1)/CoreAudio", "1", true),
+            ("older-os.wav", "Version \(major - 1).6 (Build 1A1)/CoreAudio", "1", false),
+            ("other-decoder.wav", "Version \(major).1 (Build 1A1)", "1", false),
+            ("other-algorithm.wav", "Version \(major).1 (Build 1A1)/CoreAudio", "2", false),
+        ]
+        var urls: [URL] = []
+        for item in cases {
+            let url = try f.wave(item.name); urls.append(url)
+            _ = try await AudioPreprocessor(cache: config).measureLevels(url, profile: profile(), ownerID: owner)
+        }
+        // Rewrite every record as the first format would have stored it.
+        do {
+            let db = try SQLiteConnection(url: config.url, maximumBytes: config.maximumBytes)
+            let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
+            for row in try db.query("SELECT key, context FROM measurements") {
+                let c = try PropertyListDecoder().decode([String].self, from: try #require(row[1].data))
+                let item = try #require(cases.first { c[1].hasSuffix($0.name) })
+                let legacy = ["LCMP-measurements-1", c[1], c[2], c[3], c[4], "1.15.106", "106", "digest", item.environment,
+                              item.algorithm, "1", c[9], c[10], c[11]]
+                let context = try encoder.encode(legacy)
+                let key = Data(SHA256.hash(data: context))
+                try db.execute("PRAGMA foreign_keys=OFF")
+                try db.execute("UPDATE owners SET key=? WHERE key=?", [.blob(key), .blob(try #require(row[0].data))])
+                try db.execute("UPDATE measurements SET key=?, context=?, epoch=? WHERE key=?",
+                               [.blob(key), .blob(context), .blob(Data("legacy".utf8)), .blob(try #require(row[0].data))])
+                try db.execute("PRAGMA foreign_keys=ON")
+            }
+            try db.execute("PRAGMA user_version=1")
+        }
+        let upgraded = AudioPreprocessor(cache: config)
+        for (item, url) in zip(cases, urls) {
+            let before = await upgraded.statistics().levelScans
+            _ = try await upgraded.measureLevels(url, profile: profile(), ownerID: owner)
+            #expect(await upgraded.statistics().levelScans - before == (item.carried ? 0 : 1), "\(item.name)")
+        }
+        let db = try SQLiteConnection(url: config.url, maximumBytes: config.maximumBytes)
+        #expect(db.schemaVersion == SQLiteConnection.currentVersion)
+        // The carried record keeps its owner, so an audit of the library keeps it.
+        await upgraded.reconcileCacheOwners([owner])
+        let reopened = AudioPreprocessor(cache: config)
+        _ = try await reopened.measureLevels(urls[0], profile: profile())
+        #expect(await reopened.statistics().levelScans == 0)
     }
     @Test func corruptMissingFutureAndUnwritableStoresFallBack() async throws {
         let f = try CacheFixture(); defer { f.cleanup() }; let url = try f.wave()
@@ -142,7 +207,7 @@ private final class ProviderIdentity: MeasurementSourceIdentifying, @unchecked S
         let future = AudioPreprocessor(cache: f.configuration)
         _ = try await future.measureLevels(url, profile: profile())
         #expect(await future.statistics().levelScans == 1)
-        var unavailable = f.configuration; unavailable = .init(url: url.appendingPathComponent("blocked.sqlite"), program: unavailable.program)
+        var unavailable = f.configuration; unavailable = .init(url: url.appendingPathComponent("blocked.sqlite"), platform: unavailable.platform)
         let failed = AudioPreprocessor(cache: unavailable)
         #expect(try await failed.measureLevels(url, profile: profile()) == expected)
         #expect(await failed.statistics().cacheWriteFailures > 0)

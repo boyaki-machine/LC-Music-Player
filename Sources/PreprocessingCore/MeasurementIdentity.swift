@@ -40,40 +40,44 @@ public struct LocalMeasurementSourceIdentity: MeasurementSourceIdentifying {
     }
 }
 
-public struct MeasurementProgramIdentity: Codable, Equatable, Sendable {
-    public let applicationVersion: String
-    public let build: String
-    public let executableDigest: String
-    public let environment: String
-    public init(applicationVersion: String, build: String, executableDigest: String, environment: String) {
-        self.applicationVersion = applicationVersion; self.build = build
-        self.executableDigest = executableDigest; self.environment = environment
-    }
-    /// Invoked once on the preprocessing queue, never on the render or UI thread.
-    static func current() throws -> Self {
-        guard let url = Bundle.main.executableURL else { throw PreprocessingFailure.invalidAudio }
-        let file = try FileHandle(forReadingFrom: url); defer { try? file.close() }
-        var hash = SHA256()
-        while let block = try file.read(upToCount: 1024 * 1024), !block.isEmpty { hash.update(data: block) }
-        return Self(applicationVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "development",
-            build: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development",
-            executableDigest: hash.finalize().map { String(format: "%02x", $0) }.joined(),
-            environment: ProcessInfo.processInfo.operatingSystemVersionString + "/CoreAudio")
+/// The versions of the code that measures. A change that can alter a stored measurement raises
+/// one of them, and only then are earlier measurements measured again; a new build of the app
+/// alone keeps them. `MeasurementVersionTests` pins the results of each version.
+public enum MeasurementVersions {
+    /// Loudness, sample peak, true peak and native peak (LevelDSP, LoudnessMeter, NativeSamplePeak).
+    public static let algorithm = 1
+    /// Decoding into the profile's format (AudioDecoderFactory, ProfileConversion).
+    public static let conversion = 1
+}
+
+/// The platform whose Core Audio decodes and converts the audio: the OS and its major version.
+/// Minor updates of the OS keep measurements; a new major version measures again once.
+public struct MeasurementPlatformIdentity: Codable, Equatable, Sendable {
+    public let system: String
+    public let decoder: String
+    public init(system: String, decoder: String = "CoreAudio") { self.system = system; self.decoder = decoder }
+    public static var current: Self { Self(system: system(major: ProcessInfo.processInfo.operatingSystemVersion.majorVersion)) }
+    static func system(major: Int) -> String {
+        #if os(iOS)
+        "iOS \(major)"
+        #else
+        "macOS \(major)"
+        #endif
     }
 }
 
 public struct MeasurementCacheConfiguration: Sendable {
     public let url: URL
-    public var program: MeasurementProgramIdentity?
+    public var platform: MeasurementPlatformIdentity
     public var sourceIdentity: any MeasurementSourceIdentifying
     public var maximumBytes: Int = 64 * 1024 * 1024
     public var maximumRecords: Int = 10_000
     public var maximumAge: TimeInterval = 90 * 86400
-    public var algorithmVersion: Int = 1
-    public var conversionVersion: Int = 1
-    public init(url: URL, program: MeasurementProgramIdentity? = nil,
+    public var algorithmVersion: Int = MeasurementVersions.algorithm
+    public var conversionVersion: Int = MeasurementVersions.conversion
+    public init(url: URL, platform: MeasurementPlatformIdentity = .current,
                 sourceIdentity: any MeasurementSourceIdentifying = LocalMeasurementSourceIdentity()) {
-        self.url = url; self.program = program; self.sourceIdentity = sourceIdentity
+        self.url = url; self.platform = platform; self.sourceIdentity = sourceIdentity
     }
     public static var application: Self {
         Self(url: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
@@ -82,22 +86,46 @@ public struct MeasurementCacheConfiguration: Sendable {
 }
 
 struct MeasurementRequest: Sendable {
+    static let format = "LCMP-measurements-2"
     let source: MeasurementSourceIdentity
     let context: Data
     let key: Data
     let epoch: Data
-    init(source: MeasurementSourceIdentity, program: MeasurementProgramIdentity,
-         configuration: MeasurementCacheConfiguration, profile: MeasurementProfile?) throws {
+    init(source: MeasurementSourceIdentity, configuration: MeasurementCacheConfiguration, profile: MeasurementProfile?) throws {
+        try self.init(source: source, platform: configuration.platform, algorithm: String(configuration.algorithmVersion),
+                      conversion: String(configuration.conversionVersion), profile: profile.map { String($0.version) } ?? "native-peak-1",
+                      rate: profile.map { String($0.sampleRate.bitPattern) } ?? "", channels: profile.map { String($0.channels) } ?? "")
+    }
+    init(source: MeasurementSourceIdentity, platform: MeasurementPlatformIdentity, algorithm: String, conversion: String,
+         profile: String, rate: String, channels: String) throws {
         self.source = source
         // An ordered array of length-delimited strings prevents concatenation ambiguity.
-        let components = ["LCMP-measurements-1", source.locator, source.resource, source.revision, String(source.size),
-            program.applicationVersion, program.build, program.executableDigest, program.environment,
-            String(configuration.algorithmVersion), String(configuration.conversionVersion),
-            profile.map { String($0.version) } ?? "native-peak-1",
-            profile.map { String($0.sampleRate.bitPattern) } ?? "", profile.map { String($0.channels) } ?? ""]
+        let components = [Self.format, source.locator, source.resource, source.revision, String(source.size),
+            platform.system, platform.decoder, algorithm, conversion, profile, rate, channels]
         let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
         context = try encoder.encode(components)
         key = Data(SHA256.hash(data: context))
-        epoch = Data(SHA256.hash(data: try encoder.encode(Array(components[5...10]))))
+        epoch = Data(SHA256.hash(data: try encoder.encode(Array(components[5...8]))))
+    }
+
+    /// A record of the first format (schema 1) under the current format, or nil when it cannot be
+    /// carried over. That format keyed the app's build and executable, which no longer invalidate a
+    /// measurement, and the whole OS version string, of which only the major version is kept.
+    /// Only records decoded by Core Audio with the current algorithm and conversion carry over.
+    static func legacy(_ context: Data, configuration: MeasurementCacheConfiguration) -> MeasurementRequest? {
+        guard let c = try? PropertyListDecoder().decode([String].self, from: context), c.count == 14,
+              c[0] == "LCMP-measurements-1", let size = Int64(c[4]),
+              c[8].hasSuffix("/CoreAudio"), let major = Self.legacyMajor(c[8]),
+              c[9] == String(configuration.algorithmVersion), c[10] == String(configuration.conversionVersion) else { return nil }
+        let source = MeasurementSourceIdentity(locator: c[1], resource: c[2], revision: c[3], size: size)
+        let platform = MeasurementPlatformIdentity(system: MeasurementPlatformIdentity.system(major: major))
+        return try? MeasurementRequest(source: source, platform: platform, algorithm: c[9], conversion: c[10], profile: c[11], rate: c[12], channels: c[13])
+    }
+
+    /// The major version in `ProcessInfo.operatingSystemVersionString`, e.g. 26 in "Version 26.0 (Build 25A354)/CoreAudio".
+    static func legacyMajor(_ environment: String) -> Int? {
+        guard environment.hasPrefix("Version ") else { return nil }
+        let digits = environment.dropFirst("Version ".count).prefix { $0.isNumber }
+        return Int(digits).flatMap { $0 > 0 ? $0 : nil }
     }
 }
