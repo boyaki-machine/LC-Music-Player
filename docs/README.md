@@ -18,7 +18,7 @@
 | [01 UI・UX設計](design/01_ui-ux-design.md) | メイン画面、拡張画面、シーク、縦型音量、設定、状態の伝え方 |
 | [02 基本再生機能の実装設計](design/02_playback-implementation.md) | 単曲再生の構成、対応形式、ファイルアクセス、状態遷移、シーク、音量、デコーダの選択 |
 | [03 ライブラリ・プレイリストの実装設計](design/03_library-implementation.md) | 保存・復元、ブックマーク、再生順序、M3U8交換、リスト表示、終了処理 |
-| [04 再生前処理の実装設計](design/04_preprocessing-implementation.md) | 次曲の先頭PCM、全曲測定、プレイリストの事前測定、取消とファイルアクセス |
+| [04 再生前処理の実装設計](design/04_preprocessing-implementation.md) | 次曲の先頭PCM、全曲測定、プレイリストの事前測定と優先度・省電力、取消とファイルアクセス |
 | [05 前処理測定結果の永続キャッシュ](design/05_measurement-cache-implementation.md) | SQLiteの保存形式、識別と失効、Audit、容量の回収 |
 | [06 音量自動調整の実装設計](design/06_volume-normalization-implementation.md) | 全曲LUFS/true peakの測定、固定ゲインの算出、処理段の順序、再生準備と設定 |
 | [07 周波数解析の実装設計](design/07_analysis-implementation.md) | 解析データ、音声の取得、時刻情報と将来の同期補償の契約 |
@@ -27,7 +27,7 @@
 | [10 Player UI・可視化の開発ガイド](design/10_player-ui-developer-guide.md) | `LCMP_default_GEQ`のフォルダ構成、モジュール間のI/F、新しいUI・可視化の追加手順 |
 | [11 依存ライブラリと同梱構成](design/11_third-party-dependencies.md) | 依存を持たない構成、署名と権限、ライセンス表示、脆弱性の確認 |
 | [12 オコジョ合唱団の実装設計](design/12_ermine-chorus-implementation.md) | 原画と中割り、キャラクタごとの演出、音域と感度、セルの描画、時計と寿命 |
-| [13 iPhone版の実装設計](design/13_iphone-implementation.md) | 共用部分のOS分岐、画面の枠と配置、音声セッションとバックグラウンド再生、ファイルの選択、ビルド |
+| [13 iPhone版の実装設計](design/13_iphone-implementation.md) | 共用部分のOS分岐、画面の枠と配置、音声セッションとバックグラウンド再生、ウィジェットとURLスキーム、ファイルの選択、ビルド |
 
 ## 設計書の書き方
 
