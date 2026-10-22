@@ -83,8 +83,24 @@
 - Info.plistの`UIBackgroundModes`に`audio`を入れる。音声セッションの区分は`.playback`、方針は`.longFormAudio`とし、消音スイッチの状態にかかわらず鳴らす。
 - 再生を始めたときにセッションを有効にし、停止したときに他のアプリへ知らせて無効にする。曲の自然な終わりでは無効にしない（次の曲が続くため）。
 - 中断の始まりで、再生中なら一時停止する。中断の終わりでは再開しない。
-- 出力の経路が変わると（ヘッドホンの抜き差し・Bluetoothの接続の変化）、AVAudioEngineの構成変更としてmacOSと同じく停止する。
+- 出力の経路が変わると（ヘッドホンの抜き差し・Bluetoothの接続の変化）、出力の形式（サンプルレート等）が変わる場合はAVAudioEngineの構成変更としてmacOSと同じく停止する。形式が変わらない場合は再生を続け、可視化の出力遅延だけを取り直す（次の節）。
 - 画面がアクティブでないとき（バックグラウンド・ロック）は、`visualizationVisible`を偽にし、解析の設定を外す。再生は続ける。
+
+### 出力遅延の取り方
+
+可視化は「レンダーのhost時刻＋出力遅延」を推定提示時刻とし、音に合わせて表示する（[解析の実装設計](07_analysis-implementation.md)・[可視化の実装設計](08_visualization-implementation.md)）。利用者の機器（スピーカー・有線・各社のBluetoothイヤホン）は様々なので、特定の機器に合わせた補正値は持たず、OSが報告する遅延をそのまま使う。
+
+- 出力遅延は、観測ノードの`outputPresentationLatency`だけを使う。iOSでは、この値は`AVAudioSession.outputLatency`と同じで、Bluetoothの経路の遅延を含む。セッションの値を足すと二重に数えるので足さない。
+- iPhoneの実機での報告値は次のとおりだった。どちらの経路でも、全ノードの`outputPresentationLatency`とセッションの`outputLatency`は一致した。
+
+| 経路 | 出力遅延 | IOバッファ | host時刻の先行（呼び出し時点から） |
+| --- | --- | --- | --- |
+| スピーカー（48kHz） | 15.8ms | 21.3ms | 約24.2ms |
+| Bluetooth A2DP（44.1kHz） | 240.6ms | 23.2ms | 約23.1ms |
+
+- レンダー通知のhost時刻はIOバッファ約1回分先を指し、macOSと同じ意味である。よって推定提示時刻の求め方はmacOSと共通にできる。
+- 経路が変わったときは`OutputLatencyTracker`が`AVAudioSession.routeChangeNotification`を受けて遅延を読み直し、0.5ms以上変わっていれば`AnalysisSession.updateOutputLatency(_:)`で差し替える。不正な値（非有限・負・2秒以上）は使わない。形式が同じまま経路が変わると再生が続くため、取り直さないとスピーカーとBluetoothの間で約225msずれる。形式が変わる経路の変更では再生が止まり、再生を始め直したときに取り直す。macOSでは既定の出力機器の変更が構成変更になり再生が止まるので、通知は受けない。
+- DEBUG版では、`AudioEngineBackend.recordsLatency`（iPhoneのアプリが起動時に有効にする。UIテストの専用ライブラリでは`-LCMPLatencyProbe YES`のときだけ）で、再生の開始・3秒ごと・経路の変更のたびに、各ノードの遅延・セッションの`outputLatency`・`ioBufferDuration`・サンプルレート・経路の種類・使っている遅延・host時刻の先行（p50・最小・最大）を`Library/Caches/lcmp-latency.jsonl`へ1行ずつ書く。曲名や機器名は書かない。`xcrun devicectl device copy from --domain-type appDataContainer --domain-identifier <bundle ID> --source Library/Caches/lcmp-latency.jsonl`で取り出せる。
 
 ### ロック画面の操作
 
@@ -160,6 +176,8 @@
 | ☰のリンクで拡張画面が開く | `make ios-uitest`（`ControlSurfaceTests`） |
 | 音源タブの登録ボタン（ファイル・フォルダ・ミュージック）が1行に同じ高さで並び、名前が折り返さない | `make ios-uitest`（`SourceButtonsTests`。幅の狭い機種（iPhone SE、375pt）では、シミュレータの画面で目視する） |
 | 音源タブの検索で一致した曲のまとまりが開き、曲のゴミ箱で1曲を、選択モードでまとまりを1回の確認で除外できる。曲のゴミ箱が画面の右端（スクロールのインジケータ）から離れている | `make ios-uitest`（`SourceSearchTouchTests`。`TEST_RUNNER_LCMP_UI_SNAPSHOTS=<フォルダ>`を付けると、検索中と選択中の画面を書き出す） |
+| 経路の変更で出力遅延を読み直し、報告値をそのまま（足さずに）使う。不正な値を使わない。差し替えた遅延が以降の解析結果に届く | `OutputLatencyTrackerTests`、`AnalysisTests`の`updatedOutputLatencyReachesLaterFramesOnly`（オフラインのレンダリング） |
+| 実機での可視化と音の同期 | DEBUG版をスピーカーとBluetoothのイヤホンで再生し、再生中に付け外しする。`lcmp-latency.jsonl`で、使っている遅延が経路ごとの報告値に変わることを確かめ、表示と音のずれが気にならないことを目視する |
 | ウィジェットの見た目 | DEBUGの起動引数`-LCMPControlSurfaces YES`で各状態の見本を並べて撮影し、UI・UX設計と見比べる |
 | 縦置き・横置き・拡張を閉じた全画面の配置 | シミュレータで起動引数（`-LCMPImportPaths`・`-LCMPAutoplay`・`-LCMPOrientation`・`-LCMPExtension`）を付けて撮影し、UI・UX設計と見比べる |
 | バックグラウンドで再生が続く | 再生中に他のアプリへ切り替え、音が続くことと、アプリがMediaPlaybackの権利を持ち続けることを確かめる |

@@ -52,6 +52,12 @@ struct LCMPiOSApp: App {
         session = AudioSessionController(playback: playback, library: library)
         deviceVolume = DeviceVolumeMemory(playback: playback, system: AudioSessionOutputVolume(setter: SystemVolumeSlider.shared.set))
         library.restore()
+        #if DEBUG
+        // Device checks of the output latency. Runs with a library of their own (UI tests) leave it
+        // off unless `-LCMPLatencyProbe YES` asks for it.
+        AudioEngineBackend.recordsLatency = UserDefaults.standard.string(forKey: "LCMPLibraryFile") == nil
+            || UserDefaults.standard.bool(forKey: "LCMPLatencyProbe")
+        #endif
         surfaces = ControlSurfaceController(playback: playback)
         // The buttons of the widgets run here, even with the app in the background.
         TransportIntentHandler.handle = { [weak self] command in self?.perform(command) }

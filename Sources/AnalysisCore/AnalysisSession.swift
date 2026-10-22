@@ -68,6 +68,7 @@ public final class AnalysisSession: @unchecked Sendable {
         stamp.sample_time = Double(time.sampleTime)
         stamp.host_time_valid = time.isHostTimeValid
         stamp.host_seconds = time.isHostTimeValid ? AVAudioTime.seconds(forHostTime: time.hostTime) : 0
+        stamp.callback_seconds = AVAudioTime.seconds(forHostTime: mach_absolute_time())
         stamp.latency_valid = outputLatency.map { $0.isFinite && $0 >= 0 } ?? false
         stamp.output_latency = outputLatency ?? 0
         stamp.sequence = producerSequence
@@ -93,6 +94,9 @@ public final class AnalysisSession: @unchecked Sendable {
         if status == noErr { renderSource = source }
         return status
     }
+
+    /// Stamps later renders with a new output latency, for a route change that keeps the engine running.
+    public func updateOutputLatency(_ seconds: Double) { lcmp_pcm_set_output_latency(transport, seconds) }
 
     public func detach() {
         renderSource?.clear(transport)
@@ -124,6 +128,9 @@ public final class AnalysisSession: @unchecked Sendable {
         guard stamp.sample_rate.isFinite, stamp.sample_rate >= 8000 else { return }
         let sample = stamp.sample_time_valid ? stamp.sample_time : nil
         let host = stamp.host_time_valid ? stamp.host_seconds : nil
+        #if DEBUG
+        if let host, stamp.callback_seconds > 0 { LatencyProbe.recordRenderLead(host - stamp.callback_seconds) }
+        #endif
         let sampleGap = sample.flatMap { s in previousSampleEnd.map { abs(s - $0) > 0.5 } } ?? false
         let hostGap = host.flatMap { h in previousHostEnd.map { abs(h - $0) > 2 / stamp.sample_rate } } ?? false
         let discontinuity = rate != stamp.sample_rate || lastSequence.map { $0 &+ 1 != stamp.sequence } == true
@@ -137,13 +144,15 @@ public final class AnalysisSession: @unchecked Sendable {
         lastSequence = stamp.sequence
         previousSampleEnd = sample.map { $0 + Double(stamp.frames) }
         previousHostEnd = host.map { $0 + Double(stamp.frames) / rate }
+        // Overlapping windows never empty, so each render brings its latency: a route change
+        // that keeps the engine running reaches the next window.
+        windowLatency = stamp.latency_valid ? stamp.output_latency : nil
         let n = analyzer.configuration.fftSize
         var offset = 0
         while offset < Int(stamp.frames) {
             if leftWindow.isEmpty {
                 windowStartSample = sample.map { $0 + Double(offset) }
                 windowStartHost = host.map { $0 + Double(offset) / rate }
-                windowLatency = stamp.latency_valid ? stamp.output_latency : nil
             }
             let count = min(n - leftWindow.count, Int(stamp.frames) - offset)
             leftWindow.append(contentsOf: leftScratch[offset..<(offset + count)])

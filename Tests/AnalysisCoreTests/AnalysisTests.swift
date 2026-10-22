@@ -193,6 +193,48 @@ struct AnalysisTests {
         session.finish()
     }
 
+    /// A route change that keeps the engine running stamps later renders with the new latency.
+    @Test func updatedOutputLatencyReachesLaterFramesOnly() async throws {
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        let engine = AVAudioEngine()
+        let source = AVAudioPlayerNode()
+        let observation = AVAudioUnitEQ(numberOfBands: 0)
+        for node in [source, observation] as [AVAudioNode] { engine.attach(node) }
+        engine.connect(source, to: observation, format: format)
+        engine.connect(observation, to: engine.mainMixerNode, format: format)
+        try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 1024)
+        let session = try AnalysisSession(configuration: AnalysisConfiguration(framesPerSecond: 60))
+        let collector = Task { () -> [Double?] in
+            var result: [Double?] = []
+            for await frame in session.frames { result.append(frame.timing.estimatedOutputLatency) }
+            return result
+        }
+        let renderSource = try AnalysisRenderSource(unit: observation.audioUnit)
+        #expect(session.attach(to: renderSource, sampleRate: 48000, outputLatency: 0.0158) == noErr)
+        source.scheduleBuffer(try makeBuffer(frames: 48000, sample: 0, rate: 48000), completionHandler: nil)
+        try engine.start()
+        source.play()
+        let output = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1024))
+        func render(_ chunks: Int) async throws {
+            for _ in 0..<chunks {
+                #expect(try engine.renderOffline(1024, to: output) == .success)
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        try await render(12)
+        session.updateOutputLatency(0.2406)
+        // Let the windows rendered before the change go out first.
+        try await Task.sleep(for: .milliseconds(150))
+        try await render(12)
+        engine.stop()
+        session.detach()
+        session.finish()
+        let latencies = await collector.value
+        let first = try #require(latencies.firstIndex { $0 == 0.2406 }, "no frame took the new latency: \(latencies)")
+        #expect(first > 0 && latencies[..<first].allSatisfy { $0 == 0.0158 })
+        #expect(latencies[first...].allSatisfy { $0 == 0.2406 })
+    }
+
     @Test func timestampValidityTransitionsResetOverlappingWindows() async throws {
         let session = try AnalysisSession(configuration: AnalysisConfiguration())
         let stream = session.frames

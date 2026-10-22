@@ -61,6 +61,13 @@ public final class AudioEngineBackend: PlaybackBackend {
     private var analysisGeneration: UUID?
     private var analysisNode: AVAudioUnitEQ?
     private var analysisSource: AnalysisRenderSource?
+    private var latencyTracker: OutputLatencyTracker?
+    #if os(iOS)
+    private static let routeChange: Notification.Name? = AVAudioSession.routeChangeNotification
+    #else
+    // A change of the default device on macOS changes the engine's configuration and stops playback.
+    private static let routeChange: Notification.Name? = nil
+    #endif
 
     public func configureAnalysis(_ configuration: AnalysisConfiguration?,
                                   receive: (@MainActor (AnalysisFrame) -> Void)?) {
@@ -81,6 +88,12 @@ public final class AudioEngineBackend: PlaybackBackend {
         guard status == noErr else { session.finish(); return }
         analysis = session
         analysisGeneration = session.generation
+        latencyTracker = OutputLatencyTracker(initial: node.outputPresentationLatency, notification: Self.routeChange,
+                                              read: { [weak node] in node?.outputPresentationLatency },
+                                              apply: { [weak session] in session?.updateOutputLatency($0) })
+        #if DEBUG
+        startProbe()
+        #endif
         analysisTask = Task { [weak self, frames = session.frames, id = session.generation] in
             for await frame in frames {
                 guard !Task.isCancelled, let self, self.analysisGeneration == id else { break }
@@ -90,6 +103,8 @@ public final class AudioEngineBackend: PlaybackBackend {
     }
 
     private func endAnalysis() {
+        latencyTracker?.cancel()
+        latencyTracker = nil
         analysisGeneration = nil
         analysisTask?.cancel()
         analysisTask = nil
@@ -97,6 +112,63 @@ public final class AudioEngineBackend: PlaybackBackend {
         analysis?.finish()
         analysis = nil
     }
+
+    #if DEBUG
+    /// Latency diagnostics for checking on a device; see LatencyProbe.
+    public static var recordsLatency: Bool {
+        get { LatencyProbe.isEnabled }
+        set { LatencyProbe.isEnabled = newValue }
+    }
+    private var probeTimer: Timer?
+    private var probeRoute: NSObjectProtocol?
+
+    private func startProbe() {
+        guard LatencyProbe.isEnabled else { return }
+        probe("analysis")
+        if probeTimer == nil {
+            probeTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.probe("tick") }
+            }
+        }
+        #if os(iOS)
+        if probeRoute == nil {
+            probeRoute = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] note in
+                let reason = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt) ?? 0
+                MainActor.assumeIsolated { self?.probe("route-\(reason)") }
+            }
+        }
+        #endif
+    }
+
+    private func stopProbe() {
+        probeTimer?.invalidate(); probeTimer = nil
+        if let probeRoute { NotificationCenter.default.removeObserver(probeRoute) }
+        probeRoute = nil
+    }
+
+    private func probe(_ event: String) {
+        guard LatencyProbe.isEnabled, let run else { return }
+        func ms(_ seconds: Double?) -> Double { seconds.map { $0.isFinite ? $0 * 1000 : -1 } ?? -1 }
+        var values: [String: Any] = [
+            "observedOutputPresentationLatencyMs": ms(analysisNode?.outputPresentationLatency),
+            "outputNodePresentationLatencyMs": ms(run.engine.outputNode.presentationLatency),
+            "outputNodeOutputPresentationLatencyMs": ms(run.engine.outputNode.outputPresentationLatency),
+            "mixerOutputPresentationLatencyMs": ms(run.engine.mainMixerNode.outputPresentationLatency),
+            "boundLatencyMs": ms(latencyTracker?.applied),
+            "outputSampleRate": run.engine.outputNode.outputFormat(forBus: 0).sampleRate,
+            "paused": paused,
+        ]
+        #if os(iOS)
+        let session = AVAudioSession.sharedInstance()
+        values["sessionOutputLatencyMs"] = ms(session.outputLatency)
+        values["sessionIOBufferDurationMs"] = ms(session.ioBufferDuration)
+        values["sessionSampleRate"] = session.sampleRate
+        // Kinds of ports only (speaker, Bluetooth A2DP, ...), never their names.
+        values["routeOutputs"] = session.currentRoute.outputs.map(\.portType.rawValue)
+        #endif
+        LatencyProbe.write(event, values)
+    }
+    #endif
 
     init(url: URL, duration: Double, supportsSeeking: Bool) {
         self.url = url; self.duration = duration; self.supportsSeeking = supportsSeeking
@@ -251,6 +323,9 @@ public final class AudioEngineBackend: PlaybackBackend {
     }
 
     public func stop() {
+        #if DEBUG
+        stopProbe()
+        #endif
         try? preparedDecoder?.close()
         preparedDecoder = nil
         endAnalysis()
