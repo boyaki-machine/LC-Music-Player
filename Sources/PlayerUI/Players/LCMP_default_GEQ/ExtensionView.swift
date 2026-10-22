@@ -35,6 +35,13 @@ public struct ExtensionView: View {
     @State private var confirmPlaylist: UUID?
     @State private var confirmSource: UUID?
     @State private var confirmFolder: SourceFolderGroup?
+    @State private var searchingSources = false
+    @State private var sourceQuery = ""
+    @State private var selectingSources = false
+    @State private var selectedSources: Set<UUID> = []
+    @State private var confirmSelection = false
+    @State private var sourceCatalog = SourceCatalogCache()
+    @FocusState private var searchFocused: Bool
     @State private var rowDrag: RowDrag?
     @State private var reveal = UUID()
     private enum Screen { case list, chooser, manage, create, rename, add }
@@ -194,15 +201,22 @@ public struct ExtensionView: View {
             .confirmationDialog("プレイリストを削除しますか？音源は残ります。", isPresented: Binding(get: { confirmPlaylist != nil }, set: { if !$0 { confirmPlaylist = nil } })) {
                 Button("プレイリストを削除", role: .destructive) { if let id = confirmPlaylist { library.deletePlaylist(id) }; confirmPlaylist = nil }
             }
-            .confirmationDialog("ライブラリと各プレイリストから除外します。元ファイルは削除しません。", isPresented: Binding(get: { confirmSource != nil }, set: { if !$0 { confirmSource = nil } })) {
+            .confirmationDialog("「\(confirmSource.flatMap(library.track)?.name ?? "")」を、ライブラリと各プレイリストから除外します。元ファイルは削除しません。", isPresented: Binding(get: { confirmSource != nil }, set: { if !$0 { confirmSource = nil } })) {
                 Button("ライブラリから除外", role: .destructive) { if let id = confirmSource { library.excludeTrack(id) }; confirmSource = nil; sourceID = nil }
             }
             .confirmationDialog("「\(confirmFolder?.name ?? "")」の\(confirmFolder?.tracks.count ?? 0)曲を、ライブラリと各プレイリストから除外します。元ファイルは削除しません。",
                                 isPresented: Binding(get: { confirmFolder != nil }, set: { if !$0 { confirmFolder = nil } })) {
                 Button("\(confirmFolder?.kindName ?? "フォルダ")を除外", role: .destructive) { if let group = confirmFolder { library.excludeTracks(group.tracks.map(\.id)) }; confirmFolder = nil }
             }
+            .confirmationDialog("選んだ\(selectedSources.count)曲を、ライブラリと各プレイリストから除外します。元ファイルは削除しません。", isPresented: $confirmSelection) {
+                Button("\(selectedSources.count)曲を除外", role: .destructive) {
+                    library.excludeTracks(library.document.tracks.map(\.id).filter(selectedSources.contains))
+                    selectedSources = []; selectingSources = false
+                }
+            }
         }
     }
+    private func closeSourceSearch() { searchingSources = false; sourceQuery = ""; searchFocused = false }
     private func openCurrent() {
         browsingID = library.document.currentPlaylistID ?? library.document.playlists.first?.id
         screen = .list; sourceID = nil; reveal = UUID()
@@ -411,17 +425,56 @@ public struct ExtensionView: View {
                 Button { browsingID = originID; self.sourceID = nil; presentation.section = .playlist; screen = .list } label: { Label("リストへ戻る", systemImage: "chevron.left") }.buttonStyle(SoftGlassButtonStyle())
             }
         } else {
-            HStack { Text("ライブラリ").fontWeight(.medium); Spacer(); Text("\(library.document.tracks.count)曲").foregroundStyle(.secondary) }
-            HStack(spacing: 8) {
-                Button { actions.files(nil) } label: { Label("ファイル", systemImage: "doc.badge.plus") }
-                Button(action: actions.folder) { Label("フォルダ", systemImage: "folder.badge.plus") }
-                if let musicLibrary = actions.musicLibrary {
-                    Button { musicLibrary(nil) } label: { Label("ミュージック", systemImage: "music.note") }
+            let shown = sourceCatalog.groups(library.document.tracks, matching: sourceQuery, hiding: [])
+            let filtering = !SourceCatalog.terms(sourceQuery).isEmpty
+            HStack(spacing: 4) {
+                Text("ライブラリ").fontWeight(.medium); Spacer()
+                Text(filtering ? "\(shown.reduce(0) { $0 + $1.tracks.count }) / \(library.document.tracks.count)曲" : "\(library.document.tracks.count)曲")
+                    .foregroundStyle(.secondary).padding(.trailing, 6)
+                smallButton(searchingSources ? "magnifyingglass.circle.fill" : "magnifyingglass", searchingSources ? "検索を閉じる" : "音源を検索") {
+                    if searchingSources { closeSourceSearch() } else { searchingSources = true; searchFocused = true }
                 }
-            }.fixedSize(horizontal: false, vertical: true).buttonStyle(SoftGlassButtonStyle()).labelStyle(CompactLabelStyle()).disabled(!library.canEdit)
+                smallButton(selectingSources ? "checkmark.circle.fill" : "checkmark.circle", selectingSources ? "選択を終了" : "曲を選択して除外") {
+                    selectingSources.toggle(); selectedSources = []
+                }.disabled(!library.canEdit || library.document.tracks.isEmpty)
+            }
+            if searchingSources {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("曲名・ファイル名・フォルダ・アルバムなど", text: $sourceQuery).textFieldStyle(.plain).focused($searchFocused)
+                        .autocorrectionDisabled().accessibilityIdentifier("sourceSearch")
+                        #if os(macOS)
+                        .onExitCommand(perform: closeSourceSearch)
+                        #else
+                        .textInputAutocapitalization(.never).submitLabel(.search)
+                        #endif
+                    if !sourceQuery.isEmpty {
+                        Button { sourceQuery = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                            .buttonStyle(.plain).accessibilityLabel("検索語を消す")
+                    }
+                }.padding(.horizontal, 8).padding(.vertical, 5).background(.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 5))
+            }
+            if selectingSources {
+                HStack(spacing: 8) {
+                    Button(filtering ? "一致をすべて選択" : "すべて選択") { selectedSources.formUnion(shown.flatMap(\.tracks).map(\.id)) }
+                    Button("選択を解除") { selectedSources = [] }.disabled(selectedSources.isEmpty)
+                    Spacer(minLength: 0)
+                    Button("\(selectedSources.count)曲を除外") { confirmSelection = true }.disabled(selectedSources.isEmpty || !library.canEdit)
+                }.buttonStyle(SoftGlassButtonStyle()).lineLimit(1)
+            } else {
+                HStack(spacing: 8) {
+                    Button { actions.files(nil) } label: { Label("ファイル", systemImage: "doc.badge.plus") }
+                    Button(action: actions.folder) { Label("フォルダ", systemImage: "folder.badge.plus") }
+                    if let musicLibrary = actions.musicLibrary {
+                        Button { musicLibrary(nil) } label: { Label("ミュージック", systemImage: "music.note") }
+                    }
+                }.fixedSize(horizontal: false, vertical: true).buttonStyle(SoftGlassButtonStyle()).labelStyle(CompactLabelStyle()).disabled(!library.canEdit)
+            }
             scrolled {
                 SourceFolderList(tracks: library.document.tracks, unavailable: library.unavailable, canRemove: library.canEdit,
-                                 select: { id in sourceID = id; originID = nil }, removeFolder: { confirmFolder = $0 })
+                                 query: sourceQuery, selection: selectingSources ? $selectedSources : nil, catalog: sourceCatalog,
+                                 select: { id in sourceID = id; originID = nil }, removeFolder: { confirmFolder = $0 },
+                                 removeTrack: { confirmSource = $0.id })
             }
         }
     }

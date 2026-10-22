@@ -89,7 +89,9 @@ render側は次のように実装する。
 | computationSeconds / droppedBuffers / queuedBufferHighWatermark | 計算時間、取得側の累積の欠落数、キューの最大使用スロット数（上限8） |
 
 - host時刻や遅延を取得できない場合はnilとし、0で代用しない。
-- ノードの`outputPresentationLatency`は開始・再開・再設定時に取得し、機器の遅延を別に加えて二重に計上しない。macOSでは、この値は出力機器の遅延（Core Audioの`kAudioDevicePropertyLatency`）と一致し、IOバッファの長さを含まない。観測ノードのレンダー通知のhost時刻は、呼び出しの時点よりIOバッファ1回分先を指すので、host時刻＋報告値がCore Audioの報告どおりの提示時刻になる。将来、下流の遅延段がノードの報告値に含まれる場合は、その既知の補償量を報告値から分離してから設定する。
+- ノードの`outputPresentationLatency`は開始・再開・再設定時に取得し、機器の遅延を別に加えて二重に計上しない。macOSでは、この値は出力機器の遅延（Core Audioの`kAudioDevicePropertyLatency`）と一致し、IOバッファの長さを含まない。iOSでは、この値は`AVAudioSession.outputLatency`と一致し、Bluetoothなど経路の遅延を含む（[iPhone版の実装設計](13_iphone-implementation.md#出力遅延の取り方)）。どちらも、観測ノードのレンダー通知のhost時刻は呼び出しの時点よりIOバッファ約1回分先を指すので、host時刻＋報告値がOSの報告どおりの提示時刻になる。将来、下流の遅延段がノードの報告値に含まれる場合は、その既知の補償量を報告値から分離してから設定する。
+- 再生を続けたまま出力の経路が変わったとき（iOSで形式の変わらない経路の変更）は、`AnalysisSession.updateOutputLatency(_:)`で以降のレンダーの遅延を差し替える。転送のキューは遅延を原子的な値として持ち、レンダーのスレッドが読む。解析はレンダーごとに打刻の遅延を読み直す（窓は重ねて進むので空にならず、窓の始まりだけで読むと差し替えが届かない）。
+- 打刻には、レンダー通知が走った時点のhost時刻（`callback_seconds`）も入れる。host時刻の意味を実機で確かめるためのもので、表示の計算には使わない。
 - `SynchronizationEstimate.additionalAudioDelay`は、追加量＝max(0, 表示までの遅延＋余裕−既存の出力遅延)を計算する純粋な補助関数である。音声の時刻・速度・出力機器の設定は変更しない。表示を推定提示時刻まで待たせる処理は可視化側が担当する（採用の時計と画面の更新の遅れを見込んで、少し前に採用する。[可視化の実装設計](08_visualization-implementation.md)を参照）。実際に音声を遅らせる段は将来の機能である。
 
 将来の補償器は次を満たす構成にする。

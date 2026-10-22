@@ -11,7 +11,9 @@ struct LCMPPCMQueue {
     _Atomic uint32_t high_water;
     LCMPPCMStamp *stamps;
     float *samples;
-    double render_rate, output_latency, tick_seconds;
+    double render_rate, tick_seconds;
+    /// Replaced while rendering when the output route changes.
+    _Atomic double output_latency;
     uint64_t render_sequence;
 };
 LCMPPCMQueue *lcmp_pcm_create(uint32_t capacity, uint32_t max_frames) {
@@ -20,13 +22,14 @@ LCMPPCMQueue *lcmp_pcm_create(uint32_t capacity, uint32_t max_frames) {
     if (!q) return NULL;
     q->capacity = capacity; q->max_frames = max_frames;
     atomic_init(&q->read_index, 0); atomic_init(&q->write_index, 0); atomic_init(&q->dropped, 0);
-    atomic_init(&q->high_water, 0);
+    atomic_init(&q->high_water, 0); atomic_init(&q->output_latency, 0);
     q->stamps = calloc(capacity, sizeof(*q->stamps));
     q->samples = calloc((size_t)capacity * 2 * max_frames, sizeof(float));
     if (!q->stamps || !q->samples) { lcmp_pcm_destroy(q); return NULL; }
     // Allocation-free push/pop must not fall back to hidden atomic locks.
     if (!atomic_is_lock_free(&q->write_index) || !atomic_is_lock_free(&q->read_index) ||
-        !atomic_is_lock_free(&q->dropped) || !atomic_is_lock_free(&q->high_water)) { lcmp_pcm_destroy(q); return NULL; }
+        !atomic_is_lock_free(&q->dropped) || !atomic_is_lock_free(&q->high_water) ||
+        !atomic_is_lock_free(&q->output_latency)) { lcmp_pcm_destroy(q); return NULL; }
     return q;
 }
 void lcmp_pcm_destroy(LCMPPCMQueue *q) {
@@ -64,6 +67,9 @@ bool lcmp_pcm_pop(LCMPPCMQueue *q, float *left, float *right, LCMPPCMStamp *stam
 }
 uint64_t lcmp_pcm_dropped(LCMPPCMQueue *q) {
     return atomic_load_explicit(&q->dropped, memory_order_relaxed);
+}
+void lcmp_pcm_set_output_latency(LCMPPCMQueue *q, double latency) {
+    atomic_store_explicit(&q->output_latency, latency, memory_order_relaxed);
 }
 uint32_t lcmp_pcm_high_water(LCMPPCMQueue *q) {
     return atomic_load_explicit(&q->high_water, memory_order_relaxed);
@@ -107,8 +113,10 @@ static OSStatus capture(void *context, AudioUnitRenderActionFlags *flags,
     stamp.sample_time = time->mSampleTime;
     stamp.host_time_valid = (time->mFlags & kAudioTimeStampHostTimeValid) != 0;
     stamp.host_seconds = time->mHostTime * q->tick_seconds;
-    stamp.output_latency = q->output_latency;
-    stamp.latency_valid = isfinite(q->output_latency) && q->output_latency >= 0;
+    stamp.callback_seconds = mach_absolute_time() * q->tick_seconds;
+    double latency = atomic_load_explicit(&q->output_latency, memory_order_relaxed);
+    stamp.output_latency = latency;
+    stamp.latency_valid = isfinite(latency) && latency >= 0;
     lcmp_pcm_push(q, data->mBuffers[0].mData, right, stamp);
 done:
     atomic_fetch_sub_explicit(&source->readers, 1, memory_order_seq_cst);
@@ -128,7 +136,7 @@ OSStatus lcmp_render_source_bind(LCMPRenderSource *source, LCMPPCMQueue *q, doub
     mach_timebase_info(&info);
     q->tick_seconds = (double)info.numer / info.denom / 1e9;
     q->render_rate = rate;
-    q->output_latency = latency;
+    atomic_store_explicit(&q->output_latency, latency, memory_order_relaxed);
     LCMPPCMQueue *expected = NULL;
     return atomic_compare_exchange_strong_explicit(&source->queue, &expected, q, memory_order_seq_cst, memory_order_seq_cst) ? noErr : kAudio_ParamError;
 }

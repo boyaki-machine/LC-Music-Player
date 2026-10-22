@@ -129,7 +129,7 @@ LCMP_VISUALIZATION_REPORT_DIR=build/visualization-sources \
   --filter 'VisualizationPerformanceTests/comparesSourceConditions'
 ```
 
-- 推定提示時刻に対する遅れ・早さと、観測した出力遅延（`estimatedOutputLatencyMs`）をJSONに残す。出力遅延は出力先で大きく変わる（内蔵スピーカー約1.5ms、Bluetoothのイヤホン約220ms）ので、評価では出力先を併記する。
+- 推定提示時刻に対する遅れ・早さと、観測した出力遅延（`estimatedOutputLatencyMs`）をJSONに残す。出力遅延は出力先で大きく変わる（macの内蔵スピーカー約1.5ms、Bluetoothのイヤホン約220ms、iPhoneのスピーカー約16ms、Bluetoothのイヤホン約240ms）ので、評価では出力先を併記する。iPhoneでも推定提示時刻は経路の遅延を含み、再生中の経路の変更にも追従する（[iPhone版の実装設計](13_iphone-implementation.md#出力遅延の取り方)）。
 - 内蔵スピーカーなど出力遅延が解析の窓の半分より短い出力先では、解析結果が揃った時点で提示時刻を過ぎている。この遅れは先読みでは縮まらず、縮めるには音声を遅らせる同期用ディレイが要る。
 
 10分連続の測定：

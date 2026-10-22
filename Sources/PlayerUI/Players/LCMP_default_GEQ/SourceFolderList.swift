@@ -105,64 +105,162 @@ struct SourceFolderList: View {
     let tracks: [LibraryTrack]
     let unavailable: [UUID: String]
     var canRemove = true
+    /// Shows only the tracks that match, with their groups open.
+    var query = ""
+    /// The tracks chosen in selection mode; nil outside it. Rows then choose instead of opening.
+    var selection: Binding<Set<UUID>>? = nil
+    /// Shared with the screen, which counts the matches from the same result.
+    var catalog: SourceCatalogCache? = nil
     let select: (UUID) -> Void
     var removeFolder: (SourceFolderGroup) -> Void = { _ in }
+    var removeTrack: (LibraryTrack) -> Void = { _ in }
+    /// Room kept free at the right for the scroll bar, so that scrolling never presses a remove button.
+    /// The overlay scroller of macOS draws thin but takes clicks across its whole width.
+    #if os(macOS)
+    static let scrollerClearance = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .overlay) + 2
+    #else
+    static let scrollerClearance: CGFloat = 12
+    #endif
+    /// The width of the disclosure chevron at the right of a track; group rows keep the same room so
+    /// that every remove button lines up.
+    static let chevronWidth: CGFloat = 12
     var body: some View {
-        SourceFolderSections(tracks: tracks, removeFolder: canRemove ? removeFolder : nil) { track in
-            Button { select(track.id) } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        OverflowTitle(name: track.name)
-                        Text(unavailable[track.id] ?? track.reference.lastKnownURL.pathExtension.uppercased())
-                            .font(.ui(11)).foregroundStyle(unavailable[track.id] == nil ? Color.white.opacity(0.55) : .orange).lineLimit(1)
-                    }
-                    Spacer(minLength: 4)
-                    Image(systemName: "chevron.right").font(.ui(11)).foregroundStyle(.secondary)
-                }.frame(minHeight: 40).contentShape(Rectangle())
-            }.buttonStyle(.plain)
+        SourceFolderSections(tracks: tracks, removeFolder: canRemove && selection == nil ? removeFolder : nil, query: query,
+                             selection: selection, catalog: catalog, trailing: Self.chevronWidth) { track in
+            if let selection {
+                let chosen = selection.wrappedValue.contains(track.id)
+                Button {
+                    if chosen { selection.wrappedValue.remove(track.id) } else { selection.wrappedValue.insert(track.id) }
+                } label: {
+                    HStack(spacing: 8) { SourceCheckbox(state: chosen ? .all : .none); details(track); Spacer(minLength: 4) }
+                        .frame(minHeight: 40).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel(track.name).accessibilityAddTraits(chosen ? .isSelected : [])
+            } else {
+                HStack(spacing: 0) {
+                    Button { select(track.id) } label: {
+                        HStack { details(track); Spacer(minLength: 4) }.frame(minHeight: 40).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    if canRemove { SourceRemoveButton(label: "「\(track.name)」を除外") { removeTrack(track) } }
+                    Button { select(track.id) } label: {
+                        Image(systemName: "chevron.right").font(.ui(11)).foregroundStyle(.secondary)
+                            .frame(width: Self.chevronWidth, height: 40, alignment: .trailing).contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityHidden(true)
+                }
+            }
+        }
+        .padding(.trailing, Self.scrollerClearance)
+    }
+    private func details(_ track: LibraryTrack) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            OverflowTitle(name: track.name)
+            Text(unavailable[track.id] ?? track.reference.lastKnownURL.pathExtension.uppercased())
+                .font(.ui(11)).foregroundStyle(unavailable[track.id] == nil ? Color.white.opacity(0.55) : .orange).lineLimit(1)
         }
     }
 }
 
-/// Share folder identity, order and disclosure behavior across source and add screens.
+/// The trash button of a group or a track.
+struct SourceRemoveButton: View {
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "trash").font(.ui(11)).frame(width: 24, height: 24).contentShape(Rectangle())
+        }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.55)).accessibilityLabel(label).help(label)
+    }
+}
+
+/// A checkbox that can also show a group whose tracks are only partly chosen.
+struct SourceCheckbox: View {
+    let state: SourceSelection.State
+    var body: some View {
+        Image(systemName: state == .all ? "checkmark.square.fill" : state == .some ? "minus.square.fill" : "square")
+            .font(.ui(13)).foregroundStyle(state == .none ? Color.white.opacity(0.5) : ShuffleToggle.litColor)
+    }
+}
+
+/// Share folder identity, order and disclosure behavior across source and add screens. Rows are laid
+/// out lazily one by one, so that a search opening groups of thousands of tracks stays smooth.
 struct SourceFolderSections<Row: View>: View {
     let tracks: [LibraryTrack]
     /// Shows a remove button on real folders. The default group has none against mistaken taps.
     var removeFolder: ((SourceFolderGroup) -> Void)? = nil
     /// Tracks left out of the list, such as those already in the playlist being added to.
     var hidden: Set<UUID> = []
+    /// Shows only the tracks that match. Groups open while searching, until closed by hand.
+    var query = ""
+    /// Puts a checkbox before each group that chooses all its shown tracks.
+    var selection: Binding<Set<UUID>>? = nil
+    var catalog: SourceCatalogCache? = nil
+    /// Room after the remove button, matching what the rows put there.
+    var trailing: CGFloat = 0
     @ViewBuilder var row: (LibraryTrack) -> Row
     @State private var expanded: Set<String> = []
+    @State private var closedWhileSearching: Set<String> = []
+    @State private var ownCatalog = SourceCatalogCache()
+    private enum Item: Identifiable {
+        case group(SourceFolderGroup, open: Bool, first: Bool)
+        case track(LibraryTrack, group: String)
+        var id: String {
+            switch self {
+            case .group(let group, _, _): "g:" + group.id
+            case .track(let track, let group): "t:\(group):\(track.id)"
+            }
+        }
+    }
     var body: some View {
-        LazyVStack(alignment: .leading, spacing: 10) {
-            ForEach(SourceFolderGroup.groups(tracks, hiding: hidden)) { group in
-                DisclosureGroup(isExpanded: Binding(get: { expanded.contains(group.id) }, set: { open in
-                    if open { expanded.insert(group.id) } else { expanded.remove(group.id) }
-                })) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(group.tracks) { track in
-                            row(track)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 8)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: group.isAlbum ? "opticaldisc" : "folder").foregroundStyle(.white.opacity(0.6))
-                        OverflowTitle(name: group.name).fontWeight(.medium)
-                        Spacer(minLength: 4)
-                        Text("\(group.tracks.count)曲").font(.ui(11)).foregroundStyle(.secondary)
-                        if let removeFolder, group.isRemovable {
-                            Button { removeFolder(group) } label: {
-                                Image(systemName: "trash").font(.ui(11)).frame(width: 24, height: 24).contentShape(Rectangle())
-                            }.buttonStyle(.plain).foregroundStyle(.white.opacity(0.55))
-                                .accessibilityLabel("\(group.kindName)「\(group.name)」を除外").help("\(group.kindName)「\(group.name)」を除外")
-                                .padding(.vertical, -4)
-                        }
-                    }
-                }.tint(.white.opacity(0.6))
+        let searching = !SourceCatalog.terms(query).isEmpty
+        let groups = (catalog ?? ownCatalog).groups(tracks, matching: query, hiding: hidden)
+        var items: [Item] = []
+        for (index, group) in groups.enumerated() {
+            let open = searching ? !closedWhileSearching.contains(group.id) : expanded.contains(group.id)
+            items.append(.group(group, open: open, first: index == 0))
+            if open { items += group.tracks.map { .track($0, group: group.id) } }
+        }
+        return LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(items) { item in
+                switch item {
+                case .group(let group, let open, let first): header(group, open: open, searching: searching).padding(.top, first ? 0 : 10)
+                case .track(let track, _): row(track).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 26)
+                }
             }
             if tracks.isEmpty { Text("ファイルやフォルダを登録してください。").foregroundStyle(.secondary).padding(.vertical, 16) }
-            else if tracks.allSatisfy({ hidden.contains($0.id) }) { Text("未追加の曲はありません。").foregroundStyle(.secondary).padding(.vertical, 16) }
+            else if groups.isEmpty {
+                Text(searching ? "一致する曲はありません。" : "未追加の曲はありません。").foregroundStyle(.secondary).padding(.vertical, 16)
+            }
+        }
+        .onChange(of: query) { closedWhileSearching = [] }
+    }
+    private func header(_ group: SourceFolderGroup, open: Bool, searching: Bool) -> some View {
+        HStack(spacing: 6) {
+            if let selection {
+                Button { SourceSelection.toggle(group.tracks, in: &selection.wrappedValue) } label: {
+                    SourceCheckbox(state: SourceSelection.state(of: group.tracks, in: selection.wrappedValue)).frame(width: 20, height: 24).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityLabel("\(group.kindName)「\(group.name)」の\(group.tracks.count)曲を選択")
+            }
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right").font(.ui(10, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                    .rotationEffect(.degrees(open ? 90 : 0)).frame(width: 14)
+                Image(systemName: group.isAlbum ? "opticaldisc" : "folder").foregroundStyle(.white.opacity(0.6))
+                OverflowTitle(name: group.name).fontWeight(.medium)
+                Spacer(minLength: 4)
+                Text("\(group.tracks.count)曲").font(.ui(11)).foregroundStyle(.secondary)
+            }
+            .frame(minHeight: 24).contentShape(Rectangle())
+            .onTapGesture { toggle(group, open: open, searching: searching) }
+            .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton)
+            .accessibilityValue(open ? "開いています" : "閉じています")
+            .accessibilityAction { toggle(group, open: open, searching: searching) }
+            if let removeFolder, group.isRemovable {
+                SourceRemoveButton(label: "\(group.kindName)「\(group.name)」を除外") { removeFolder(group) }
+            }
+        }.padding(.trailing, trailing)
+    }
+    private func toggle(_ group: SourceFolderGroup, open: Bool, searching: Bool) {
+        if searching {
+            if open { closedWhileSearching.insert(group.id) } else { closedWhileSearching.remove(group.id) }
+        } else {
+            if open { expanded.remove(group.id) } else { expanded.insert(group.id) }
         }
     }
 }

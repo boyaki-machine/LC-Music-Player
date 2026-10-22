@@ -8,6 +8,8 @@ typedef struct {
     double sample_rate;
     double sample_time;
     double host_seconds;
+    /// The host clock when the render notification ran, for checking what the host time refers to.
+    double callback_seconds;
     double output_latency;
     uint32_t frames;
     bool sample_time_valid;
@@ -21,6 +23,8 @@ void lcmp_pcm_destroy(LCMPPCMQueue *queue);
 bool lcmp_pcm_push(LCMPPCMQueue *queue, const float *left, const float *right,
                    LCMPPCMStamp stamp);
 bool lcmp_pcm_pop(LCMPPCMQueue *queue, float *left, float *right, LCMPPCMStamp *stamp);
+/// The latency stamped on later renders of a bound render source; safe while rendering.
+void lcmp_pcm_set_output_latency(LCMPPCMQueue *queue, double output_latency);
 uint64_t lcmp_pcm_dropped(LCMPPCMQueue *queue);
 uint32_t lcmp_pcm_high_water(LCMPPCMQueue *queue);
 // Worker-side finite sanitization, before vector operations; not a render effect.

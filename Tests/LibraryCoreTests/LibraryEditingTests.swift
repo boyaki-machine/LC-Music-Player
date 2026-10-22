@@ -74,4 +74,28 @@ import PlaybackCore
         library.excludeTracks([UUID()])
         #expect(library.document.tracks.count == 1 && library.error == nil)
     }
+
+    @Test func excludingOneTrackRemovesEveryEntryOfItAndKeepsTheRestAndTheCurrentTrack() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        let store = CountingStore(), library = model(store)
+        let list = try #require(library.document.currentPlaylistID)
+        let files = try ["a", "b", "c"].map { try f.file("\($0).wav") }
+        await library.importFiles(files, into: list)
+        let ids = library.document.tracks.map(\.id)
+        // The track appears twice in a second playlist.
+        let second = try #require(library.createPlaylist("別のリスト"))
+        library.addTracks([ids[1], ids[0], ids[1]], to: second)
+        let current = try #require(library.playlist(list)?.entries.first { $0.trackID == ids[2] })
+        library.selectEntry(current.id, in: list)
+        let saves = store.saves
+        library.excludeTrack(ids[1])
+        #expect(store.saves == saves + 1)
+        #expect(library.document.tracks.map(\.id) == [ids[0], ids[2]])
+        #expect(library.playlist(list)?.entries.map(\.trackID) == [ids[0], ids[2]])
+        #expect(library.playlist(second)?.entries.map(\.trackID) == [ids[0]])
+        #expect(library.document.currentEntryID == current.id && library.currentTrack?.id == ids[2])
+        // One track gives no summary message; the files stay.
+        #expect(library.message == nil)
+        #expect(files.allSatisfy { FileManager.default.fileExists(atPath: $0.path) })
+    }
 }
