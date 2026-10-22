@@ -25,6 +25,9 @@ import PlaybackCore
     static let synthesized: [(name: String, rate: Int, channels: Int, bits: Int, profileRate: Double, profileChannels: UInt32)] = [
         ("triangle-48k-2ch-16.wav", 48000, 2, 16, 48000, 2), ("triangle-44k-1ch-16.wav", 44100, 1, 16, 48000, 2),
         ("triangle-96k-2ch-24.wav", 96000, 2, 24, 48000, 2), ("triangle-48k-2ch-16.wav", 48000, 2, 16, 44100, 1),
+        // The rates of external converters: 88.2k, 176.4k and 192kHz, converted to and native.
+        ("triangle-96k-2ch-24.wav", 96000, 2, 24, 88200, 2), ("triangle-44k-1ch-16.wav", 44100, 1, 16, 176400, 1),
+        ("triangle-96k-2ch-24.wav", 96000, 2, 24, 192000, 2), ("triangle-192k-2ch-24.wav", 192000, 2, 24, 192000, 2),
     ]
 
     /// Results by "algorithm.conversion".
@@ -37,10 +40,14 @@ import PlaybackCore
             "tone.flac@48000x2": "tooShort sample:3fa998a340000000 true:3fa9994a8d8f25f8 frames:12000 blocks:0 source:3fa9980000000000 sourceFrames:11025",
             "tone.wav@44100x1": "tooShort sample:3fa9980000000000 true:3fa999245989a370 frames:11025 blocks:0 source:3fa9980000000000 sourceFrames:11025",
             "tone.wav@48000x2": "tooShort sample:3fa998a340000000 true:3fa9994a8d8f25f8 frames:12000 blocks:0 source:3fa9980000000000 sourceFrames:11025",
+            "triangle-192k-2ch-24.wav@192000x2": "measured:c020d605d008d219 sample:3fdfffff80000000 true:3fe2153c7cb3ce56 frames:960000 blocks:47 source:3fdfffff80000000 sourceFrames:960000",
+            "triangle-44k-1ch-16.wav@176400x1": "measured:c0279aa74f788ac4 sample:3fe1c9eee0000000 true:3fe23fb033a49cad frames:882000 blocks:47 source:3fdfff8000000000 sourceFrames:220500",
             "triangle-44k-1ch-16.wav@48000x2": "measured:c0218579c4b2bec3 sample:3fe08cf960000000 true:3fe26ba842dce2c1 frames:240000 blocks:47 source:3fdfff8000000000 sourceFrames:220500",
             "triangle-48k-2ch-16.wav@44100x1": "measured:c027620094c0c43d sample:3fe04c9e20000000 true:3fe1e287575fa5de frames:220500 blocks:47 source:3fdfff8000000000 sourceFrames:240000",
             "triangle-48k-2ch-16.wav@48000x2": "measured:c020afb206a6eb97 sample:3fdfff8000000000 true:3fe1e62be865ab72 frames:240000 blocks:47 source:3fdfff8000000000 sourceFrames:240000",
+            "triangle-96k-2ch-24.wav@192000x2": "measured:c020d4f484df43c3 sample:3fe1eebf20000000 true:3fe2ad5848719990 frames:960000 blocks:47 source:3fdfffff80000000 sourceFrames:480000",
             "triangle-96k-2ch-24.wav@48000x2": "measured:c020c5eb37504f7c sample:3fe0d329c0000000 true:3fe100fb6e111227 frames:240000 blocks:47 source:3fdfffff80000000 sourceFrames:480000",
+            "triangle-96k-2ch-24.wav@88200x2": "measured:c020cecf13aa76c4 sample:3fe09e1fa0000000 true:3fe20509e17a4eff frames:441000 blocks:47 source:3fdfffff80000000 sourceFrames:480000",
         ],
     ]
 
