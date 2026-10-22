@@ -13,6 +13,7 @@ private actor PlaylistWorker: AudioPreprocessing {
     var starts: [URL] = []
     var prefixes: [URL] = []
     var cancelled: [URL] = []
+    var priorities: [URL: TaskPriority] = [:]
     init(cache: MeasurementCacheConfiguration? = nil) { real = AudioPreprocessor(cache: cache) }
     func block(_ url: URL) { blocked.insert(url) }
     func release(_ url: URL) { blocked.remove(url) }
@@ -22,7 +23,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         return try await real.prepare(url, cancellation: cancellation, seconds: seconds, byteLimit: byteLimit)
     }
     func measureLevels(_ url: URL, profile: MeasurementProfile, cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackAudioMetrics {
-        starts.append(url)
+        starts.append(url); priorities[url] = Task.currentPriority
         do {
             while blocked.contains(url) { try cancellation.check(); try await Task.sleep(for: .milliseconds(2)) }
             try cancellation.check()
@@ -120,6 +121,50 @@ private actor PlaylistWorker: AudioPreprocessing {
         #expect(refs.scopes.maximum <= 2)
         // The explicit test-owned current scope remains alive until this scope returns.
         #expect(refs.scopes.active == 1)
+    }
+
+    /// The current track and its neighbours are measured at utility, the rest of the sweep at background.
+    @Test func sweepMeasuresFarTracksAtBackgroundPriority() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        var doc = try playlistFixture(f.root)
+        doc.currentEntryID = doc.playlists[0].entries[2].id
+        let refs = TestReferences(), worker = PlaylistWorker(), playback = PlaybackController(makeBackend: { _ in TestBackend() })
+        let current = try refs.resolve(doc.tracks[2].reference)
+        #expect(playback.select(current.url, using: current.lease))
+        playback.togglePlayPause(using: current.lease)
+        let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: 48000, channels: 2) })
+        queue.update(doc, playback: playback, after: nil)
+        try await sweepWait { await worker.starts.count == 5 && queue.active?.trackID == doc.tracks[3].id }
+        let priorities = await worker.priorities
+        for i in [2, 3, 1] { #expect(priorities[doc.tracks[i].reference.lastKnownURL] == .utility) }
+        for i in [0, 4] { #expect(priorities[doc.tracks[i].reference.lastKnownURL] == .background) }
+        queue.suspend(); await queue.retirement?.value
+        playback.stop()
+    }
+
+    /// In Low Power Mode or a hot state only the current track and its neighbours are measured.
+    @Test func constrainedEnergyStopsTheSweepAfterTheNeighbours() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        var doc = try playlistFixture(f.root)
+        doc.currentEntryID = doc.playlists[0].entries[2].id
+        let refs = TestReferences(), worker = PlaylistWorker(), playback = PlaybackController(makeBackend: { _ in TestBackend() })
+        let current = try refs.resolve(doc.tracks[2].reference)
+        #expect(playback.select(current.url, using: current.lease))
+        playback.togglePlayPause(using: current.lease)
+        let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: 48000, channels: 2) })
+        var constrained = true
+        queue.isEnergyConstrained = { constrained }
+        queue.update(doc, playback: playback, after: nil)
+        try await sweepWait { await worker.starts.count == 3 && queue.active == nil }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await worker.starts == [2, 3, 1].map { doc.tracks[$0].reference.lastKnownURL })
+        queue.energyStateChanged()
+        #expect(await worker.starts.count == 3)
+        constrained = false
+        queue.energyStateChanged()
+        try await sweepWait { await worker.starts.count == 5 }
+        queue.suspend(); await queue.retirement?.value
+        playback.stop()
     }
 
     @Test func transfersPendingMeasurementWithoutCancellingOrResolvingAgain() async throws {

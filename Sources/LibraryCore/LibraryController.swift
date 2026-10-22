@@ -838,6 +838,8 @@ extension LibraryController {
         let intent = SelectionIntent(entry: entryID, playlist: playlistID, reference: requestedReference, autoPlay: autoPlay)
         selectionIntent = intent
         let sweepTransfer = autoPlay && normalizesVolume ? trackForEntry(entryID, in: playlistID).flatMap { playlistPreprocessing?.take($0) } : nil
+        // A sweep measures far tracks at background QoS; the listener now waits for this one.
+        if let sweepTransfer { preprocessor.promote(sweepTransfer.0.cancellation) }
         playlistPreprocessing?.suspend()
         let sweepRetirement = playlistPreprocessing?.retirement
         let candidate = sweepTransfer?.0 ?? nextPrepared.flatMap { request in

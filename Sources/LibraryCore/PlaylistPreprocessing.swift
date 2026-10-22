@@ -30,12 +30,19 @@ import AudioProcessingCore
     private var nextCandidate: Candidate?
     private var nextMetrics: (UUID, TrackAudioMetrics)?
     private var currentID: UUID?
+    private var previousID: UUID?
+    /// In Low Power Mode or when the device runs hot, the sweep measures only the current track and
+    /// its neighbours, and goes on with the rest when the state eases.
+    var isEnergyConstrained: @MainActor () -> Bool = {
+        ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
+    }
+    private var energyObservers: [any NSObjectProtocol] = []
     private var publishedCurrent: UUID?
     private var currentURL: URL?
     private var currentLease: FileLease?
     private var suspended = true
     private var outputObserver: PlaylistOutputObserver?
-    isolated deinit { suspend() }
+    isolated deinit { suspend(); energyObservers.forEach(NotificationCenter.default.removeObserver) }
 
     init(references: any FileReferenceProvider, worker: any AudioPreprocessing,
          profile: @escaping @MainActor () throws -> MeasurementProfile) {
@@ -88,6 +95,7 @@ import AudioProcessingCore
             .entries.first { $0.id == document.currentEntryID }?.trackID
         currentURL = playback.selectedURL; currentLease = playback.activeFileLease
         nextCandidate = nil
+        previousID = adjacent.previous?.trackID
         if playback.state == .playing, let entry = adjacent.next,
            let track = document.tracks.first(where: { $0.id == entry.trackID }) {
             nextCandidate = Candidate(entry: entry.id, track: track)
@@ -157,8 +165,23 @@ import AudioProcessingCore
         active = nil; task = nil
     }
 
+    /// Called when Low Power Mode or the thermal state changes.
+    func energyStateChanged() { if !suspended { pump() } }
+
+    private func observeEnergyState() {
+        guard energyObservers.isEmpty else { return }
+        let center = NotificationCenter.default
+        for name in [Notification.Name.NSProcessInfoPowerStateDidChange, ProcessInfo.thermalStateDidChangeNotification] {
+            energyObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.energyStateChanged() }
+            })
+        }
+    }
+
     private func pump() {
         guard !suspended, active == nil, let profile, let candidate = pending.first ?? preparedNextCandidate else { return }
+        let near = candidate.track.id == currentID || candidate.track.id == nextCandidate?.track.id || candidate.track.id == previousID
+        if !near, isEnergyConstrained() { observeEnergyState(); return }
         let measure = attempts[candidate.track.id] == nil
         let prefix = candidate.entry == nextCandidate?.entry
         let request = NextPreparation(entry: candidate.entry, reference: candidate.track.reference, trackID: candidate.track.id)
@@ -170,8 +193,9 @@ import AudioProcessingCore
         let previous = retirement, references = references, worker = worker
         let sharedLease = candidate.track.id == currentID ? currentLease : nil
         let sharedURL = sharedLease == nil ? nil : currentURL
-        // Background work runs at utility, so the preprocessor keeps it behind a listener's request.
-        task = Task(priority: .utility) { [weak self] in
+        // The current track and its neighbours run at utility, behind a listener's request. The rest of
+        // the sweep runs at background, on the efficiency cores: about a sixth of the energy, six times slower.
+        task = Task(priority: near ? .utility : .background) { [weak self] in
             do {
                 await previous?.value
                 try request.cancellation.check()

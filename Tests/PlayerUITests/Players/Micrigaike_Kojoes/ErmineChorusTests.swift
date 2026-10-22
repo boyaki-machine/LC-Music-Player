@@ -654,4 +654,67 @@ import Testing
         #expect(median < 0.012)
     }
 }
+/// The neon sign lays each letter out once a frame and only recolors it. It must draw exactly what
+/// drawing a new `Text` for every glow and tube did.
+@Suite @MainActor struct ErmineNeonRenderingTests {
+    private static let neonPink = Color(red: 1, green: 0.27, blue: 0.68), neonCore = Color(red: 1, green: 0.74, blue: 0.91)
+    private static let rope = Color(red: 0.78, green: 0.7, blue: 0.55)
+
+    /// The drawing before the letters were laid out once, kept as the reference.
+    private static func referenceNeon(_ context: GraphicsContext, brightness: [Double]) {
+        var c = context
+        c.translateBy(x: ErmineChorusRenderer.neonCenter.x, y: ErmineChorusRenderer.neonCenter.y); c.rotate(by: ErmineChorusRenderer.neonTilt)
+        let font = Font.system(size: 14, weight: .heavy, design: .rounded)
+        let letters = ErmineStage.neonText.map { c.resolve(Text(String($0)).font(font)) }
+        let widths = letters.map { $0.measure(in: CGSize(width: 100, height: 100)).width }
+        let total = widths.reduce(0, +)
+        var strings = Path()
+        for x in [-total * 0.36, total * 0.36] { strings.move(to: CGPoint(x: x, y: -11)); strings.addLine(to: CGPoint(x: x + 1.5, y: -20)) }
+        c.stroke(strings, with: .color(rope.opacity(0.8)), lineWidth: 0.7)
+        var tubes = Path()
+        tubes.move(to: CGPoint(x: -total / 2 - 2, y: -11)); tubes.addLine(to: CGPoint(x: total / 2 + 2, y: -11.5))
+        tubes.move(to: CGPoint(x: -total / 2 - 5, y: 10.5)); tubes.addLine(to: CGPoint(x: total / 2 + 5, y: 10))
+        var x = -total / 2
+        var centers: [CGFloat] = []
+        for w in widths { centers.append(x + w / 2); x += w }
+        for (radius, opacity) in [(CGFloat(6), 0.55), (CGFloat(2.5), 0.8)] {
+            c.drawLayer { glow in
+                glow.addFilter(.blur(radius: radius))
+                glow.stroke(tubes, with: .color(neonPink.opacity(opacity)), lineWidth: 2)
+                for (i, letter) in ErmineStage.neonText.enumerated() where letter != " " {
+                    let level = i < brightness.count ? brightness[i] : 1
+                    glow.draw(Text(String(letter)).font(font).foregroundColor(neonPink.opacity(opacity * level)), at: CGPoint(x: centers[i], y: 0))
+                }
+            }
+        }
+        c.stroke(tubes, with: .color(neonCore), style: StrokeStyle(lineWidth: 1, lineCap: .round))
+        for (i, letter) in ErmineStage.neonText.enumerated() where letter != " " {
+            let level = i < brightness.count ? brightness[i] : 1
+            let color = level > 0.5 ? neonCore : Color(red: 0.45, green: 0.2, blue: 0.33)
+            c.draw(Text(String(letter)).font(font).foregroundColor(color), at: CGPoint(x: centers[i], y: 0))
+        }
+    }
+
+    private func pixels(scale: CGFloat = 2, _ draw: @escaping (GraphicsContext) -> Void) throws -> Data {
+        let renderer = ImageRenderer(content: Canvas { context, _ in
+            context.fill(Path(CGRect(x: 0, y: 0, width: 360, height: 60)), with: .color(.black))
+            draw(context)
+        }.frame(width: 360, height: 60))
+        renderer.scale = scale
+        let rep = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
+        return Data(bytes: try #require(rep.bitmapData), count: rep.bytesPerRow * rep.pixelsHigh)
+    }
+
+    @Test func layingLettersOutOnceDrawsTheSamePixels() throws {
+        let count = ErmineStage.neonText.count
+        for brightness in [Array(repeating: 1.0, count: count), (0..<count).map { $0 % 3 == 0 ? 0.2 : 1 }, Array(repeating: 0.0, count: count)] {
+            for scale in [2.0, 1, 3] {
+                let current = try pixels(scale: scale) { ErmineChorusRenderer.drawNeon($0, brightness: brightness) }
+                let reference = try pixels(scale: scale) { Self.referenceNeon($0, brightness: brightness) }
+                #expect(current == reference, "scale \(scale)")
+                #expect(current.contains { $0 > 128 })
+            }
+        }
+    }
+}
 #endif

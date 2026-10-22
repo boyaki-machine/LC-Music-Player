@@ -47,7 +47,9 @@ public final class AnalysisSession: @unchecked Sendable {
         rightWindow.reserveCapacity(configuration.fftSize)
         pendingLeft = Array(repeating: 0, count: configuration.fftSize)
         pendingRight = Array(repeating: 0, count: configuration.fftSize)
-        timer.schedule(deadline: .now(), repeating: .milliseconds(4), leeway: .milliseconds(1))
+        // 8ms with 4ms of leeway: the 8 queued buffers hold about 85ms, and the system may batch
+        // these wakeups with others. A 4ms period woke the process about 250 times a second.
+        timer.schedule(deadline: .now(), repeating: .milliseconds(8), leeway: .milliseconds(4))
         timer.setEventHandler { [weak self] in self?.drain() }
         timer.resume()
     }
