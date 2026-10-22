@@ -276,7 +276,7 @@ import AudioProcessingCore
                 guard !Task.isCancelled, !self.isBusy else { break }
                 for ((id, old), new) in zip(batch, results) where self.track(id)?.reference == old {
                     // Only a change is written: every write makes the list observe the marks again.
-                    let mark = new == nil ? "ファイルが見つからないか、アクセスできません。" : nil
+                    let mark = new == nil ? LibraryFailure.unavailable.localizedDescription : nil
                     if self.unavailable[id] != mark { self.unavailable[id] = mark }
                     if let new, new != old { refreshed[id] = (old, new) }
                 }
@@ -319,7 +319,7 @@ import AudioProcessingCore
             if autoPlay { playback.togglePlayPause(using: resolved.lease) }
             return true
         } catch {
-            unavailable[track.id] = "ファイルが見つからないか、アクセスできません。"
+            unavailable[track.id] = LibraryFailure.unavailable.localizedDescription
             self.error = error.localizedDescription; return false
         }
     }
@@ -364,7 +364,7 @@ import AudioProcessingCore
                 error = playback.error?.localizedDescription
             } else { selectEntry(entry, in: list, autoPlay: true) }
         } catch {
-            unavailable[current.id] = "ファイルが見つからないか、アクセスできません。"
+            unavailable[current.id] = LibraryFailure.unavailable.localizedDescription
             self.error = error.localizedDescription
         }
     }
@@ -523,7 +523,7 @@ import AudioProcessingCore
     public func shutdown() {
         guard !shuttingDown else { return }
         shuttingDown = true
-        let logger = Logger(subsystem: "local.lcmp.player", category: "shutdown")
+        let logger = Logger.shutdown
         let started = ContinuousClock.now
         logger.notice("Library shutdown: stopping playback")
         cancelPreparation()
@@ -631,7 +631,7 @@ import AudioProcessingCore
             let track = LibraryTrack(name: name, reference: reference, registration: fromFolder ? .folder : .file)
             positions[track.id] = tracks.count
             tracks.append(track); paths[path] = track.id; ids.append(track.id)
-            if reference.bookmark == nil && reference.mediaItemID == nil { unavailable[track.id] = "ファイルが見つからないか、アクセスできません。" }
+            if reference.bookmark == nil && reference.mediaItemID == nil { unavailable[track.id] = LibraryFailure.unavailable.localizedDescription }
             // Adding a track takes tens of microseconds; a large import lets other main-actor work in between.
             if index % 32 == 31 { await Task.yield(); guard editsEnabled else { throw CancellationError() } }
         }
@@ -837,28 +837,9 @@ extension LibraryController {
         let requestedReference = currentReference(entryID, in: playlistID)
         let intent = SelectionIntent(entry: entryID, playlist: playlistID, reference: requestedReference, autoPlay: autoPlay)
         selectionIntent = intent
-        let sweepTransfer = autoPlay && normalizesVolume ? trackForEntry(entryID, in: playlistID).flatMap { playlistPreprocessing?.take($0) } : nil
-        // A sweep measures far tracks at background QoS; the listener now waits for this one.
-        if let sweepTransfer { preprocessor.promote(sweepTransfer.0.cancellation) }
-        playlistPreprocessing?.suspend()
-        let sweepRetirement = playlistPreprocessing?.retirement
-        let candidate = sweepTransfer?.0 ?? nextPrepared.flatMap { request in
-            request.entry == entryID && request.reference == requestedReference ? request : nil
-        }
-        // Transfer the existing waiter and lease, including a still-pending prefix.
-        // OFF/metadata selections keep their cancellation path and never wait for a full scan.
-        let promoted = autoPlay && normalizesVolume ? candidate : nil
-        let promotedTask = sweepTransfer?.1 ?? (promoted == nil ? nil : nextTask)
-        let retiringSelection = selectionTask, retiringNext = promoted == nil ? nextTask : nil
-        selectionCancellation?.cancel(); selectionTask?.cancel()
+        let handoff = takeOverPreparation(entryID, playlistID: playlistID, reference: requestedReference, autoPlay: autoPlay)
         let id = UUID(); preparationID = id
-        let cancellation = promoted?.cancellation ?? PreparationCancellation(); selectionCancellation = cancellation
-        let cached = candidate
         let previousLevels = measuredLevels
-        let retiringBackground = backgroundRetirement
-        if promoted != nil {
-            nextTask = nil; nextCancellation = nil; nextID = nil; nextPrepared = nil
-        } else { cancelNext() }
         cancelMeasurement(); measuredTrack = nil
         peakMeasurement = measuresMaximumVolume ? .pending : .disabled
         isPreparing = true
@@ -866,100 +847,25 @@ extension LibraryController {
         selectionTask = Task { [weak self] in
             defer {
                 if let self, self.preparationID == id, self.isPreparing {
-                    let retiring = self.selectionTask, previous = self.backgroundRetirement
-                    self.backgroundRetirement = Task { await previous?.value; await retiring?.value }
-                    self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
-                    self.preparationStage = nil
+                    self.endSelection()
                     if self.playback.state == .playing { self.resumePlaylistPreprocessing() }
                 }
             }
             do {
-                await sweepRetirement?.value
-                await retiringBackground?.value
-                await retiringSelection?.value
-                await retiringNext?.value
-                await promotedTask?.value
-                try cancellation.check()
-                if let failure = promoted?.failure { throw failure }
+                for retiring in handoff.retiring { await retiring?.value }
+                try handoff.cancellation.check()
+                if let failure = handoff.promoted?.failure { throw failure }
                 guard let self, let entry = self.playlist(playlistID)?.entries.first(where: { $0.id == entryID }),
                       let track = self.track(entry.trackID), track.reference == requestedReference else { return }
-                let resolved: ResolvedTrack
-                let prepared: PreparedAudio
-                if let cached, let audio = cached.audio, let access = cached.resolved,
-                   (try? audio.source.validate()) != nil, cached.reference == track.reference {
-                    resolved = access; prepared = audio
-                } else if sweepTransfer != nil, let cached, cached.audio == nil,
-                          let access = cached.resolved, cached.reference == track.reference,
-                          cached.levels?.profile == (try? AudioEngineBackend.measurementProfile()),
-                          (try? cached.levels?.source.validate()) != nil {
-                    resolved = access
-                    prepared = try await self.preprocessor.prepare(access.url, cancellation: cancellation, seconds: 2, byteLimit: 32 * 1024 * 1024)
-                } else {
-                    // A changed source cannot keep an obsolete lease while reopening it.
-                    cached?.audio = nil; cached?.resolved = nil; cached?.levels = nil; cached?.peak = nil
-                    do { resolved = try await self.references.resolved(track.reference) }
-                    catch {
-                        self.unavailable[track.id] = "ファイルが見つからないか、アクセスできません。"
-                        throw error
-                    }
-                    prepared = try await self.preprocessor.prepare(resolved.url, cancellation: cancellation, seconds: 2, byteLimit: 32 * 1024 * 1024)
-                }
-                var levels: TrackAudioMetrics?
-                if intent.autoPlay, self.normalizesVolume {
-                    let profile = try AudioEngineBackend.measurementProfile()
-                    let candidate = cached?.levels ?? previousLevels
-                    if let candidate, candidate.source == prepared.source, candidate.profile == profile,
-                       (try? candidate.source.validate()) != nil { levels = candidate }
-                    else {
-                        self.preparationStage = "曲全体の音量を測定しています…"
-                        levels = try await self.preprocessor.measureLevels(resolved.url, profile: profile, cancellation: cancellation, ownerID: track.id)
-                    }
-                    guard try AudioEngineBackend.measurementProfile() == profile else { throw AudioProcessingFailure.outputChanged }
-                }
-                try cancellation.check()
-                guard self.preparationID == id, self.editsEnabled,
-                      let latest = self.playlist(playlistID)?.entries.first(where: { $0.id == entryID }),
-                      latest.trackID == track.id, self.track(track.id)?.reference == track.reference else { return }
-                var next = self.document
-                self.recordShuffle(&next, entry: entryID, playlist: playlistID, step: shuffle)
-                next.currentPlaylistID = playlistID; next.currentEntryID = entryID
-                // Only a refreshed reference is written: an unchanged library keeps sharing its storage.
-                if let i = self.trackIndex[track.id], next.tracks[i].reference != resolved.reference { next.tracks[i].reference = resolved.reference }
-                if intent.autoPlay {
-                    guard self.playback.selectPrepared(prepared, using: resolved.lease, metrics: levels,
-                        settings: self.normalizationSettings, committing: {
-                        if next != self.document { try self.store.save(next) }
-                    }) else { throw self.playback.error ?? PlaybackError.inaccessibleFile }
-                } else {
-                    // The player holds only metadata while idle. The prepared start and its access stay
-                    // with the library, so pressing play starts without resolving and reading again;
-                    // stopping, choosing another entry or quitting releases them.
-                    guard self.playback.selectMetadata(url: resolved.url, duration: prepared.duration,
-                        supportsSeeking: prepared.supportsSeeking, committing: {
-                            if next != self.document { try self.store.save(next) }
-                        }) else { throw self.playback.error ?? PlaybackError.inaccessibleFile }
-                    let idle = NextPreparation(entry: entryID, reference: resolved.reference, trackID: track.id)
-                    idle.audio = prepared; idle.resolved = resolved
-                    self.nextPrepared = idle
-                }
-                self.publish(next); self.unavailable[track.id] = nil; self.error = nil; self.message = nil
-                self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
-                self.preparationStage = nil
-                if position > 0 { self.playback.seek(to: position) }
-                self.measuredLevels = levels
-                self.levelMeasurement = self.normalizesVolume ? levels.map { .complete($0) } ?? .pending : .disabled
-                self.normalizationNeedsPreparation = false
-                if self.measuresMaximumVolume, let peak = levels?.sourcePeak ?? cached?.peak, peak.source == prepared.source {
-                    self.measuredTrack = track.id; self.peakMeasurement = .complete(peak)
-                }
-                if intent.autoPlay { self.playback.togglePlayPause(using: resolved.lease) }
-                else if self.playlistPreprocessing != nil { self.resumePlaylistPreprocessing() }
+                let (resolved, prepared) = try await self.selectionAudio(for: track, handoff: handoff)
+                let levels = try await self.selectionLevels(intent, track: track, url: resolved.url, prepared: prepared,
+                                                            earlier: handoff.candidate?.levels ?? previousLevels, cancellation: handoff.cancellation)
+                try handoff.cancellation.check()
+                try self.commitSelection(id, intent: intent, track: track, resolved: resolved, prepared: prepared, levels: levels,
+                                         earlierPeak: handoff.candidate?.peak, position: position, shuffle: shuffle)
             } catch {
                 guard let self, self.preparationID == id else { return }
-                let retiring = self.selectionTask, previous = self.backgroundRetirement
-                self.backgroundRetirement = Task { await previous?.value; await retiring?.value }
-                self.isPreparing = false; self.selectionTask = nil; self.selectionCancellation = nil; self.selectionIntent = nil
-                self.preparationStage = nil
+                self.endSelection()
                 if !(error is CancellationError) {
                     self.error = "再生を準備できませんでした。\(error.localizedDescription)"
                     if self.normalizesVolume { self.levelMeasurement = .failed(error.localizedDescription) }
@@ -967,6 +873,136 @@ extension LibraryController {
                 self.updatePreprocessing()
             }
         }
+    }
+
+    /// What a new selection takes over from the speculative work, and the work it waits for to retire.
+    private struct SelectionHandoff {
+        /// The sweep's or the next track's preparation of the same entry and reference.
+        let candidate: NextPreparation?
+        /// The candidate whose waiter and lease the selection takes over (normalized playback only).
+        let promoted: NextPreparation?
+        let fromSweep: Bool
+        let retiring: [Task<Void, Never>?]
+        let cancellation: PreparationCancellation
+    }
+
+    /// Takes over the speculative work for the entry, or cancels it, and cancels the previous selection.
+    private func takeOverPreparation(_ entryID: UUID, playlistID: UUID, reference: TrackReference?, autoPlay: Bool) -> SelectionHandoff {
+        let sweepTransfer = autoPlay && normalizesVolume ? trackForEntry(entryID, in: playlistID).flatMap { playlistPreprocessing?.take($0) } : nil
+        // A sweep measures far tracks at background QoS; the listener now waits for this one.
+        if let sweepTransfer { preprocessor.promote(sweepTransfer.0.cancellation) }
+        playlistPreprocessing?.suspend()
+        let sweepRetirement = playlistPreprocessing?.retirement
+        let candidate = sweepTransfer?.0 ?? nextPrepared.flatMap { request in
+            request.entry == entryID && request.reference == reference ? request : nil
+        }
+        // Transfer the existing waiter and lease, including a still-pending prefix.
+        // OFF/metadata selections keep their cancellation path and never wait for a full scan.
+        let promoted = autoPlay && normalizesVolume ? candidate : nil
+        let promotedTask = sweepTransfer?.1 ?? (promoted == nil ? nil : nextTask)
+        let retiringSelection = selectionTask, retiringNext = promoted == nil ? nextTask : nil
+        selectionCancellation?.cancel(); selectionTask?.cancel()
+        let cancellation = promoted?.cancellation ?? PreparationCancellation(); selectionCancellation = cancellation
+        // Read before cancelling the next track, which adds that track's work to the background retirement.
+        let retiringBackground = backgroundRetirement
+        if promoted != nil {
+            nextTask = nil; nextCancellation = nil; nextID = nil; nextPrepared = nil
+        } else { cancelNext() }
+        return SelectionHandoff(candidate: candidate, promoted: promoted, fromSweep: sweepTransfer != nil,
+                                retiring: [sweepRetirement, retiringBackground, retiringSelection, retiringNext, promotedTask],
+                                cancellation: cancellation)
+    }
+
+    /// The start of the track: the speculative prefix while its source is unchanged, a new prefix for a
+    /// sweep's measured track, otherwise resolved and read again.
+    private func selectionAudio(for track: LibraryTrack, handoff: SelectionHandoff) async throws -> (ResolvedTrack, PreparedAudio) {
+        let cached = handoff.candidate
+        if let cached, let audio = cached.audio, let access = cached.resolved,
+           (try? audio.source.validate()) != nil, cached.reference == track.reference {
+            return (access, audio)
+        }
+        if handoff.fromSweep, let cached, cached.audio == nil,
+           let access = cached.resolved, cached.reference == track.reference,
+           cached.levels?.profile == (try? AudioEngineBackend.measurementProfile()),
+           (try? cached.levels?.source.validate()) != nil {
+            return (access, try await preprocessor.preparePrefix(access.url, cancellation: handoff.cancellation))
+        }
+        // A changed source cannot keep an obsolete lease while reopening it.
+        cached?.audio = nil; cached?.resolved = nil; cached?.levels = nil; cached?.peak = nil
+        let resolved: ResolvedTrack
+        do { resolved = try await references.resolved(track.reference) }
+        catch {
+            unavailable[track.id] = LibraryFailure.unavailable.localizedDescription
+            throw error
+        }
+        return (resolved, try await preprocessor.preparePrefix(resolved.url, cancellation: handoff.cancellation))
+    }
+
+    /// The levels for normalized playback: an earlier result for the same source and output, otherwise measured now.
+    private func selectionLevels(_ intent: SelectionIntent, track: LibraryTrack, url: URL, prepared: PreparedAudio,
+                                 earlier: TrackAudioMetrics?, cancellation: PreparationCancellation) async throws -> TrackAudioMetrics? {
+        guard intent.autoPlay, normalizesVolume else { return nil }
+        let profile = try AudioEngineBackend.measurementProfile()
+        let levels: TrackAudioMetrics
+        if let earlier, earlier.source == prepared.source, earlier.profile == profile,
+           (try? earlier.source.validate()) != nil { levels = earlier }
+        else {
+            preparationStage = "曲全体の音量を測定しています…"
+            levels = try await preprocessor.measureLevels(url, profile: profile, cancellation: cancellation, ownerID: track.id)
+        }
+        guard try AudioEngineBackend.measurementProfile() == profile else { throw AudioProcessingFailure.outputChanged }
+        return levels
+    }
+
+    /// Saves the selection and hands it to the player. A newer selection, read-only storage or a
+    /// changed entry leaves everything as it was.
+    private func commitSelection(_ id: UUID, intent: SelectionIntent, track: LibraryTrack, resolved: ResolvedTrack, prepared: PreparedAudio,
+                                 levels: TrackAudioMetrics?, earlierPeak: TrackPeak?, position: Double, shuffle: ShuffleStep) throws {
+        guard preparationID == id, editsEnabled,
+              let latest = playlist(intent.playlist)?.entries.first(where: { $0.id == intent.entry }),
+              latest.trackID == track.id, self.track(track.id)?.reference == track.reference else { return }
+        var next = document
+        recordShuffle(&next, entry: intent.entry, playlist: intent.playlist, step: shuffle)
+        next.currentPlaylistID = intent.playlist; next.currentEntryID = intent.entry
+        // Only a refreshed reference is written: an unchanged library keeps sharing its storage.
+        if let i = trackIndex[track.id], next.tracks[i].reference != resolved.reference { next.tracks[i].reference = resolved.reference }
+        if intent.autoPlay {
+            guard playback.selectPrepared(prepared, using: resolved.lease, metrics: levels,
+                settings: normalizationSettings, committing: {
+                if next != self.document { try self.store.save(next) }
+            }) else { throw playback.error ?? PlaybackError.inaccessibleFile }
+        } else {
+            // The player holds only metadata while idle. The prepared start and its access stay
+            // with the library, so pressing play starts without resolving and reading again;
+            // stopping, choosing another entry or quitting releases them.
+            guard playback.selectMetadata(url: resolved.url, duration: prepared.duration,
+                supportsSeeking: prepared.supportsSeeking, committing: {
+                    if next != self.document { try self.store.save(next) }
+                }) else { throw playback.error ?? PlaybackError.inaccessibleFile }
+            let idle = NextPreparation(entry: intent.entry, reference: resolved.reference, trackID: track.id)
+            idle.audio = prepared; idle.resolved = resolved
+            nextPrepared = idle
+        }
+        publish(next); unavailable[track.id] = nil; error = nil; message = nil
+        isPreparing = false; selectionTask = nil; selectionCancellation = nil; selectionIntent = nil
+        preparationStage = nil
+        if position > 0 { playback.seek(to: position) }
+        measuredLevels = levels
+        levelMeasurement = normalizesVolume ? levels.map { .complete($0) } ?? .pending : .disabled
+        normalizationNeedsPreparation = false
+        if measuresMaximumVolume, let peak = levels?.sourcePeak ?? earlierPeak, peak.source == prepared.source {
+            measuredTrack = track.id; peakMeasurement = .complete(peak)
+        }
+        if intent.autoPlay { playback.togglePlayPause(using: resolved.lease) }
+        else if playlistPreprocessing != nil { resumePlaylistPreprocessing() }
+    }
+
+    /// Ends a selection that did not commit; its task retires behind the background work.
+    private func endSelection() {
+        let retiring = selectionTask, previous = backgroundRetirement
+        backgroundRetirement = Task { await previous?.value; await retiring?.value }
+        isPreparing = false; selectionTask = nil; selectionCancellation = nil; selectionIntent = nil
+        preparationStage = nil
     }
 
     private func trackForEntry(_ entryID: UUID, in playlistID: UUID) -> LibraryTrack? {
@@ -1011,8 +1047,7 @@ extension LibraryController {
                 let resolved = try await references.resolved(track.reference)
                 // Retain this one lease through preparation, measurement, and any role transfer.
                 request.resolved = resolved
-                let prepared = try await preprocessor.prepare(resolved.url, cancellation: cancellation,
-                                                              seconds: 2, byteLimit: 32 * 1024 * 1024)
+                let prepared = try await preprocessor.preparePrefix(resolved.url, cancellation: cancellation)
                 try cancellation.check()
                 request.audio = prepared
                 if normalize {

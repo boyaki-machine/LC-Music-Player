@@ -3,6 +3,9 @@ import Foundation
 
 /// The lock transfers exclusive ownership, never makes a decoder safe for concurrent use.
 public final class PreparedAudio: @unchecked Sendable {
+    /// How much of a track's start is read ahead of playback, by time and by memory.
+    public static let prefixSeconds: Double = 2
+    public static let prefixByteLimit = 32 * 1024 * 1024
     public let source: SourceFingerprint
     public let duration: TimeInterval
     public let supportsSeeking: Bool

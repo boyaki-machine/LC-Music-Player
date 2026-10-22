@@ -115,7 +115,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
     }
 
     public func prepare(_ url: URL, cancellation: PreparationCancellation = .init(),
-                        seconds: Double = 2, byteLimit: Int = 32 * 1024 * 1024) async throws -> PreparedAudio {
+                        seconds: Double = PreparedAudio.prefixSeconds, byteLimit: Int = PreparedAudio.prefixByteLimit) async throws -> PreparedAudio {
         let qos = Self.requestedQoS
         return try await withCheckedThrowingContinuation { continuation in
             queue.async(qos: qos, flags: .enforceQoS) {
@@ -129,11 +129,11 @@ public final class AudioPreprocessor: AudioPreprocessing {
                     let format = base.processingFormat
                     let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame) * (format.isInterleaved ? 1 : Int(format.channelCount))
                     guard base.length > 0, format.sampleRate.isFinite, format.sampleRate > 0,
-                          seconds.isFinite, seconds > 0, seconds <= 2, bytesPerFrame > 0, byteLimit >= bytesPerFrame else {
+                          seconds.isFinite, seconds > 0, seconds <= PreparedAudio.prefixSeconds, bytesPerFrame > 0, byteLimit >= bytesPerFrame else {
                         throw PreprocessingFailure.invalidAudio
                     }
                     let frames = UInt32(min(Double(base.length), seconds * format.sampleRate,
-                                            Double(min(byteLimit, 32 * 1024 * 1024) / bytesPerFrame)))
+                                            Double(min(byteLimit, PreparedAudio.prefixByteLimit) / bytesPerFrame)))
                     guard frames > 0, let prefix = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
                           let chunk = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: min(frames, 8192)) else {
                         throw PreprocessingFailure.invalidAudio

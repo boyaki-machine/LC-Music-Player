@@ -38,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private let acknowledgements = AcknowledgementsWindowController()
     private var arranging = false
     private var activePanel: NSSavePanel?
-    private let shutdownLog = Logger(subsystem: "local.lcmp.player", category: "shutdown")
+    private let shutdownLog = Logger.shutdown
     private var quitRequestedAt: ContinuousClock.Instant?
     private var preferredExtensionHeight = WindowLayout.extensionSize.height
 

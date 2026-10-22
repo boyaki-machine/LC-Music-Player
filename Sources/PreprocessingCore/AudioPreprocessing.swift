@@ -15,4 +15,8 @@ public protocol AudioPreprocessing: Sendable {
 
 public extension AudioPreprocessing {
     func promote(_ cancellation: PreparationCancellation) {}
+    /// The start of a track that playback begins from: up to `PreparedAudio.prefixSeconds` and `prefixByteLimit`.
+    func preparePrefix(_ url: URL, cancellation: PreparationCancellation) async throws -> PreparedAudio {
+        try await prepare(url, cancellation: cancellation, seconds: PreparedAudio.prefixSeconds, byteLimit: PreparedAudio.prefixByteLimit)
+    }
 }
