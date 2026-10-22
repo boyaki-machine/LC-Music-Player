@@ -56,6 +56,27 @@ import XCTest
         XCTAssertFalse(field.exists || song("aac-song-1").exists)
     }
 
+    /// The keyboard leaves room for only a few rows: scrolling or touching the list puts it away.
+    func testScrollingOrTouchingTheListPutsTheKeyboardAwayAndKeepsTheSearch() throws {
+        app.buttons["音源を検索"].tap()
+        let field = app.textFields["sourceSearch"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        field.typeText("song")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertTrue(song("aac-song-1").waitForExistence(timeout: 5))
+        song("aac-song-1").swipeUp()
+        XCTAssertTrue(waitForKeyboardToHide(), "Scrolling the list left the keyboard up.")
+        XCTAssertEqual(field.value as? String, "song")
+        XCTAssertTrue(app.staticTexts["6 / 6曲"].exists)
+        // Back in the field, then a touch on a group heading.
+        field.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
+        app.buttons.matching(NSPredicate(format: "value == %@", "開いています")).firstMatch.tap()
+        XCTAssertTrue(waitForKeyboardToHide(), "Touching the list left the keyboard up.")
+        XCTAssertEqual(field.value as? String, "song")
+        snapshot("source-search-keyboard-hidden")
+    }
+
     func testSelectionModeRemovesTheChosenGroupInOneConfirmation() throws {
         app.buttons["曲を選択して除外"].tap()
         let group = app.buttons["フォルダ「mp3」の3曲を選択"]
@@ -71,6 +92,11 @@ import XCTest
         confirm.tap()
         XCTAssertTrue(app.staticTexts["3曲"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["曲を選択して除外"].exists, "Selection mode did not end after removing.")
+    }
+
+    private func waitForKeyboardToHide() -> Bool {
+        let hidden = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: app.keyboards.firstMatch)
+        return XCTWaiter().wait(for: [hidden], timeout: 5) == .completed
     }
 
     private func song(_ name: String) -> XCUIElement {

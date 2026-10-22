@@ -83,5 +83,33 @@ import LibraryCore
         _ = try render(query: "", selecting: true, snapshot: "source-selection.png")
         _ = try render(query: "wav", selecting: true, snapshot: "source-selection-open.png")
     }
+
+    /// The search and selection buttons light like the shuffle LED while their mode is on.
+    @Test func searchAndSelectionButtonsLightLikeLEDs() throws {
+        func litPixels(_ isOn: Bool, _ symbol: String) throws -> Int {
+            let root = LEDToggle(symbol: symbol, label: symbol, isOn: isOn, action: {}).padding(8).background(Color.black)
+            let host = NSHostingView(rootView: root); host.frame = NSRect(x: 0, y: 0, width: 48, height: 32)
+            let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentView = host; host.layoutSubtreeIfNeeded()
+            defer { window.contentView = nil }
+            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
+                try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                try #require(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: directory).appendingPathComponent("led-\(symbol)-\(isOn ? "on" : "off").png"))
+            }
+            var count = 0
+            for x in 0..<rep.pixelsWide { for y in 0..<rep.pixelsHigh {
+                // Raw components, as in the shuffle test: green clearly above red and blue.
+                guard let c = rep.colorAt(x: x, y: y) else { continue }
+                if c.greenComponent > 0.6, c.greenComponent - c.redComponent > 0.15, c.greenComponent - c.blueComponent > 0.08 { count += 1 }
+            } }
+            return count
+        }
+        for symbol in ["magnifyingglass", "checkmark.circle"] {
+            #expect(try litPixels(false, symbol) == 0, "\(symbol) is lit while off")
+            #expect(try litPixels(true, symbol) > 20, "\(symbol) is dark while on")
+        }
+    }
 }
 #endif
