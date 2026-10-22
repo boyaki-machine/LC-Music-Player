@@ -27,6 +27,7 @@ public struct SpectrumAdoption: Sendable {
 
 /// A bounded presentation queue. Tick displays only the newest due sample,
 /// never replays a backlog. New arrivals cannot postpone existing deadlines.
+/// A sample with a presentation time is due `VisualizationClock.presentationLead` before it.
 public struct SpectrumPresentation {
     public static let capacity = 64
     public static let missingInterval = 0.25
@@ -73,7 +74,7 @@ public struct SpectrumPresentation {
     }
 
     private func deadline(_ sample: SpectrumSample) -> Double {
-        validatedPresentationTime(sample) ?? sample.producedAt
+        validatedPresentationTime(sample).map { $0 - VisualizationClock.presentationLead } ?? sample.producedAt
     }
 
     private func validatedPresentationTime(_ sample: SpectrumSample) -> Double? {

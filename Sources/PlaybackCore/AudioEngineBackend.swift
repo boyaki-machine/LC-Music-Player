@@ -35,13 +35,14 @@ public final class AudioEngineBackend: PlaybackBackend {
         return try MeasurementProfile(sampleRate: format.sampleRate, channels: format.channelCount)
     }
     public var volume: Float = 0.25 {
-        didSet { run?.engine.mainMixerNode.outputVolume = volume }
+        didSet { run?.graph.setVolume(volume) }
     }
 
     private struct Run {
         let id: UUID
         let engine: AVAudioEngine
         let player: AVAudioPlayerNode
+        let graph: PlaybackGraph
         let feeder: PCMFeeder
         let startTime: TimeInterval
         let observer: NSObjectProtocol
@@ -177,29 +178,18 @@ public final class AudioEngineBackend: PlaybackBackend {
                 }
             }
             let player = AVAudioPlayerNode()
-            // Zero filters, zero global gain: a pass-through AU with a public
-            // render-notification API. Future compensation belongs downstream.
-            let observation = AVAudioUnitEQ(numberOfBands: 0)
-            let chain = AudioProcessingChain(plan: normalizationPlan)
-            let converter = AVAudioMixerNode()
-            engine.attach(player)
-            engine.attach(converter)
-            engine.attach(observation)
-            engine.attach(chain.levelNode)
-            engine.connect(player, to: converter, format: decoder.processingFormat)
-            engine.connect(converter, to: observation, format: observationFormat)
-            engine.connect(observation, to: chain.levelNode, format: observationFormat)
-            engine.connect(chain.levelNode, to: engine.mainMixerNode, format: observationFormat)
-            engine.mainMixerNode.outputVolume = volume
+            let graph = PlaybackGraph(engine: engine, player: player, sourceFormat: decoder.processingFormat,
+                                      observationFormat: observationFormat, plan: normalizationPlan)
+            graph.setVolume(volume)
             let feeder = PCMFeeder(decoder: decoder, player: player,
                                    finished: { send(.finished) },
                                    failed: { send(.failed(.playbackFailed($0.localizedDescription))) })
             let observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange,
                                                                   object: engine, queue: nil) { _ in send(.outputChanged) }
             pendingTime = seconds
-            run = Run(id: id, engine: engine, player: player, feeder: feeder, startTime: seconds, observer: observer)
-            processingChain = chain
-            analysisNode = observation
+            run = Run(id: id, engine: engine, player: player, graph: graph, feeder: feeder, startTime: seconds, observer: observer)
+            processingChain = graph.chain
+            analysisNode = graph.observation
             try feeder.prime()
             engine.prepare()
             try engine.start()
@@ -279,6 +269,34 @@ public final class AudioEngineBackend: PlaybackBackend {
         analysisNode = nil
         processingChain = nil
     }
+}
+
+/// The nodes between the player and the output, built the same way for playback and for the
+/// offline tests: player → format mixer → observation → level gain → main mixer (app volume).
+@MainActor struct PlaybackGraph {
+    let engine: AVAudioEngine
+    /// Zero filters, zero global gain: a pass-through AU with a public
+    /// render-notification API. Future compensation belongs downstream.
+    let observation: AVAudioUnitEQ
+    let chain: AudioProcessingChain
+
+    init(engine: AVAudioEngine, player: AVAudioPlayerNode, sourceFormat: AVAudioFormat,
+         observationFormat: AVAudioFormat, plan: NormalizationPlan?) {
+        self.engine = engine
+        observation = AVAudioUnitEQ(numberOfBands: 0)
+        chain = AudioProcessingChain(plan: plan)
+        let converter = AVAudioMixerNode()
+        for node in [player, converter, observation, chain.levelNode] as [AVAudioNode] { engine.attach(node) }
+        engine.connect(player, to: converter, format: sourceFormat)
+        engine.connect(converter, to: observation, format: observationFormat)
+        engine.connect(observation, to: chain.levelNode, format: observationFormat)
+        engine.connect(chain.levelNode, to: engine.mainMixerNode, format: observationFormat)
+    }
+
+    /// The app volume and the sleep timer's fade change while audio flows, so they go to the main
+    /// mixer, which ramps a change over about 20ms instead of stepping the waveform. The level
+    /// gain steps at once and is therefore fixed before the engine starts.
+    func setVolume(_ volume: Float) { engine.mainMixerNode.outputVolume = volume }
 }
 
 /// Owns the decoder after a run starts. Decoding and scheduling happen only on `queue`,

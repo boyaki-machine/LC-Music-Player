@@ -22,8 +22,11 @@ private final class FakeBackend: PlaybackBackend {
         playCount += 1
         // Preserve a prepared seek position on playback.
     }
-    func pause() throws { pauseCount += 1 }
+    /// Calls that change what is heard, in order.
+    var calls: [String] = []
+    func pause() throws { pauseCount += 1; calls.append("pause") }
     func resume() throws { resumeCount += 1 }
+    func clearNormalization() { calls.append("clearNormalization") }
     func seek(to seconds: TimeInterval) throws {
         if let seekError { throw seekError }
         seekCount += 1; currentTime = seconds
@@ -86,6 +89,17 @@ struct PlaybackControllerTests {
         #expect(releases.activeCount == 0)
         controller.close()
         #expect(releases.activeCount == 0)
+    }
+
+    /// The level gain steps at once, so turning the volume adjustment off never changes it while audio flows.
+    @Test func turningOffTheVolumeAdjustmentPausesBeforeTheGainChanges() {
+        let backend = FakeBackend()
+        let controller = PlaybackController(fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend })
+        controller.select(first)
+        controller.togglePlayPause()
+        #expect(controller.state == .playing)
+        controller.requireNormalization(false)
+        #expect(controller.state == .paused && backend.calls == ["pause", "clearNormalization"])
     }
 
     @Test func lostAccessOnRestartFailsWithoutOpeningAudioAndCanBeRetried() {

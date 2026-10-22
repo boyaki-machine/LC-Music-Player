@@ -278,7 +278,7 @@ extension LibraryNativeViewTests {
         let playback = PlaybackController(makeBackend: { _ in UIBackend() })
         let library = LibraryController(playback: playback, store: UIStore(doc), references: UIReferences())
         defer { library.shutdown() }
-        library.refreshAvailability()
+        await library.refreshAvailability()?.value
         let presentation = PlayerPresentation(); presentation.toggleExtension()
         let actions = LibraryActions(files: { _ in }, folder: {}, repair: { _ in }, importPlaylist: {}, exportPlaylist: { _ in })
         let host = NSHostingView(rootView: ExtensionView(playback: playback, presentation: presentation, library: library, actions: actions))

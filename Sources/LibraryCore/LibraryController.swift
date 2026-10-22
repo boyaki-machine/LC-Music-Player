@@ -72,6 +72,9 @@ import AudioProcessingCore
     @ObservationIgnored private var shuttingDown = false
     @ObservationIgnored private let tagReader: (any TrackTagReading)?
     @ObservationIgnored private var tagTask: Task<Void, Never>?
+    @ObservationIgnored private var availabilityTask: Task<Void, Never>?
+    /// Tracks whose references are checked together on another thread.
+    static let availabilityBatchSize = 32
     /// Tracks whose tags could not be read in this run. They are tried again on the next launch.
     @ObservationIgnored private var tagFailures: Set<UUID> = []
     static let tagBatchSize = 64
@@ -249,23 +252,46 @@ import AudioProcessingCore
             }
         } catch { self.error = error.localizedDescription }
     }
+    /// Selects the last song first; the whole library is then checked in the background.
     public func restore() {
-        refreshAvailability()
         if let list = document.currentPlaylistID, let entry = document.currentEntryID { selectEntry(entry, in: list) }
+        refreshAvailability()
     }
     /// Readability is transient. A missing file never removes a persisted entry.
-    public func refreshAvailability() {
-        guard !isBusy else { return }
-        var next = document
-        for i in next.tracks.indices {
-            let t = next.tracks[i]
-            do {
-                let resolved = try references.resolve(t.reference)
-                next.tracks[i].reference = resolved.reference; unavailable[t.id] = nil
-                withExtendedLifetime(resolved.lease) {}
-            } catch { unavailable[t.id] = "ファイルが見つからないか、アクセスできません。" }
+    /// Checks every track on another thread in batches, so neither launch nor opening the list
+    /// waits for it; marks are updated batch by batch. A check already running is kept. Refreshed
+    /// bookmarks are saved together at the end, except for tracks that changed meanwhile, and an
+    /// import or another edit that makes the library busy ends the check without saving.
+    @discardableResult public func refreshAvailability() -> Task<Void, Never>? {
+        if let availabilityTask { return availabilityTask }
+        guard !isBusy, !shuttingDown else { return nil }
+        let tracks = document.tracks.map { ($0.id, $0.reference) }
+        availabilityTask = Task { [weak self] in
+            var refreshed: [UUID: (old: TrackReference, new: TrackReference)] = [:]
+            var start = 0
+            while start < tracks.count {
+                let batch = tracks[start..<min(start + Self.availabilityBatchSize, tracks.count)]
+                guard let self, !Task.isCancelled, !self.isBusy else { break }
+                let results = await self.references.availability(of: batch.map(\.1))
+                guard !Task.isCancelled, !self.isBusy else { break }
+                for ((id, old), new) in zip(batch, results) where self.track(id)?.reference == old {
+                    // Only a change is written: every write makes the list observe the marks again.
+                    let mark = new == nil ? "ファイルが見つからないか、アクセスできません。" : nil
+                    if self.unavailable[id] != mark { self.unavailable[id] = mark }
+                    if let new, new != old { refreshed[id] = (old, new) }
+                }
+                start += Self.availabilityBatchSize
+            }
+            guard let self else { return }
+            self.availabilityTask = nil
+            guard start >= tracks.count, !Task.isCancelled, !self.isBusy, self.editsEnabled, !refreshed.isEmpty else { return }
+            var next = self.document
+            for i in next.tracks.indices {
+                if let change = refreshed[next.tracks[i].id], next.tracks[i].reference == change.old { next.tracks[i].reference = change.new }
+            }
+            if next != self.document { _ = self.commit(next) }
         }
-        if next != document && editsEnabled { _ = commit(next) }
+        return availabilityTask
     }
 
     // MARK: Selection and transport
@@ -440,19 +466,20 @@ import AudioProcessingCore
         if restoring, playback.fadeGain < 1 { restoreSleepFade() }
         else { sleepRestoreTask?.cancel(); sleepRestoreTask = nil; playback.setFadeGain(1) }
     }
-    /// Rises evenly in decibels from the current level to full volume over `sleepRestoreDuration`.
+    /// Rises evenly in decibels from the current level to full volume in 50ms steps over
+    /// `sleepRestoreDuration`. It counts steps, not elapsed time, so a busy main actor makes the
+    /// rise slower but never larger in one step.
     private func restoreSleepFade() {
         sleepRestoreTask?.cancel()
         let startDB = 20 * log10(Double(max(playback.fadeGain, 0.001)))
-        let duration = sleepRestoreDuration, step = Duration.milliseconds(50)
-        let started = ContinuousClock.now
+        let step = Duration.milliseconds(50)
+        let steps = max(1, Int((sleepRestoreDuration / step).rounded(.up)))
         sleepRestoreTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                let elapsed = started.duration(to: .now) / duration
-                guard let self else { return }
-                if elapsed >= 1 { self.playback.setFadeGain(1); self.sleepRestoreTask = nil; return }
-                self.playback.setFadeGain(Float(pow(10, startDB * (1 - elapsed) / 20)))
+            for done in 1...steps {
                 do { try await Task.sleep(for: step) } catch { return }
+                guard let self else { return }
+                if done == steps { self.playback.setFadeGain(1); self.sleepRestoreTask = nil; return }
+                self.playback.setFadeGain(Float(pow(10, startDB * (1 - Double(done) / Double(steps)) / 20)))
             }
         }
     }
@@ -505,6 +532,7 @@ import AudioProcessingCore
         sleepFadeTask?.cancel(); sleepFadeTask = nil
         sleepRestoreTask?.cancel(); sleepRestoreTask = nil
         tagTask?.cancel(); tagTask = nil
+        availabilityTask?.cancel(); availabilityTask = nil
         playback.close()
         logger.notice("Library shutdown finished after \(String(describing: started.duration(to: .now)), privacy: .public)")
     }

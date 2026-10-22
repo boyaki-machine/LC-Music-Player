@@ -89,8 +89,8 @@ render側は次のように実装する。
 | computationSeconds / droppedBuffers / queuedBufferHighWatermark | 計算時間、取得側の累積の欠落数、キューの最大使用スロット数（上限8） |
 
 - host時刻や遅延を取得できない場合はnilとし、0で代用しない。
-- ノードの`outputPresentationLatency`は開始・再開・再設定時に取得し、機器の遅延を別に加えて二重に計上しない。将来、下流の遅延段がノードの報告値に含まれる場合は、その既知の補償量を報告値から分離してから設定する。
-- `SynchronizationEstimate.additionalAudioDelay`は、追加量＝max(0, 表示までの遅延＋余裕−既存の出力遅延)を計算する純粋な補助関数である。音声の時刻・速度・出力機器の設定は変更しない。表示を推定提示時刻まで待たせる処理は可視化側が担当する。実際に音声を遅らせる段は将来の機能である。
+- ノードの`outputPresentationLatency`は開始・再開・再設定時に取得し、機器の遅延を別に加えて二重に計上しない。macOSでは、この値は出力機器の遅延（Core Audioの`kAudioDevicePropertyLatency`）と一致し、IOバッファの長さを含まない。観測ノードのレンダー通知のhost時刻は、呼び出しの時点よりIOバッファ1回分先を指すので、host時刻＋報告値がCore Audioの報告どおりの提示時刻になる。将来、下流の遅延段がノードの報告値に含まれる場合は、その既知の補償量を報告値から分離してから設定する。
+- `SynchronizationEstimate.additionalAudioDelay`は、追加量＝max(0, 表示までの遅延＋余裕−既存の出力遅延)を計算する純粋な補助関数である。音声の時刻・速度・出力機器の設定は変更しない。表示を推定提示時刻まで待たせる処理は可視化側が担当する（採用の時計と画面の更新の遅れを見込んで、少し前に採用する。[可視化の実装設計](08_visualization-implementation.md)を参照）。実際に音声を遅らせる段は将来の機能である。
 
 将来の補償器は次を満たす構成にする。
 
