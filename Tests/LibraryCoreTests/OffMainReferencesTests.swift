@@ -49,7 +49,7 @@ private final class ThreadRecordingLibrary: MediaLibraryLookup, @unchecked Senda
         model.selectEntry(entry.id, in: list)
         try await wait { !model.isPreparing && model.document.currentEntryID == entry.id }
         let out = f.root.appendingPathComponent("out.m3u8")
-        await model.exportM3U8(list, to: out)
+        await model.exportM3U8(list, to: out) { _ in Issue.record("every file is in the list's folder"); return nil }
         await model.importM3U8(out)
         #expect(model.document.playlists.last?.entries.count == 4 && model.document.tracks.count == 3)
         #expect(refs.syncCalls.isEmpty, "\(refs.syncCalls)")

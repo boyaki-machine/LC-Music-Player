@@ -196,8 +196,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             activePanel = panel
             panel.allowedContentTypes = [UTType(filenameExtension: "m3u8") ?? .plainText]
             panel.nameFieldStringValue = list.name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_") + ".m3u8"
-            if await panel.beginSheetModal(for: extensionWindow) == .OK, let url = panel.url { await library.exportM3U8(id, to: url) }
+            if await panel.beginSheetModal(for: extensionWindow) == .OK, let url = panel.url {
+                await library.exportM3U8(id, to: url) { count in await Self.askOutsidePaths(count, for: self.extensionWindow) }
+            }
         }
+    }
+    /// Files outside the list's folder would reveal the user name as full paths; the file name alone is the default.
+    private static func askOutsidePaths(_ count: Int, for window: NSWindow) async -> M3U8OutsidePaths? {
+        let alert = NSAlert()
+        alert.messageText = M3U8OutsidePaths.question(count: count)
+        alert.informativeText = M3U8OutsidePaths.explanation
+        let choices: [M3U8OutsidePaths] = [.fileName, .fullPath]
+        for choice in choices { alert.addButton(withTitle: choice.label) }
+        alert.addButton(withTitle: "キャンセル").keyEquivalent = "\u{1b}"
+        let index = await alert.beginSheetModal(for: window).rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        return choices.indices.contains(index) ? choices[index] : nil
     }
     @objc private func playPause() { library.togglePlayPause() }
     @objc private func stopPlayback() { library.stop() }

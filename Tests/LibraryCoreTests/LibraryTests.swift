@@ -371,7 +371,7 @@ struct Fixture {
         #expect(model.document.tracks.count == 2 && model.document.playlists.last?.entries.count == 3)
         #expect(model.unavailable.count == 1)
         let out = f.root.appendingPathComponent("export.m3u8")
-        await model.exportM3U8(try #require(model.document.playlists.last?.id), to: out)
+        await model.exportM3U8(try #require(model.document.playlists.last?.id), to: out) { _ in Issue.record("every file is in the list's folder"); return nil }
         #expect(try M3U8.decode(Data(contentsOf: out), relativeTo: out).map(\.url) == [song, song, f.root.appendingPathComponent("missing.flac")])
     }
     @Test func corruptUnrecoverableStoreIsReadOnly() throws {
@@ -422,5 +422,47 @@ struct Fixture {
         let file = URL(fileURLWithPath: "/music/line\nbreak.wav"), list = URL(fileURLWithPath: "/music/list.m3u8")
         let encoded = M3U8.encode([M3U8Item(url: file, title: "one\ntwo")], relativeTo: list)
         #expect(try M3U8.decode(encoded, relativeTo: list) == [M3U8Item(url: file, title: "one two")])
+        #expect(M3U8.outsideCount([M3U8Item(url: file)], relativeTo: list) == 1)
+        #expect(String(decoding: M3U8.encode([M3U8Item(url: file)], relativeTo: list, outside: .fileName), as: UTF8.self) == "#EXTM3U\n./line break.wav\n")
+    }
+    /// Files outside the list's folder are written by name alone, or as full paths when chosen.
+    @Test func m3u8OutsideFilesAreWrittenAsChosen() throws {
+        let list = URL(fileURLWithPath: "/Users/someone/Desktop/lists/list.m3u8")
+        let inside = URL(fileURLWithPath: "/Users/someone/Desktop/lists/音楽/凪.wav")
+        let outside = URL(fileURLWithPath: "/Users/someone/Music/アルバム/曲 1.flac")
+        let song = URL(string: "ipod-library://item/item.m4a?id=5")!
+        let items = [M3U8Item(url: inside), M3U8Item(url: outside, title: "曲"), M3U8Item(url: song)]
+        #expect(M3U8.outsideCount(items, relativeTo: list) == 1)
+        let named = String(decoding: M3U8.encode(items, relativeTo: list, outside: .fileName), as: UTF8.self)
+        #expect(named == "#EXTM3U\n./音楽/凪.wav\n#EXTINF:-1,曲\n./曲 1.flac\n\(song.absoluteString)\n")
+        #expect(!named.contains("someone") && !named.contains("Music"))
+        // Read back, the name stands for a file beside the list.
+        #expect(try M3U8.decode(Data(named.utf8), relativeTo: list).map(\.url)
+                == [inside, list.deletingLastPathComponent().appendingPathComponent("曲 1.flac"), song])
+        let full = M3U8.encode(items, relativeTo: list, outside: .fullPath)
+        #expect(String(decoding: full, as: UTF8.self).contains(outside.absoluteString))
+        #expect(try M3U8.decode(full, relativeTo: list).map(\.url) == [inside, outside, song])
+        #expect(M3U8.encode(items, relativeTo: list) == full)
+        let odd = [URL(fileURLWithPath: "/Users/someone/Music/#1 a.wav"), URL(fileURLWithPath: "/Users/someone/Music/x:y.wav")]
+        let oddNamed = M3U8.encode(odd.map { M3U8Item(url: $0) }, relativeTo: list, outside: .fileName)
+        #expect(try M3U8.decode(oddNamed, relativeTo: list).map(\.url.lastPathComponent) == ["#1 a.wav", "x:y.wav"])
+    }
+    /// The export asks once with the number of outside files; cancelling writes nothing.
+    @Test func m3u8ExportAsksAboutOutsideFiles() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        let a = try f.file("lists/a.wav"), b = try f.file("elsewhere/b.wav"), c = try f.file("elsewhere/c.wav")
+        let model = LibraryController(playback: PlaybackController(makeBackend: { _ in TestBackend() }), store: MemoryStore(), references: TestReferences())
+        let list = try #require(model.document.currentPlaylistID)
+        await model.importFiles([a, b, c], into: list)
+        let out = f.root.appendingPathComponent("lists/out.m3u8")
+        var asked: [Int] = []
+        await model.exportM3U8(list, to: out) { asked.append($0); return nil }
+        #expect(asked == [2] && !FileManager.default.fileExists(atPath: out.path))
+        await model.exportM3U8(list, to: out) { asked.append($0); return .fileName }
+        let named = try String(contentsOf: out, encoding: .utf8)
+        #expect(asked == [2, 2] && !named.contains(f.root.path) && !named.contains("elsewhere"))
+        #expect(["./a.wav", "./b.wav", "./c.wav"].allSatisfy { named.contains("\n\($0)\n") })
+        await model.exportM3U8(list, to: out) { _ in .fullPath }
+        #expect(Set(try M3U8.decode(Data(contentsOf: out), relativeTo: out).map(\.url)) == [a, b, c])
     }
 }

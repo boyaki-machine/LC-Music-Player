@@ -18,6 +18,10 @@ struct RootView: View {
     // The playlist that receives the picked songs; the outer optional is nil while the picker is closed.
     @State private var musicTarget: UUID?? = nil
     @State private var musicDenied = false
+    // Asked before writing a list with files outside its folder. Only the alert's buttons dismiss it,
+    // and each of them resumes the waiting export.
+    @State private var outsidePrompt: OutsidePathsPrompt?
+    @State private var outsidePromptShown = false
 
     private var presentation: PlayerPresentation { model.presentation }
 
@@ -54,6 +58,13 @@ struct RootView: View {
             Button("閉じる", role: .cancel) {}
         } message: {
             Text("設定のLCMPで「メディアとApple Music」へのアクセスを許可してください。")
+        }
+        .alert(M3U8OutsidePaths.question(count: outsidePrompt?.count ?? 0), isPresented: $outsidePromptShown) {
+            Button(M3U8OutsidePaths.fileName.label) { answerOutsidePaths(.fileName) }
+            Button(M3U8OutsidePaths.fullPath.label) { answerOutsidePaths(.fullPath) }
+            Button("キャンセル", role: .cancel) { answerOutsidePaths(nil) }
+        } message: {
+            Text(M3U8OutsidePaths.explanation)
         }
         #if DEBUG
         .task {
@@ -143,11 +154,28 @@ struct RootView: View {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let url = folder.appendingPathComponent(name)
             Task {
-                await model.library.exportM3U8(id, to: url)
+                await model.library.exportM3U8(id, to: url) { count in
+                    await withCheckedContinuation { continuation in
+                        outsidePrompt = OutsidePathsPrompt(count: count, continuation: continuation)
+                        outsidePromptShown = true
+                    }
+                }
                 if FileManager.default.fileExists(atPath: url.path) { exportFile = url; moverShown = true }
+                else { try? FileManager.default.removeItem(at: folder) }
             }
         } catch {}
     }
+
+    private func answerOutsidePaths(_ choice: M3U8OutsidePaths?) {
+        outsidePrompt?.continuation.resume(returning: choice)
+        outsidePrompt = nil
+    }
+}
+
+/// The export waiting for the answer about the files outside the list's folder.
+struct OutsidePathsPrompt {
+    let count: Int
+    let continuation: CheckedContinuation<M3U8OutsidePaths?, Never>
 }
 
 /// What the single file importer is open for.

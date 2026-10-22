@@ -6,12 +6,35 @@ public enum TransportState: String, Codable, Hashable, Sendable {
     case playing, paused, stopped
 }
 
+/// What the `lcmp://` scheme accepts. Any web page or app can open the scheme, so a link only shows
+/// a screen of the app; everything else, including extra parts on a known link, does nothing.
+public enum AppLink: CaseIterable, Equatable, Sendable {
+    /// `lcmp://extension`: the ☰ of the widgets.
+    case showExtension
+
+    public static let scheme = "lcmp"
+
+    public var url: URL {
+        switch self {
+        case .showExtension: URL(string: "\(Self.scheme)://extension")!
+        }
+    }
+
+    /// Only the exact URL of a link matches, compared component by component.
+    public init?(_ url: URL) {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let link = Self.allCases.first(where: { URLComponents(url: $0.url, resolvingAgainstBaseURL: false) == components })
+        else { return nil }
+        self = link
+    }
+}
+
 /// The buttons of the widgets. `menu` opens the app with the extension shown.
 public enum TransportCommand: String, CaseIterable, Sendable {
     case previous, playPause, next, stop, menu
 
     /// Opens the app and shows the extension (`lcmp://extension`).
-    public static let menuURL = URL(string: "lcmp://extension")!
+    public static let menuURL = AppLink.showExtension.url
 
     public var label: String {
         switch self {

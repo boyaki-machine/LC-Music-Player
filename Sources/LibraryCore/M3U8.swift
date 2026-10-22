@@ -48,16 +48,51 @@ public enum M3U8 {
         }
         return result
     }
-    public static func encode(_ items: [M3U8Item], relativeTo file: URL) -> Data {
-        let base = file.deletingLastPathComponent().standardizedFileURL.path + "/"
+    /// Files the list cannot reach by a path from its own folder; written as full paths they reveal
+    /// the user name and the folder layout. Library songs keep their asset URL and are not counted.
+    public static func outsideCount(_ items: [M3U8Item], relativeTo file: URL) -> Int {
+        let base = baseDirectory(of: file)
+        return items.filter { $0.url.isFileURL && relativePath($0.url, base: base) == nil }.count
+    }
+    public static func encode(_ items: [M3U8Item], relativeTo file: URL, outside: M3U8OutsidePaths = .fullPath) -> Data {
+        let base = baseDirectory(of: file)
         var lines = ["#EXTM3U"]
         for item in items {
-            if let title = item.title { lines.append("#EXTINF:-1," + title.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")) }
-            let path = item.url.standardizedFileURL.path
+            if let title = item.title { lines.append("#EXTINF:-1," + singleLine(title)) }
             // Relative paths remain portable with their containing media directory.
-            if path.hasPrefix(base), !path.contains("\n"), !path.contains("\r") { lines.append("./" + String(path.dropFirst(base.count))) }
+            if let relative = relativePath(item.url, base: base) { lines.append(relative) }
+            // `./` keeps a name starting with `#` or holding `:` from reading as a comment or a URL.
+            else if item.url.isFileURL, outside == .fileName { lines.append("./" + singleLine(item.url.standardizedFileURL.lastPathComponent)) }
             else { lines.append(item.url.absoluteString) }
         }
         return Data((lines.joined(separator: "\n") + "\n").utf8)
     }
+    private static func baseDirectory(of file: URL) -> String { file.deletingLastPathComponent().standardizedFileURL.path + "/" }
+    private static func relativePath(_ url: URL, base: String) -> String? {
+        guard url.isFileURL else { return nil }
+        let path = url.standardizedFileURL.path
+        guard path.hasPrefix(base), !path.contains("\n"), !path.contains("\r") else { return nil }
+        return "./" + String(path.dropFirst(base.count))
+    }
+    private static func singleLine(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
+    }
+}
+
+/// How a list writes the files outside its own folder.
+public enum M3U8OutsidePaths: Sendable, CaseIterable {
+    /// The file name alone: nothing of the user's folders, but the list no longer finds the file elsewhere.
+    case fileName
+    /// The full file URL, which reads back on this device.
+    case fullPath
+
+    public var label: String {
+        switch self {
+        case .fileName: "ファイル名だけで書く"
+        case .fullPath: "フルパスで書く"
+        }
+    }
+    /// The question asked before writing a list with such files.
+    public static func question(count: Int) -> String { "\(count)曲はリストのフォルダの外にあります" }
+    public static let explanation = "フルパスで書くと、フォルダの構成（Macではユーザ名を含む）がリストに入ります。ファイル名だけで書くと、読み込んだときに参照切れになることがあります。"
 }
