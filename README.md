@@ -3,7 +3,7 @@
 LC Music Player（LCMP）は、落ち着いた音楽鑑賞体験を目指すmacOSとiPhoneのネイティブ音楽プレイヤーです。前世紀（Last Century：LC）の楽曲プレイヤーのように情報を控えめに表示し、グラフィックイコライザーなどの可視化で再生を楽しめるようにします。
 
 <!-- The screenshot is a 2x (Retina) capture of the 360x210pt main window; width keeps it at actual size. -->
-<img src="docs/images/lcmp-player.png" width="360" alt="「Last Century イコライザー」で再生しているメイン画面。16列の蛍光管LEDが周波数ごとのレベルを表示している">
+<img src="docs/images/lcmp-player.png" style="display: block; margin-left: auto; margin-right: auto;" width="360" alt="「Last Century イコライザー」で再生しているメイン画面。16列の蛍光管LEDが周波数ごとのレベルを表示している">
 
 ## 主な機能
 
