@@ -159,6 +159,7 @@
 | 常時表示の判定（30%・充電中・残量不明）と、自動ロックの設定が判定の変化のときだけ行われること、表示タブの記号の緑・琥珀の点灯 | `AlwaysOnDisplayTests`、`VisualizationDesignCardTests`の`alwaysOnIconSitsAboveTheCardsAndLightsGreenOrAmber` |
 | ☰のリンクで拡張画面が開く | `make ios-uitest`（`ControlSurfaceTests`） |
 | 音源タブの登録ボタン（ファイル・フォルダ・ミュージック）が1行に同じ高さで並び、名前が折り返さない | `make ios-uitest`（`SourceButtonsTests`。幅の狭い機種（iPhone SE、375pt）では、シミュレータの画面で目視する） |
+| 音源タブの検索で一致した曲のまとまりが開き、曲のゴミ箱で1曲を、選択モードでまとまりを1回の確認で除外できる。曲のゴミ箱が画面の右端（スクロールのインジケータ）から離れている | `make ios-uitest`（`SourceSearchTouchTests`。`TEST_RUNNER_LCMP_UI_SNAPSHOTS=<フォルダ>`を付けると、検索中と選択中の画面を書き出す） |
 | ウィジェットの見た目 | DEBUGの起動引数`-LCMPControlSurfaces YES`で各状態の見本を並べて撮影し、UI・UX設計と見比べる |
 | 縦置き・横置き・拡張を閉じた全画面の配置 | シミュレータで起動引数（`-LCMPImportPaths`・`-LCMPAutoplay`・`-LCMPOrientation`・`-LCMPExtension`）を付けて撮影し、UI・UX設計と見比べる |
 | バックグラウンドで再生が続く | 再生中に他のアプリへ切り替え、音が続くことと、アプリがMediaPlaybackの権利を持ち続けることを確かめる |
