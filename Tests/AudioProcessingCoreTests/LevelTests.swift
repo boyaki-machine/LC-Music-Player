@@ -54,14 +54,22 @@ private func tone(_ seconds: Double, rate: Double = 48000, amplitude: Double, ch
         #expect(throws: (any Error).self) {
             for _ in 0..<5 { try data.withUnsafeBufferPointer { try capped.consume(left: $0.baseAddress!, right: nil, frames: 8192) } }
         }
-        // Other meters share the directory in a parallel run, so check only files this test owns.
-        let active = try LoudnessMeter(profile: profile)
-        let abandoned = LoudnessMeter.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".energy")
-        try Data([0]).write(to: abandoned)
+        // The energies stay in memory: measuring writes no file.
+        let directory = LoudnessMeter.temporaryDirectory
+        let before = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+        let measuring = try LoudnessMeter(profile: profile)
+        for _ in 0..<12 { try data.withUnsafeBufferPointer { try measuring.consume(left: $0.baseAddress!, right: nil, frames: 8192) } }
+        _ = try measuring.finish()
+        #expect(((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []).count <= before.count)
+        // A spool an earlier version left behind is removed; one another process still holds stays.
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let abandoned = directory.appendingPathComponent(UUID().uuidString + ".energy")
+        let held = directory.appendingPathComponent(UUID().uuidString + ".energy")
+        try Data([0]).write(to: abandoned); try Data([0]).write(to: held)
+        let handle = open(held.path, O_RDWR); defer { close(handle); unlink(held.path) }
+        #expect(flock(handle, LOCK_EX | LOCK_NB) == 0)
         LoudnessMeter.cleanAbandonedFiles()
-        #expect(FileManager.default.fileExists(atPath: active.url.path))
-        #expect(!FileManager.default.fileExists(atPath: abandoned.path))
-        withExtendedLifetime(active) {}
+        #expect(!FileManager.default.fileExists(atPath: abandoned.path) && FileManager.default.fileExists(atPath: held.path))
     }
     @Test func gainConstraintsAndInvalidData() throws {
         let profile = try MeasurementProfile(sampleRate: 48000, channels: 2)
