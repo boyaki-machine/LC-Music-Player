@@ -4,12 +4,16 @@ import Foundation
 import AudioProcessingCore
 import LevelDSP
 
-/// One utility queue, shared by prefix preparation and incremental full-track scans.
+/// One utility queue, shared by prefix preparation and incremental full-track scans. Work requested
+/// from a task of user-initiated priority or higher (a listener waiting for a song) runs at that
+/// priority; background preparation runs in utility tasks and stays at utility.
 public final class AudioPreprocessor: AudioPreprocessing {
     public static let shared = AudioPreprocessor()
     private let queue = DispatchQueue(label: "local.lcmp.preprocessing", qos: .utility)
     private let state: PreprocessingState
     /// A standalone instance has no persistent side effects unless configured.
+    /// The priority of work requested by the current task.
+    static var requestedQoS: DispatchQoS { Task.currentPriority >= .userInitiated ? .userInitiated : .utility }
     public init(cache: MeasurementCacheConfiguration? = nil, collectMeasurementTimings: Bool = false) {
         state = PreprocessingState(cache: cache.map(MeasurementCache.init), collectTimings: collectMeasurementTimings)
         LoudnessMeter.cleanAbandonedFiles()
@@ -24,15 +28,18 @@ public final class AudioPreprocessor: AudioPreprocessing {
     }
     public func measureLevels(_ url: URL, profile: MeasurementProfile,
                               cancellation: PreparationCancellation = .init(), ownerID: UUID? = nil) async throws -> TrackAudioMetrics {
-        try await withTaskCancellationHandler {
+        let qos = Self.requestedQoS
+        return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                queue.async {
+                queue.async(qos: qos, flags: .enforceQoS) {
                     do {
                         try cancellation.check()
                         let source = try SourceFingerprint(url: url)
                         let key = MeasurementJobKey(source: source, profile: profile)
                         let waiter = MeasurementWaiter(cancellation: cancellation, owner: ownerID, continuation: continuation)
-                        if let job = self.state.levels[key] { job.waiters.append(waiter); self.state.statistics.coalescedRequests += 1; return }
+                        if let job = self.state.levels[key] {
+                            job.waiters.append(waiter); job.raise(qos); self.state.statistics.coalescedRequests += 1; return
+                        }
                         let request = try? self.state.cache?.request(url, profile: profile)
                         if let request, let value = try? self.state.cache?.load(request, owner: ownerID),
                            let result = try? value.metrics(source: source, profile: profile) {
@@ -43,7 +50,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
                         }
                         self.state.statistics.cacheMisses += 1
                         let scan = try LevelScan(url: url, profile: profile, cancellation: .init(), collectTimings: self.state.collectTimings)
-                        let job = LevelJob(scan: scan, request: request, waiters: [waiter])
+                        let job = LevelJob(scan: scan, request: request, waiters: [waiter], qos: qos)
                         self.state.levels[key] = job; self.state.statistics.levelScans += 1
                         self.stepLevels(job, key: key)
                     } catch { continuation.resume(throwing: error) }
@@ -75,7 +82,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
                 state.statistics.nativePeakWorkSeconds += job.scan.nativePeakSeconds
                 job.scan.close(); state.levels[key] = nil
                 for waiter in job.waiters { waiter.finish(.success(result)) }
-            } else { queue.async { self.stepLevels(job, key: key) } }
+            } else { queue.async(qos: job.qos, flags: .enforceQoS) { self.stepLevels(job, key: key) } }
         } catch {
             job.scan.close(); state.levels[key] = nil
             for waiter in job.waiters { waiter.finish(.failure(error)) }
@@ -84,8 +91,9 @@ public final class AudioPreprocessor: AudioPreprocessing {
 
     public func prepare(_ url: URL, cancellation: PreparationCancellation = .init(),
                         seconds: Double = 2, byteLimit: Int = 32 * 1024 * 1024) async throws -> PreparedAudio {
-        try await withCheckedThrowingContinuation { continuation in
-            queue.async {
+        let qos = Self.requestedQoS
+        return try await withCheckedThrowingContinuation { continuation in
+            queue.async(qos: qos, flags: .enforceQoS) {
                 do {
                     try cancellation.check()
                     let source = try SourceFingerprint(url: url)
@@ -132,15 +140,18 @@ public final class AudioPreprocessor: AudioPreprocessing {
     }
 
     public func measure(_ url: URL, cancellation: PreparationCancellation = .init(), ownerID: UUID? = nil) async throws -> TrackPeak {
-        try await withTaskCancellationHandler {
+        let qos = Self.requestedQoS
+        return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
-                queue.async {
+                queue.async(qos: qos, flags: .enforceQoS) {
                     do {
                         try cancellation.check()
                         let source = try SourceFingerprint(url: url)
                         let key = MeasurementJobKey(source: source, profile: nil)
                         let waiter = MeasurementWaiter(cancellation: cancellation, owner: ownerID, continuation: continuation)
-                        if let job = self.state.peaks[key] { job.waiters.append(waiter); self.state.statistics.coalescedRequests += 1; return }
+                        if let job = self.state.peaks[key] {
+                            job.waiters.append(waiter); job.raise(qos); self.state.statistics.coalescedRequests += 1; return
+                        }
                         let request = try? self.state.cache?.request(url, profile: nil)
                         if let request, let value = try? self.state.cache?.load(request, owner: ownerID),
                            let result = try? value.peak(source: source) {
@@ -150,7 +161,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
                         }
                         self.state.statistics.cacheMisses += 1
                         let scan = try PeakScan(url: url, cancellation: .init())
-                        let job = PeakJob(scan: scan, request: request, waiters: [waiter])
+                        let job = PeakJob(scan: scan, request: request, waiters: [waiter], qos: qos)
                         self.state.peaks[key] = job; self.state.statistics.peakScans += 1
                         self.step(job, key: key)
                     } catch { continuation.resume(throwing: error) }
@@ -173,7 +184,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
                 }
                 job.scan.close(); state.peaks[key] = nil
                 for waiter in job.waiters { waiter.finish(.success(result)) }
-            } else { queue.async { self.step(job, key: key) } }
+            } else { queue.async(qos: job.qos, flags: .enforceQoS) { self.step(job, key: key) } }
         } catch {
             job.scan.close(); state.peaks[key] = nil
             for waiter in job.waiters { waiter.finish(.failure(error)) }
@@ -206,17 +217,26 @@ private struct MeasurementWaiter<Value: Sendable> {
         catch { continuation.resume(throwing: error) }
     }
 }
+/// A scan continues at the highest priority any of its waiters asked for.
 private final class LevelJob: @unchecked Sendable {
     let scan: LevelScan
     let request: MeasurementRequest?
     var waiters: [MeasurementWaiter<TrackAudioMetrics>]
-    init(scan: LevelScan, request: MeasurementRequest?, waiters: [MeasurementWaiter<TrackAudioMetrics>]) { self.scan = scan; self.request = request; self.waiters = waiters }
+    private(set) var qos: DispatchQoS
+    init(scan: LevelScan, request: MeasurementRequest?, waiters: [MeasurementWaiter<TrackAudioMetrics>], qos: DispatchQoS) {
+        self.scan = scan; self.request = request; self.waiters = waiters; self.qos = qos
+    }
+    func raise(_ requested: DispatchQoS) { if requested.qosClass.rawValue.rawValue > qos.qosClass.rawValue.rawValue { qos = requested } }
 }
 private final class PeakJob: @unchecked Sendable {
     let scan: PeakScan
     let request: MeasurementRequest?
     var waiters: [MeasurementWaiter<TrackPeak>]
-    init(scan: PeakScan, request: MeasurementRequest?, waiters: [MeasurementWaiter<TrackPeak>]) { self.scan = scan; self.request = request; self.waiters = waiters }
+    private(set) var qos: DispatchQoS
+    init(scan: PeakScan, request: MeasurementRequest?, waiters: [MeasurementWaiter<TrackPeak>], qos: DispatchQoS) {
+        self.scan = scan; self.request = request; self.waiters = waiters; self.qos = qos
+    }
+    func raise(_ requested: DispatchQoS) { if requested.qosClass.rawValue.rawValue > qos.qosClass.rawValue.rawValue { qos = requested } }
 }
 private final class PreprocessingState: @unchecked Sendable {
     let cache: MeasurementCache?

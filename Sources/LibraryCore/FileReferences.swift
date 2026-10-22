@@ -4,7 +4,7 @@ import PlaybackCore
 import MediaPlayer
 #endif
 
-public struct ResolvedTrack {
+public struct ResolvedTrack: Sendable {
     public var url: URL
     public var reference: TrackReference
     public var lease: FileLease
@@ -17,11 +17,22 @@ public struct ResolvedTrack {
     /// Checks that each reference can still be opened, on another thread where the provider can.
     /// Each result is the refreshed reference of a readable track, or nil for an unavailable one.
     func availability(of references: [TrackReference]) async -> [TrackReference?]
+    /// `resolve`, on another thread where the provider can, for work a listener waits for.
+    func resolved(_ reference: TrackReference) async throws -> ResolvedTrack
+    /// Where each reference points now, as `availability` finds it, for work a listener waits for.
+    func located(_ references: [TrackReference]) async -> [TrackReference?]
+    /// `makeReference` for each URL, nil where it fails, on another thread where the provider can.
+    func makeReferences(_ urls: [URL]) async -> [TrackReference?]
 }
 extension FileReferenceProvider {
     public func availability(of references: [TrackReference]) async -> [TrackReference?] {
         references.map { try? resolve($0).reference }
     }
+    public func resolved(_ reference: TrackReference) async throws -> ResolvedTrack { try resolve(reference) }
+    public func located(_ references: [TrackReference]) async -> [TrackReference?] {
+        references.map { try? resolve($0).reference }
+    }
+    public func makeReferences(_ urls: [URL]) async -> [TrackReference?] { urls.map { try? makeReference($0) } }
 }
 /// A song of the Music library that is stored on the device and readable (no DRM).
 public struct MediaLibrarySong: Equatable, Sendable {
@@ -88,11 +99,28 @@ public struct SystemMediaLibrary: MediaLibraryLookup {
     public func makeReference(_ url: URL) throws -> TrackReference { try Self.reference(url, mediaLibrary: mediaLibrary) }
     public func resolve(_ reference: TrackReference) throws -> ResolvedTrack { try Self.resolved(reference, mediaLibrary: mediaLibrary) }
     /// Resolving a security-scoped bookmark makes the system check the app's own signature, which
-    /// takes long enough that a whole library would hold the main thread for seconds.
+    /// takes long enough that a whole library would hold the main thread for seconds. Creating one
+    /// reads the file system. Both run on another thread; only the results come back.
     public func availability(of references: [TrackReference]) async -> [TrackReference?] {
+        await locate(references, priority: .utility)
+    }
+    public func located(_ references: [TrackReference]) async -> [TrackReference?] {
+        await locate(references, priority: .userInitiated)
+    }
+    private func locate(_ references: [TrackReference], priority: TaskPriority) async -> [TrackReference?] {
         let mediaLibrary = mediaLibrary
-        return await Task.detached(priority: .utility) {
+        return await Task.detached(priority: priority) {
             references.map { try? Self.resolved($0, mediaLibrary: mediaLibrary).reference }
+        }.value
+    }
+    public func resolved(_ reference: TrackReference) async throws -> ResolvedTrack {
+        let mediaLibrary = mediaLibrary
+        return try await Task.detached(priority: Task.currentPriority) { try Self.resolved(reference, mediaLibrary: mediaLibrary) }.value
+    }
+    public func makeReferences(_ urls: [URL]) async -> [TrackReference?] {
+        let mediaLibrary = mediaLibrary
+        return await Task.detached(priority: .userInitiated) {
+            urls.map { try? Self.reference($0, mediaLibrary: mediaLibrary) }
         }.value
     }
 

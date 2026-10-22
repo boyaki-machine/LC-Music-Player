@@ -170,13 +170,14 @@ import AudioProcessingCore
         let previous = retirement, references = references, worker = worker
         let sharedLease = candidate.track.id == currentID ? currentLease : nil
         let sharedURL = sharedLease == nil ? nil : currentURL
-        task = Task { [weak self] in
+        // Background work runs at utility, so the preprocessor keeps it behind a listener's request.
+        task = Task(priority: .utility) { [weak self] in
             do {
                 await previous?.value
                 try request.cancellation.check()
                 if let sharedLease, let sharedURL {
                     request.resolved = ResolvedTrack(url: sharedURL, reference: request.reference, lease: sharedLease)
-                } else { request.resolved = try references.resolve(request.reference) }
+                } else { request.resolved = try await references.resolved(request.reference) }
                 let url = request.resolved!.url
                 if prefix {
                     request.audio = try await worker.prepare(url, cancellation: request.cancellation, seconds: 2, byteLimit: 32 * 1024 * 1024)

@@ -196,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             activePanel = panel
             panel.allowedContentTypes = [UTType(filenameExtension: "m3u8") ?? .plainText]
             panel.nameFieldStringValue = list.name.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_") + ".m3u8"
-            if await panel.beginSheetModal(for: extensionWindow) == .OK, let url = panel.url { library.exportM3U8(id, to: url) }
+            if await panel.beginSheetModal(for: extensionWindow) == .OK, let url = panel.url { await library.exportM3U8(id, to: url) }
         }
     }
     @objc private func playPause() { library.togglePlayPause() }
