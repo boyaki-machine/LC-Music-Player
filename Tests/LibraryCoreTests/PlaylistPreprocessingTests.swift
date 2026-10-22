@@ -48,8 +48,9 @@ private actor PlaylistWorker: AudioPreprocessing {
     }
     return doc
 }
+/// Waits for a condition. The limit only ends a failing wait; a slow, loaded simulator can need far longer than usual.
 @MainActor private func sweepWait(_ condition: () async -> Bool) async throws {
-    let deadline = ContinuousClock.now + .seconds(8)
+    let deadline = ContinuousClock.now + .seconds(30)
     while !(await condition()), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
     #expect(await condition())
 }
@@ -88,7 +89,9 @@ private actor PlaylistWorker: AudioPreprocessing {
         #expect(await worker.starts == doc.tracks.map { $0.reference.lastKnownURL })
         #expect(refs.scopes.active == 0 && refs.scopes.maximum == 1)
         queue.update(doc, playback: playback, after: nil)
-        await Task.yield()
+        // Nothing starts again: the queue stays idle even after its retirement chain has run.
+        #expect(queue.active == nil)
+        await queue.retirement?.value
         #expect(queue.active == nil)
         #expect(await worker.starts.count == 5)
         queue.suspend()

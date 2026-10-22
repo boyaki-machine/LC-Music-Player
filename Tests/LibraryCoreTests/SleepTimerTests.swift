@@ -88,18 +88,18 @@ import PlaybackCore
         playback.setVolume(0.4)
         #expect(abs(output.volume - 0.4 * playback.fadeGain) < 0.001)
         let lowered = output.volume
-        model.setSleepTimer(false)
-        // No jump: the volume climbs steadily and reaches the listener's level after the restore time.
-        #expect(output.volume <= lowered + 0.01)
-        var heard = [output.volume]
+        let before = output.volumes.count
         let started = ContinuousClock.now
-        while output.volume < 0.4, ContinuousClock.now < started + .seconds(5) {
-            try await Task.sleep(for: .milliseconds(20)); heard.append(output.volume)
-        }
+        model.setSleepTimer(false)
+        // No jump: the volume climbs in even steps and reaches the listener's level after the restore time.
+        #expect(output.volume <= lowered + 0.01)
+        try await sleepWait { playback.fadeGain == 1 }
         let took = started.duration(to: .now)
         #expect(output.volume == 0.4 && playback.fadeGain == 1 && playback.volume == 0.4)
+        let heard = [lowered] + output.volumes[before...]
         #expect(zip(heard, heard.dropFirst()).allSatisfy { $1 >= $0 - 0.0001 })
         #expect(heard.filter { $0 > lowered + 0.01 && $0 < 0.39 }.count >= 3, "no steps between \(lowered) and 0.4: \(heard)")
+        #expect(largestRiseDB(heard) <= 15.0 / 6 + 0.01, "\(heard)")
         #expect(took >= .milliseconds(250), "restored in \(took)")
         output.onEvent?(.finished)
         #expect(model.currentIndex == 1 && playback.state == .playing)
@@ -114,17 +114,21 @@ import PlaybackCore
         let output = try #require(backend())
         output.currentTime = 8
         try await sleepWait { playback.fadeGain < 0.1 }
+        let lowered = playback.fadeGain
         model.setSleepTimer(false)
-        try await Task.sleep(for: .milliseconds(100))
-        let midway = playback.fadeGain
+        try await sleepWait { playback.fadeGain > lowered }
+        let midway = playback.fadeGain, midwayVolume = output.volume, before = output.volumes.count
         #expect(midway > 0.05 && midway < 0.6)
         // A new timer starts at full volume, so it waits rather than jumping up to it.
         model.setSleepTimer(true)
         model.setSleepTimerCount(2)
-        try await Task.sleep(for: .milliseconds(30))
-        #expect(playback.fadeGain < 0.9 && playback.fadeGain >= midway)
+        #expect(playback.fadeGain == midway)
         try await sleepWait { playback.fadeGain > 0.99 }
         #expect(model.sleepTimer?.count == 2)
+        // The restore went on in its own steps: no step jumped to the new timer's full volume.
+        let heard = [midwayVolume] + output.volumes[before...]
+        #expect(zip(heard, heard.dropFirst()).allSatisfy { $1 >= $0 - 0.0001 })
+        #expect(largestRiseDB(heard) <= 30.0 / 8 + 0.01, "\(heard)")
         // The timer is not ended by the restore: its fade takes over once the volume is back.
         output.currentTime = 10
         try await sleepWait { playback.fadeGain < 0.99 }
@@ -151,6 +155,11 @@ import PlaybackCore
                                       references: TestReferences(), preferences: preferences)
         #expect(other.sleepTimerCount == SleepTimer.defaultCount)
     }
+}
+
+/// The largest rise between consecutive volumes, in decibels.
+private func largestRiseDB(_ volumes: [Float]) -> Double {
+    zip(volumes, volumes.dropFirst()).map { 20 * log10(Double(max($1, 0.00001)) / Double(max($0, 0.00001))) }.max() ?? 0
 }
 
 @MainActor private func sleepWait(_ condition: () -> Bool, sourceLocation: SourceLocation = #_sourceLocation) async throws {

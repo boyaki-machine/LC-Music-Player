@@ -233,24 +233,32 @@ private actor HeldPreprocessor: AudioPreprocessing {
         let url = try audioFile(fixture.root, name: "a.wav", duration: 1)
         let worker = HeldPreprocessor(url, prefix: true)
         await worker.release()
+        let delay = Duration.milliseconds(500)
         let model = LibraryController(playback: PlaybackController(), store: MemoryStore(), references: TestReferences(),
             preprocessingEnabled: true, preferences: MemoryPreferences(), preprocessor: worker,
-            preparationNoticeDelay: .seconds(2))
+            preparationNoticeDelay: delay)
         defer { model.shutdown() }
         let list = try #require(model.document.currentPlaylistID)
         await model.importFiles([url], into: list)
         let entry = try #require(model.playlist(list)?.entries.first)
+        let started = ContinuousClock.now
         model.clickEntry(entry.id, in: list, clickCount: 1)
         #expect(model.isPreparing)
         var shown = false
-        let deadline = ContinuousClock.now + .seconds(5)
+        let deadline = started + .seconds(30)
         while model.isPreparing, ContinuousClock.now < deadline {
             shown = shown || model.showsPreparationNotice
             try await Task.sleep(for: .milliseconds(2))
         }
-        #expect(!model.isPreparing && !shown)
-        // The cancelled timer does not show it late either.
-        try await Task.sleep(for: .milliseconds(50))
+        let took = started.duration(to: .now)
+        #expect(!model.isPreparing)
+        // On a loaded machine the preparation itself may outlast the delay; the notice is then right.
+        if took < delay { #expect(!shown, "shown although the preparation took \(took)") }
+        // The cancelled timer does not show it late either, also after the delay has passed.
+        while ContinuousClock.now < started + delay + .milliseconds(200) {
+            #expect(!model.showsPreparationNotice)
+            try await Task.sleep(for: .milliseconds(10))
+        }
         #expect(!model.showsPreparationNotice)
     }
 

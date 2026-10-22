@@ -54,7 +54,9 @@ final class ScopeCounter: @unchecked Sendable {
     var duration: TimeInterval = 10
     var supportsSeeking = true
     var currentTime: TimeInterval = 0
-    var volume: Float = 0.25
+    var volume: Float = 0.25 { didSet { volumes.append(volume) } }
+    /// Every volume set, in order.
+    var volumes: [Float] = []
     var onEvent: (@MainActor (PlaybackEvent) -> Void)?
     var playCount = 0
     func play() throws { playCount += 1 }

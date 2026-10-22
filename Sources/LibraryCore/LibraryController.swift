@@ -440,19 +440,20 @@ import AudioProcessingCore
         if restoring, playback.fadeGain < 1 { restoreSleepFade() }
         else { sleepRestoreTask?.cancel(); sleepRestoreTask = nil; playback.setFadeGain(1) }
     }
-    /// Rises evenly in decibels from the current level to full volume over `sleepRestoreDuration`.
+    /// Rises evenly in decibels from the current level to full volume in 50ms steps over
+    /// `sleepRestoreDuration`. It counts steps, not elapsed time, so a busy main actor makes the
+    /// rise slower but never larger in one step.
     private func restoreSleepFade() {
         sleepRestoreTask?.cancel()
         let startDB = 20 * log10(Double(max(playback.fadeGain, 0.001)))
-        let duration = sleepRestoreDuration, step = Duration.milliseconds(50)
-        let started = ContinuousClock.now
+        let step = Duration.milliseconds(50)
+        let steps = max(1, Int((sleepRestoreDuration / step).rounded(.up)))
         sleepRestoreTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                let elapsed = started.duration(to: .now) / duration
-                guard let self else { return }
-                if elapsed >= 1 { self.playback.setFadeGain(1); self.sleepRestoreTask = nil; return }
-                self.playback.setFadeGain(Float(pow(10, startDB * (1 - elapsed) / 20)))
+            for done in 1...steps {
                 do { try await Task.sleep(for: step) } catch { return }
+                guard let self else { return }
+                if done == steps { self.playback.setFadeGain(1); self.sleepRestoreTask = nil; return }
+                self.playback.setFadeGain(Float(pow(10, startDB * (1 - Double(done) / Double(steps)) / 20)))
             }
         }
     }
