@@ -371,7 +371,7 @@ struct Fixture {
         #expect(model.document.tracks.count == 2 && model.document.playlists.last?.entries.count == 3)
         #expect(model.unavailable.count == 1)
         let out = f.root.appendingPathComponent("export.m3u8")
-        model.exportM3U8(try #require(model.document.playlists.last?.id), to: out)
+        await model.exportM3U8(try #require(model.document.playlists.last?.id), to: out)
         #expect(try M3U8.decode(Data(contentsOf: out), relativeTo: out).map(\.url) == [song, song, f.root.appendingPathComponent("missing.flac")])
     }
     @Test func corruptUnrecoverableStoreIsReadOnly() throws {

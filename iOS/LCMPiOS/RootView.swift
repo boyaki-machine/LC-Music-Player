@@ -142,8 +142,10 @@ struct RootView: View {
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let url = folder.appendingPathComponent(name)
-            model.library.exportM3U8(id, to: url)
-            if FileManager.default.fileExists(atPath: url.path) { exportFile = url; moverShown = true }
+            Task {
+                await model.library.exportM3U8(id, to: url)
+                if FileManager.default.fileExists(atPath: url.path) { exportFile = url; moverShown = true }
+            }
         } catch {}
     }
 }

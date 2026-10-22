@@ -573,39 +573,66 @@ import AudioProcessingCore
             if commit(next) { error = skipped; message = "\(ids.count)曲を登録しました。" }
         } catch { self.error = error.localizedDescription }
     }
+    /// Adds the items to `next` and returns their track IDs, reusing a track already in the library
+    /// for the same file. Locating the library's tracks, following symbolic links and creating the
+    /// new references touch the file system for every file, so they run on another thread.
     private func stage(_ items: [M3U8Item], in next: inout LibraryDocument, allowMissing: Bool, folderRoots: [URL] = []) async throws -> [UUID] {
-        var paths: [URL: UUID] = [:]
-        for i in next.tracks.indices {
-            if i % 32 == 0 { await Task.yield(); guard editsEnabled else { throw CancellationError() } }
-            let t = next.tracks[i]
-            if let resolved = try? references.resolve(t.reference) {
-                next.tracks[i].reference = resolved.reference; paths[resolved.url.standardizedFileURL.resolvingSymlinksInPath()] = t.id
-            } else { paths[t.reference.lastKnownURL.standardizedFileURL.resolvingSymlinksInPath()] = t.id }
+        let located = await references.located(next.tracks.map(\.reference))
+        guard editsEnabled else { throw CancellationError() }
+        let existing = zip(next.tracks, located).map { $1 ?? $0.reference }
+        let itemURLs = items.map(\.url)
+        let (existingPaths, itemPaths, roots) = await Task.detached(priority: .userInitiated) {
+            // Native strings of the paths are the keys: hashing a URL, or a string bridged from one,
+            // takes tens of microseconds, which a whole library would spend on the main actor.
+            func canonical(_ url: URL) -> String {
+                let resolved = url.standardizedFileURL.resolvingSymlinksInPath()
+                var key = resolved.isFileURL ? resolved.path : resolved.absoluteString
+                key.makeContiguousUTF8()
+                return key
+            }
+            return (existing.map { canonical($0.lastKnownURL) }, itemURLs.map(canonical), folderRoots.map { canonical($0) + "/" })
+        }.value
+        guard editsEnabled else { throw CancellationError() }
+        // Edits go to a local array: changing an element of an inout argument of an async function
+        // copies the whole array each time.
+        var tracks = next.tracks
+        defer { next.tracks = tracks }
+        var paths: [String: UUID] = [:]
+        for i in tracks.indices {
+            if let refreshed = located[i] { tracks[i].reference = refreshed }
+            paths[existingPaths[i]] = tracks[i].id
         }
+        // Each new file is referenced once, however often the items list it.
+        var pending: [String: Int] = [:], newURLs: [URL] = []
+        for (item, path) in zip(items, itemPaths) where SupportedAudio.accepts(item.url) && paths[path] == nil && pending[path] == nil {
+            pending[path] = newURLs.count; newURLs.append(item.url)
+        }
+        let made = await references.makeReferences(newURLs)
+        guard editsEnabled else { throw CancellationError() }
         var ids: [UUID] = [], failed = 0
-        var positions = Self.positions(next.tracks)
+        var positions = Self.positions(tracks)
         for (index, item) in items.enumerated() {
             try Task.checkCancellation()
-            guard editsEnabled else { throw CancellationError() }
             guard SupportedAudio.accepts(item.url) else { failed += 1; continue }
-            let path = item.url.standardizedFileURL.resolvingSymlinksInPath()
-            let fromFolder = folderRoots.contains { path.path.hasPrefix($0.standardizedFileURL.resolvingSymlinksInPath().path + "/") }
+            let path = itemPaths[index]
+            let fromFolder = roots.contains { path.hasPrefix($0) }
             if let id = paths[path] {
-                if fromFolder, let i = positions[id] { next.tracks[i].registration = .folder }
+                if fromFolder, let i = positions[id] { tracks[i].registration = .folder }
                 ids.append(id); continue
             }
             let reference: TrackReference
-            do { reference = try references.makeReference(item.url) }
-            catch {
+            if let created = pending[path].flatMap({ made[$0] }) { reference = created }
+            else {
                 if !allowMissing { failed += 1; continue }
                 reference = TrackReference(bookmark: nil, lastKnownURL: item.url)
             }
             let name = item.title?.isEmpty == false ? item.title! : item.url.deletingPathExtension().lastPathComponent
             let track = LibraryTrack(name: name, reference: reference, registration: fromFolder ? .folder : .file)
-            positions[track.id] = next.tracks.count
-            next.tracks.append(track); paths[path] = track.id; ids.append(track.id)
+            positions[track.id] = tracks.count
+            tracks.append(track); paths[path] = track.id; ids.append(track.id)
             if reference.bookmark == nil && reference.mediaItemID == nil { unavailable[track.id] = "ファイルが見つからないか、アクセスできません。" }
-            if index % 32 == 0 { await Task.yield() }
+            // Adding a track takes tens of microseconds; a large import lets other main-actor work in between.
+            if index % 32 == 31 { await Task.yield(); guard editsEnabled else { throw CancellationError() } }
         }
         if failed > 0 { self.error = "\(failed)件は形式またはアクセスを確認できず、登録していません。" }
         return ids
@@ -619,8 +646,7 @@ import AudioProcessingCore
         let scope = references.beginAccess(url)
         defer { withExtendedLifetime(scope) {} }
         do {
-            let data = try await Task.detached { try M3U8.read(url) }.value
-            let items = try M3U8.decode(data, relativeTo: url)
+            let items = try await Task.detached(priority: .userInitiated) { try M3U8.decode(try M3U8.read(url), relativeTo: url) }.value
             var next = document
             let ids = try await stage(items, in: &next, allowMissing: true)
             next.playlists.append(MusicPlaylist(name: url.deletingPathExtension().lastPathComponent, entries: ids.map { PlaylistEntry(trackID: $0) }))
@@ -628,18 +654,17 @@ import AudioProcessingCore
             if commit(next) { error = skipped; message = "M3U8から\(ids.count)曲のリストを読み込みました。" }
         } catch { self.error = error.localizedDescription }
     }
-    public func exportM3U8(_ playlistID: UUID, to url: URL) {
+    /// Writes the list with each track's current location, found and written on another thread.
+    public func exportM3U8(_ playlistID: UUID, to url: URL) async {
         guard url.isFileURL else { error = LibraryFailure.inaccessible.localizedDescription; return }
         guard let list = playlist(playlistID), canEdit else { return }
         let scope = references.beginAccess(url)
         defer { withExtendedLifetime(scope) {} }
         do {
-            let items = list.entries.compactMap { entry -> M3U8Item? in
-                guard let t = track(entry.trackID) else { return nil }
-                let resolved = try? references.resolve(t.reference)
-                return M3U8Item(url: resolved?.url ?? t.reference.lastKnownURL, title: t.name)
-            }
-            try M3U8.encode(items, relativeTo: url).write(to: url, options: .atomic)
+            let tracks = list.entries.compactMap { track($0.trackID) }
+            let located = await references.located(tracks.map(\.reference))
+            let items = zip(tracks, located).map { M3U8Item(url: $1?.lastKnownURL ?? $0.reference.lastKnownURL, title: $0.name) }
+            try await Task.detached(priority: .userInitiated) { try M3U8.encode(items, relativeTo: url).write(to: url, options: .atomic) }.value
             message = "M3U8を書き出しました。"; error = nil
         } catch { self.error = error.localizedDescription }
     }
@@ -665,7 +690,8 @@ extension LibraryController {
                 if pending.isEmpty { break }
                 var read: [UUID: TrackTags] = [:]
                 for track in pending {
-                    guard let resolved = try? self.references.resolve(track.reference) else { self.tagFailures.insert(track.id); continue }
+                    guard let resolved = try? await self.references.resolved(track.reference) else { self.tagFailures.insert(track.id); continue }
+                    if Task.isCancelled { return }
                     let tags = await tagReader.tags(for: resolved.url)
                     withExtendedLifetime(resolved.lease) {}
                     if Task.isCancelled { return }
@@ -861,7 +887,7 @@ extension LibraryController {
                 } else {
                     // A changed source cannot keep an obsolete lease while reopening it.
                     cached?.audio = nil; cached?.resolved = nil; cached?.levels = nil; cached?.peak = nil
-                    do { resolved = try self.references.resolve(track.reference) }
+                    do { resolved = try await self.references.resolved(track.reference) }
                     catch {
                         self.unavailable[track.id] = "ファイルが見つからないか、アクセスできません。"
                         throw error
@@ -960,12 +986,13 @@ extension LibraryController {
         nextPrepared = request
         let normalize = normalizesVolume, peakOnly = measuresMaximumVolume && !normalizesVolume
         let references = references, preprocessor = preprocessor
-        nextTask = Task {
+        // Speculation runs at utility, so the preprocessor keeps it behind a listener's request.
+        nextTask = Task(priority: .utility) {
             do {
                 await retiringBackground?.value
                 await retiringNext?.value
                 try cancellation.check()
-                let resolved = try references.resolve(track.reference)
+                let resolved = try await references.resolved(track.reference)
                 // Retain this one lease through preparation, measurement, and any role transfer.
                 request.resolved = resolved
                 let prepared = try await preprocessor.prepare(resolved.url, cancellation: cancellation,
@@ -1020,7 +1047,7 @@ extension LibraryController {
         cancelMeasurement(); measuredTrack = track.id; peakMeasurement = .pending
         let id = UUID(); measurementID = id
         let cancellation = PreparationCancellation(); measurementCancellation = cancellation
-        measurementTask = Task { [weak self, lease, preprocessor] in
+        measurementTask = Task(priority: .utility) { [weak self, lease, preprocessor] in
             defer { withExtendedLifetime(lease) {} }
             do {
                 let result = try await preprocessor.measure(url, cancellation: cancellation, ownerID: track.id)
