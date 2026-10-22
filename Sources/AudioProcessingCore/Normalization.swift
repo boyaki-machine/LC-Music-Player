@@ -19,8 +19,11 @@ public struct MeasurementProfile: Equatable, Sendable {
     public let sampleRate: Double
     public let channels: UInt32
     public let version = 1
+    /// The output rates the measurement follows. The K-weighting is designed for each rate and the
+    /// true peak interpolates to 192kHz or above, so every rate meets BS.1770.
+    public static let sampleRates: [Double] = [44100, 48000, 88200, 96000, 176400, 192000]
     public init(sampleRate: Double, channels: UInt32) throws {
-        guard [44100.0, 48000, 96000].contains(sampleRate),
+        guard Self.sampleRates.contains(sampleRate),
               (1...2).contains(channels) else { throw AudioProcessingFailure.unsupportedProfile }
         self.sampleRate = sampleRate; self.channels = channels
     }

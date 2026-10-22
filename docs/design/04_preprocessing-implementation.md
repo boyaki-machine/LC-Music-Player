@@ -82,7 +82,7 @@ LibraryCore（参照解決・再生順序・設定・取消）
 ### LUFS・true peakの全曲測定
 
 - 全曲のIntegrated LUFS・sample peak・true peakを、同じ背景走査から求める（`measureLevels`）。ファイル参照、デコーダ、一時的なblockエネルギー列と取消はPreprocessingCoreが所有し、数値DSPと補正量の算出はAudioProcessingCoreが担当する。
-- `TrackAudioMetrics`は、fingerprintに加えて、出力レート・チャンネル変換と測定版を含むprofileを持つ。`TrackPeak`はsample peak専用であり、LUFS/true peakの代用にはしない。補正用には`measureLevels`／`currentTrackMetrics`を使う。
+- `TrackAudioMetrics`は、fingerprintに加えて、出力レート・チャンネル変換と測定版を含むprofileを持つ。出力レートは出力機器のレートで、44.1/48/88.2/96/176.4/192kHzを受け付ける（[音量自動調整](06_volume-normalization-implementation.md)）。レートが高いほど全曲測定の計算量が増える（192kHzで48kHzの約3倍）。`TrackPeak`はsample peak専用であり、LUFS/true peakの代用にはしない。補正用には`measureLevels`／`currentTrackMetrics`を使う。
 - 測定と自動調整ONの再生は`ProfileConversion`を共有し、再生側は`ProfileDecoder`で変換する。
 - 自動調整ONでは測定の完了を再生開始の条件とし、OFFでは測定を待たずに再生する。
 - 同じsource/profileの要求は合流する。条件が一致した永続結果があれば全曲の走査を省く。

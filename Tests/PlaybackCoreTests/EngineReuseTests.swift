@@ -57,6 +57,32 @@ import AudioProcessingCore
         }
     }
 
+    /// Outputs of external converters: a plan measured at the device's rate sets the level of what the graph renders.
+    @Test(arguments: [88200.0, 176400, 192000])
+    func aPlanAtTheDevicesRateSetsTheRenderedLevel(rate: Double) throws {
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+        let metrics = AudioLevelMetrics(loudness: .measured(-17), samplePeak: 0.5, truePeak: 0.5, frameCount: UInt64(rate), blockCount: 10)
+        let plan = try NormalizationPlan(metrics: metrics, profile: MeasurementProfile(sampleRate: rate, channels: 2))
+        let frames: AVAudioFrameCount = 16384
+        let input = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)); input.frameLength = frames
+        for channel in 0..<2 { for n in 0..<Int(frames) { input.floatChannelData![channel][n] = 0.5 } }
+        let engine = AVAudioEngine(), player = AVAudioPlayerNode()
+        let graph = PlaybackGraph(engine: engine, player: player, sourceFormat: format, observationFormat: format, plan: plan)
+        graph.setVolume(1)
+        try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 512)
+        player.scheduleBuffer(input)
+        try engine.start(); defer { engine.stop() }
+        player.play()
+        let chunk = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 512))
+        var last: Float = 0
+        for _ in 0..<Int(frames) / 512 {
+            #expect(try engine.renderOffline(512, to: chunk) == .success)
+            last = chunk.floatChannelData![0][Int(chunk.frameLength) - 1]
+        }
+        #expect(abs(last - 0.5 * Float(pow(10, plan.gainDB / 20))) < 1e-4, "\(rate)Hz: \(last)")
+        #expect(plan.gainDB == -6)
+    }
+
     /// A graph taken over by the next track gets that track's level gain, and a player for its format.
     @Test func aTakenGraphGetsTheNextTracksGainAndFormat() throws {
         let stereo = try #require(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2))

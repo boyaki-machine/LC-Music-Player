@@ -25,7 +25,7 @@ private func tone(_ seconds: Double, rate: Double = 48000, amplitude: Double, ch
 }
 
 @Suite(.serialized) struct LevelTests {
-    @Test(arguments: [44100.0, 48000, 96000])
+    @Test(arguments: MeasurementProfile.sampleRates)
     func referenceToneAndChannelEnergy(rate: Double) throws {
         let stereo = try tone(2, rate: rate, amplitude: pow(10,-23.0/20))
         #expect(abs(try #require(stereo.loudness.value) + 23) < 0.1)
@@ -33,6 +33,36 @@ private func tone(_ seconds: Double, rate: Double = 48000, amplitude: Double, ch
         #expect(abs(try #require(mono.loudness.value) + 26.0103) < 0.1)
         let inverted = try tone(2, rate: rate, amplitude: pow(10,-23.0/20), invert: true)
         #expect(abs(try #require(inverted.loudness.value) - #require(stereo.loudness.value)) < 1e-6)
+    }
+    @Test func profilesFollowTheListedOutputRates() throws {
+        #expect(MeasurementProfile.sampleRates == [44100, 48000, 88200, 96000, 176400, 192000])
+        for rate in MeasurementProfile.sampleRates { #expect(try MeasurementProfile(sampleRate: rate, channels: 2).sampleRate == rate) }
+        for rate in [32000.0, 22050, 44100.5, 352800, 384000, 0, .nan] {
+            #expect(throws: AudioProcessingFailure.unsupportedProfile) { try MeasurementProfile(sampleRate: rate, channels: 2) }
+        }
+    }
+    /// BS.1770 gives the K-weighting as coefficients at 48kHz; every rate keeps that response.
+    /// The high-pass's unnormalized numerator, as in the standard, passes 48kHz +0.043dB and 192kHz
+    /// +0.011dB, so a rate shifts all frequencies alike by up to 0.032dB (inside EBU Tech 3341's 0.1LU).
+    @Test(arguments: MeasurementProfile.sampleRates)
+    func kWeightingFollowsTheReferenceRate(rate: Double) throws {
+        let frequencies = [20.0, 100, 1000, 5000, 10000, 20000]
+        let reference = try frequencies.map { try #require(tone(3, amplitude: 0.1, channels: 1, frequency: $0).loudness.value) }
+        let measured = try frequencies.map { try #require(tone(3, rate: rate, amplitude: 0.1, channels: 1, frequency: $0).loudness.value) }
+        let shift = measured[2] - reference[2]
+        #expect(abs(shift) < 0.04)
+        for (m, r) in zip(measured, reference) { #expect(abs(m - r - shift) < 0.02, "\(rate)Hz: \(m) against \(r)") }
+    }
+    /// Inter-sample peaks within EBU Tech 3341's +0.2/-0.4dB, at a quarter of the rate and near Nyquist.
+    @Test(arguments: MeasurementProfile.sampleRates)
+    func truePeakAtEveryRate(rate: Double) throws {
+        for (frequency, phase) in [(rate / 4, Double.pi / 4), (rate * 0.45, 0.5)] {
+            let a = try tone(1, rate: rate, amplitude: 0.5, frequency: frequency, phase: phase, chunk: 4096)
+            let b = try tone(1, rate: rate, amplitude: 0.5, frequency: frequency, phase: phase, chunk: 157)
+            #expect((-0.4...0.2).contains(a.truePeakDBTP + 6.0206), "\(rate)Hz, \(frequency)Hz: \(a.truePeakDBTP)")
+            #expect(a == b)
+            if frequency == rate / 4 { #expect(a.truePeak > a.samplePeak * 1.3) }
+        }
     }
     @Test func truePeakFindsInterSamplePeakAndChunkingIsInvariant() throws {
         let a = try tone(1, amplitude: 0.5, frequency: 12000, phase: .pi/4, chunk: 4096)
