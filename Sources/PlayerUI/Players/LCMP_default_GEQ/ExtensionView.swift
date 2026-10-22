@@ -427,16 +427,21 @@ public struct ExtensionView: View {
         } else {
             let shown = sourceCatalog.groups(library.document.tracks, matching: sourceQuery, hiding: [])
             let filtering = !SourceCatalog.terms(sourceQuery).isEmpty
-            HStack(spacing: 4) {
+            // Laid out like the playlist's header: the buttons as far apart as its lit pictograms,
+            // against mistaken taps, and the count at the right end.
+            HStack(spacing: 0) {
                 Text("ライブラリ").fontWeight(.medium); Spacer()
-                Text(filtering ? "\(shown.reduce(0) { $0 + $1.tracks.count }) / \(library.document.tracks.count)曲" : "\(library.document.tracks.count)曲")
-                    .foregroundStyle(.secondary).padding(.trailing, 6)
-                smallButton(searchingSources ? "magnifyingglass.circle.fill" : "magnifyingglass", searchingSources ? "検索を閉じる" : "音源を検索") {
-                    if searchingSources { closeSourceSearch() } else { searchingSources = true; searchFocused = true }
+                HStack(spacing: 28) {
+                    LEDToggle(symbol: "magnifyingglass", label: searchingSources ? "検索を閉じる" : "音源を検索", isOn: searchingSources) {
+                        if searchingSources { closeSourceSearch() } else { searchingSources = true; searchFocused = true }
+                    }
+                    LEDToggle(symbol: "checkmark.circle", label: selectingSources ? "選択を終了" : "曲を選択して除外", isOn: selectingSources) {
+                        selectingSources.toggle(); selectedSources = []
+                    }.disabled(!library.canEdit || library.document.tracks.isEmpty)
                 }
-                smallButton(selectingSources ? "checkmark.circle.fill" : "checkmark.circle", selectingSources ? "選択を終了" : "曲を選択して除外") {
-                    selectingSources.toggle(); selectedSources = []
-                }.disabled(!library.canEdit || library.document.tracks.isEmpty)
+                .padding(.trailing, 37)
+                Text(filtering ? "\(shown.reduce(0) { $0 + $1.tracks.count }) / \(library.document.tracks.count)曲" : "\(library.document.tracks.count)曲")
+                    .foregroundStyle(.secondary)
             }
             if searchingSources {
                 HStack(spacing: 6) {
@@ -476,6 +481,10 @@ public struct ExtensionView: View {
                                  select: { id in sourceID = id; originID = nil }, removeFolder: { confirmFolder = $0 },
                                  removeTrack: { confirmSource = $0.id })
             }
+            // The keyboard leaves room for only a few rows: scrolling or touching the list puts it
+            // away, keeping the words and the matches.
+            .scrollDismissesKeyboard(.immediately)
+            .simultaneousGesture(TapGesture().onEnded { searchFocused = false })
         }
     }
 }

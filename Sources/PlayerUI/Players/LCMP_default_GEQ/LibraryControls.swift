@@ -221,6 +221,24 @@ struct HideAddedToggle: View {
     }
 }
 
+/// A pictogram button lit like the shuffle LED while its mode is on (the source list's search and
+/// selection), near-dark while off.
+struct LEDToggle: View {
+    let symbol: String
+    let label: String
+    let isOn: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.ui(13, weight: .medium))
+                .foregroundStyle(isOn ? ShuffleToggle.litColor : .white.opacity(0.3))
+                .shadow(color: isOn ? ShuffleToggle.litColor.opacity(0.6) : .clear, radius: 4)
+                .frame(width: 32, height: 28).contentShape(Rectangle()).padding(.vertical, -6)
+        }.buttonStyle(.plain).help(label).accessibilityLabel(label)
+            .accessibilityAddTraits(isOn ? .isSelected : [])
+    }
+}
+
 struct ShuffleToggle: View {
     static let litColor = Color(red: 0.62, green: 0.91, blue: 0.74)
     let isOn: Bool

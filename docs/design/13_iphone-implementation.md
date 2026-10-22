@@ -175,7 +175,7 @@
 | 常時表示の判定（30%・充電中・残量不明）と、自動ロックの設定が判定の変化のときだけ行われること、表示タブの記号の緑・琥珀の点灯 | `AlwaysOnDisplayTests`、`VisualizationDesignCardTests`の`alwaysOnIconSitsAboveTheCardsAndLightsGreenOrAmber` |
 | ☰のリンクで拡張画面が開く | `make ios-uitest`（`ControlSurfaceTests`） |
 | 音源タブの登録ボタン（ファイル・フォルダ・ミュージック）が1行に同じ高さで並び、名前が折り返さない | `make ios-uitest`（`SourceButtonsTests`。幅の狭い機種（iPhone SE、375pt）では、シミュレータの画面で目視する） |
-| 音源タブの検索で一致した曲のまとまりが開き、曲のゴミ箱で1曲を、選択モードでまとまりを1回の確認で除外できる。曲のゴミ箱が画面の右端（スクロールのインジケータ）から離れている | `make ios-uitest`（`SourceSearchTouchTests`。`TEST_RUNNER_LCMP_UI_SNAPSHOTS=<フォルダ>`を付けると、検索中と選択中の画面を書き出す） |
+| 音源タブの検索で一致した曲のまとまりが開き、曲のゴミ箱で1曲を、選択モードでまとまりを1回の確認で除外できる。曲のゴミ箱が画面の右端（スクロールのインジケータ）から離れている。一覧のスクロールやタップでキーボードが閉じ、検索語は残る（XCUITestのスワイプはタップとしても届くので、スクロールで閉じる指定だけを外した変異は検出できない。指でのスクロールは実機で確かめる） | `make ios-uitest`（`SourceSearchTouchTests`。`TEST_RUNNER_LCMP_UI_SNAPSHOTS=<フォルダ>`を付けると、検索中と選択中の画面を書き出す） |
 | 経路の変更で出力遅延を読み直し、報告値をそのまま（足さずに）使う。不正な値を使わない。差し替えた遅延が以降の解析結果に届く | `OutputLatencyTrackerTests`、`AnalysisTests`の`updatedOutputLatencyReachesLaterFramesOnly`（オフラインのレンダリング） |
 | 実機での可視化と音の同期 | DEBUG版をスピーカーとBluetoothのイヤホンで再生し、再生中に付け外しする。`lcmp-latency.jsonl`で、使っている遅延が経路ごとの報告値に変わることを確かめ、表示と音のずれが気にならないことを目視する |
 | ウィジェットの見た目 | DEBUGの起動引数`-LCMPControlSurfaces YES`で各状態の見本を並べて撮影し、UI・UX設計と見比べる |
