@@ -78,7 +78,7 @@ private final class RenderProbe: @unchecked Sendable {
         let root = URL(fileURLWithPath: try #require(env["LCMP_STARTUP_INPUT"]))
         let label = env["LCMP_CACHE_TIMING_LABEL"] ?? "debug"
         let config = MeasurementCacheConfiguration(url: root.appendingPathComponent("timing-cache-\(label)/measurements.sqlite"),
-            program: .init(applicationVersion: "timing", build: "1", executableDigest: label, environment: "timing"))
+            platform: .init(system: "test"))
         let processor = AudioPreprocessor(cache: config, collectMeasurementTimings: true)
         var rows: [[String: Any]] = []
         for name in ["short.wav", "short.flac", "large.wav", "large.flac"] {

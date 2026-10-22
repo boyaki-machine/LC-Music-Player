@@ -32,7 +32,7 @@ private actor AuditedPreprocessor: AudioPreprocessing {
     @Test func playlistRemovalRetainsCacheLibraryExclusionAuditsAfterSuccessfulSave() async throws {
         let f = try Fixture(); defer { f.cleanup() }
         let config = MeasurementCacheConfiguration(url: f.root.appendingPathComponent("cache/measurements.sqlite"),
-            program: .init(applicationVersion: "test", build: "1", executableDigest: "test", environment: "test"))
+            platform: .init(system: "test"))
         let processor = AudioPreprocessor(cache: config), store = MemoryStore(), refs = TestReferences()
         let audited = AuditedPreprocessor(processor)
         let playback = PlaybackController(makeBackend: { _ in TestBackend() })
@@ -68,7 +68,7 @@ private actor AuditedPreprocessor: AudioPreprocessing {
     func currentNextStopOtherTrackAndRestartUseCompletedCache() async throws {
         let f = try Fixture(); defer { f.cleanup() }
         let config = MeasurementCacheConfiguration(url: f.root.appendingPathComponent("cache/measurements.sqlite"),
-            program: .init(applicationVersion: "test", build: "1", executableDigest: "test", environment: "test"))
+            platform: .init(system: "test"))
         let defaults = MemoryPreferences()
         let store = MemoryStore(), refs = TestReferences(), playback = PlaybackController()
         playback.setVolume(0)

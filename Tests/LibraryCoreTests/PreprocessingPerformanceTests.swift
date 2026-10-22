@@ -137,7 +137,7 @@ import PreprocessingCore
         let defaults = MemoryPreferences()
         defaults.set(true, forKey: "normalizeVolume"); defaults.set(true, forKey: "measureMaximumVolume")
         let processor = AudioPreprocessor(cache: .init(url: root.appendingPathComponent("cache-\(UUID())/measurements.sqlite"),
-            program: .init(applicationVersion: "soak", build: "1", executableDigest: "playlist-soak", environment: "test")))
+            platform: .init(system: "test")))
         let refs = TestReferences(), playback = PlaybackController(); playback.setVolume(0)
         playback.configureAnalysis(try .init(bandCount: 16, framesPerSecond: 30))
         let model = LibraryController(playback: playback, store: MemoryStore(), references: refs, preprocessingEnabled: true,
