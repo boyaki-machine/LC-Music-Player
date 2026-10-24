@@ -48,6 +48,16 @@
 
 ビルドは、リポジトリにある`assets/AppIcon.icns`をアプリの`Contents/Resources/AppIcon.icns`へコピーし、Info.plistの`CFBundleIconFile`に設定します。ビルドのたびには描き直しません。
 
+### パッケージのリソース
+
+可視化「教育番組」の絵は、`PlayerUI`ターゲットのリソースとしてSwiftPMが`LCMP_PlayerUI.bundle`にまとめます。ビルドはこのバンドルを`Contents/Resources/`へコピーして署名し、その後でアプリ全体に署名します（アプリの直下に置くと署名の検証に失敗します）。iPhone版では、Xcodeがアプリの直下へ入れます。
+
+パペットの部品は、原画`assets/puppet-show/puppets.png`から次のコマンドで作り直します。結果はリポジトリに置き、ビルドのたびには作りません。
+
+```sh
+uv run --with pillow --with numpy python -I scripts/make-puppet-parts.py
+```
+
 アイコンの図形を変えたときは、`scripts/render-app-icon.swift`を直してから、次のコマンドで描き直します。各サイズのPNGを図形から描き、`iconutil`でicnsにまとめます。
 
 ```sh

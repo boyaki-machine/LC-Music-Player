@@ -552,12 +552,14 @@ extension LibraryNativeViewTests {
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
         window.contentView = host; window.setFrameOrigin(CGPoint(x: -10000, y: -10000)); window.orderFront(nil)
         defer { window.orderOut(nil); window.contentView = nil }
+        var lastRep: NSBitmapImageRep?
         /// Average height (from the top) of the green outline of the chosen card.
         func accentCenter(_ name: String) async throws -> Double {
             host.layoutSubtreeIfNeeded(); host.display()
             try await Task.sleep(for: .milliseconds(150))
             let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: rep)
+            lastRep = rep
             if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
                 try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
                 try #require(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: directory).appendingPathComponent("design-cards-\(name).png"))
@@ -576,6 +578,19 @@ extension LibraryNativeViewTests {
         presentation.setVisualizationDesign(.ermineChorus)
         let ermine = try await accentCenter("ermine")
         #expect(ermine > led + 0.1, "led \(led), ermine \(ermine)")
+        presentation.setVisualizationDesign(.puppetShow)
+        let puppet = try await accentCenter("puppet")
+        #expect(puppet > ermine + 0.1, "ermine \(ermine), puppet \(puppet)")
+        // The third card shows the boy with glasses: skin-colored pixels in its picture.
+        let rep = try #require(lastRep)
+        var skin = 0
+        for y in stride(from: rep.pixelsHigh * 2 / 3, to: rep.pixelsHigh * 6 / 7, by: 2) {
+            for x in stride(from: 0, to: rep.pixelsWide / 4, by: 2) {
+                guard let c = rep.colorAt(x: x, y: y) else { continue }
+                if c.redComponent > 0.6 && c.greenComponent > 0.4 && c.blueComponent < c.redComponent - 0.15 { skin += 1 }
+            }
+        }
+        #expect(skin > 50, "skin pixels in the puppet card: \(skin)")
     }
 
     @Test func alwaysOnIconSitsAboveTheCardsAndLightsGreenOrAmber() async throws {

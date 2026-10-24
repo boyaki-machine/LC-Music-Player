@@ -28,6 +28,7 @@ public final class PlayerPresentation {
     public var selectingFile = false
     @ObservationIgnored public let visualizationDriver = VisualizationDriver()
     @ObservationIgnored public let ermineChorusDriver = ErmineChorusDriver()
+    @ObservationIgnored public let puppetShowDriver = PuppetShowDriver()
     public private(set) var visualizationDesign: VisualizationDesign
     @ObservationIgnored private let preferences: any PreferenceStoring
     /// Hides the songs already in the playlist on the add screen. Off by default; the choice is kept.
@@ -68,6 +69,7 @@ public final class PlayerPresentation {
         switch design {
         case .fluorescentLED: visualizationDriver
         case .ermineChorus: ermineChorusDriver
+        case .puppetShow: puppetShowDriver
         }
     }
     /// Changes only the drawing. The previous design's clock stops at once; the view starts the new one.

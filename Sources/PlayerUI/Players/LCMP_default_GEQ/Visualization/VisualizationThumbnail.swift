@@ -4,11 +4,13 @@ import SwiftUI
 struct VisualizationThumbnail: View {
     let design: VisualizationDesign
     var body: some View {
-        Canvas { context, size in
+        let puppet = design == .puppetShow ? PuppetShowThumbnail.image() : nil
+        return Canvas { context, size in
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(LCMPDefaultGEQRenderer.background))
             switch design {
             case .fluorescentLED: Self.drawLED(context, size: size)
             case .ermineChorus: ErmineChorusRenderer.drawThumbnail(context, size: size)
+            case .puppetShow: PuppetShowThumbnail.draw(context, size: size, image: puppet)
             }
         }
         .accessibilityHidden(true)

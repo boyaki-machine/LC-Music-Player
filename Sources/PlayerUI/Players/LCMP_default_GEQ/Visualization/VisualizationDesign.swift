@@ -6,6 +6,7 @@ import VisualizationKit
 public enum VisualizationDesign: String, CaseIterable, Sendable {
     case fluorescentLED
     case ermineChorus
+    case puppetShow
 
     static let preferenceKey = "visualizationDesign"
 
@@ -13,6 +14,7 @@ public enum VisualizationDesign: String, CaseIterable, Sendable {
         switch self {
         case .fluorescentLED: "Last Century イコライザー"
         case .ermineChorus: "MICRIGAIKE コジョーズ"
+        case .puppetShow: "教育番組"
         }
     }
 
@@ -22,10 +24,11 @@ public enum VisualizationDesign: String, CaseIterable, Sendable {
         case .fluorescentLED: "1990年代の懐かしさをお届け"
         // Break after the comma rather than in the middle of a word.
         case .ermineChorus: "山上の素敵な秘湯では、\n毎晩オコジョ達がステージを開くらしい..."
+        case .puppetShow: "思ってたのと違うけど、これはこれで味がある。絵心が欲しい..."
         }
     }
 
-    /// Both designs read the same 16 bands, so switching never re-subscribes the audio analysis.
+    /// All designs read the same 16 bands, so switching never re-subscribes the audio analysis.
     public static var configuration: AnalysisConfiguration { LCMPDefaultGEQ.configuration }
 }
 

@@ -4,7 +4,7 @@
 
 ## 1. 概要
 
-Player UIは再生操作と画面構成を扱い、可視化は解析結果から表示を作る。現在の実装名・組込IDは`LCMP_default_GEQ`で、コンパクトな操作画面と、拡張画面で切り替える2つの可視化デザイン（16列の蛍光管LED、オコジョ合唱団）を組み合わせる。本書は、ソースの配置、他のモジュールとのI/F、可視化の開発・追加の手順をまとめる。
+Player UIは再生操作と画面構成を扱い、可視化は解析結果から表示を作る。現在の実装名・組込IDは`LCMP_default_GEQ`で、コンパクトな操作画面と、拡張画面で切り替える3つの可視化デザイン（16列の蛍光管LED、オコジョ合唱団、教育番組）を組み合わせる。本書は、ソースの配置、他のモジュールとのI/F、可視化の開発・追加の手順をまとめる。
 
 製品の仕様は[基本設計](00_basic-design.md)と[UI・UX設計](01_ui-ux-design.md)、具体的な画面の動作は[コンパクト画面](09_compact-ui-implementation.md)、提示待ち・残光・描画の詳細は[可視化の実装設計](08_visualization-implementation.md)に記載する。
 
@@ -44,7 +44,9 @@ Sources/
 │       │       ├── LCMPDefaultGEQScale.swift      dBFSから表示感度への変換
 │       │       ├── SpectrumPresentation.swift     提示待ち・16×24セル・残光
 │       │       └── VisualizationDriver.swift      蛍光管LEDのMainActorの受信・時計
-│       └── Micrigaike_Kojoes/         MICRIGAIKE コジョーズ（オコジョ合唱団）の一式：原画・キャラクタ・演出・指揮役・描画・サムネイル・driver・View
+│       ├── Micrigaike_Kojoes/         MICRIGAIKE コジョーズ（オコジョ合唱団）の一式：原画・キャラクタ・演出・指揮役・描画・サムネイル・driver・View
+│       └── Kyouiku_Bangumi/           教育番組（パペット）の一式：キャラクタ・演出・指揮役・背景・組み立て・Metalの描画・driver・View
+│           └── Art/                   同梱の絵（パッケージのリソース）：背景の絵、パペットの部品と数値
 ├── VisualizationKit/
 │   └── Shared/
 │       ├── SpectrumSample.swift       UIに依存しない表示用レベル・時刻の値型
@@ -74,19 +76,24 @@ Tests/PlayerUITests/
     │   └── Visualization/
     │       ├── PresentationTests.swift
     │       └── VisualizationPerformanceTests.swift
-    └── Micrigaike_Kojoes/
-        └── ErmineChorusTests.swift
+    ├── Micrigaike_Kojoes/
+    │   └── ErmineChorusTests.swift
+    └── Kyouiku_Bangumi/
+        ├── PuppetShowTests.swift
+        ├── PuppetShowRenderingTests.swift
+        └── PuppetShowPerformanceTests.swift
 ```
 
 配置の規約は次のとおりとする。
 
 - **1つのPlayer UIの実装は、可視化も含めて`PlayerUI/Players/<実装ID>/`の1つのフォルダ配下へまとめる。** 内部の整理には`Visualization/`等のサブフォルダを使う。解析設定、表示感度、driver、残光、描画、画面の状態、入力、配置もこの実装の一部である。
-- 独自の世界観を持つ可視化デザイン（MICRIGAIKE コジョーズ等）は、そのデザインを構成するファイル一式を`PlayerUI/Players/<デザインID>/`へまとめる。デザインの種類・切り替え・サムネイルの枠・再生との接続など、複数のデザインで使う部品は、組み込む先のPlayer UIの`Visualization/`に置いたままでよい。
+- 独自の世界観を持つ可視化デザイン（MICRIGAIKE コジョーズ、教育番組等）は、そのデザインを構成するファイル一式を`PlayerUI/Players/<デザインID>/`へまとめる。デザインの種類・切り替え・サムネイルの枠・再生との接続など、複数のデザインで使う部品は、組み込む先のPlayer UIの`Visualization/`に置いたままでよい。
 - `VisualizationKit/Shared/`にはUIに依存しない共通部品だけを置く。個別のPlayer UIの描画を登録したり、個別のView・スケール・driverを参照したりしない。Player UIから共通部品を利用する一方向の依存にする。
 - 音声エンジン・FFT・ライブラリの保存は、それぞれのCoreモジュールへ委ねる。
 - フォルダはSwiftのモジュールや名前空間ではない。Player UIごとのソースは、現在の`PlayerUI`ターゲット内でコンパイルされる。新しい型には実装固有の接頭辞を付け、別の実装で同名の`PlayerPresentation`等を重複して定義しない。
 - AppKitを使う部品は`#if os(macOS)`で囲み、同じ型名と引数のiOS版を`TouchControls.swift`に置く。共用のViewはOSを意識せずに部品を使う。メイン画面の大きさは`playerFrame`の環境値で決まり、macOSのウィンドウ（360×210pt）の寸法を変えない。
 - 通常のSwiftファイルはサブフォルダにあってもSwiftPMが検出するため、移動や追加だけなら`Package.swift`の変更は不要である。ターゲットや画像等のresourcesを追加する場合は、別途manifestを変更する。
+- 画像等の素材は、デザインのフォルダ内の`Art/`等にまとめ、`PlayerUI`ターゲットのresourcesに`.copy`で加える。素材はリソースのバンドル（`LCMP_PlayerUI.bundle`）に入る。macOSのアプリでは`scripts/build-app.py`がContents/Resourcesへ入れ（アプリの直下に置くと署名が壊れる）、iPhoneのアプリではXcodeが直下へ入れる。読み込みは`Bundle.module`ではなく、両方の場所とテストの実行場所を探す`PuppetShowArt.directory`の方法に合わせる。新しいターゲットにresourcesを持たせる場合は、`build-app.py`の`RESOURCE_BUNDLES`にも加える。
 
 ## 3. モジュール間のI/F
 
@@ -122,7 +129,7 @@ flowchart LR
 | 再生 → 画面 | `analysisFrame`、`analysisResetID`、`state` | 最新のフレームを渡し、状態・取消IDの変更を可視化へ反映する |
 | 画面 → デザインの選択 | `PlayerPresentation.setVisualizationDesign(_:)` | 表示タブから呼ぶ。旧デザインのdriverを止め、選択を`UserDefaults`へ保存する |
 | 画面 → 可視化の状態 | `PlayerVisualizationDriver`の`synchronize(activity:visible:)`、`receive(_:)`、`reset()` | MainActorで、表示中のデザインのdriverへ、再生状態・表示可否・解析結果・シーク等のリセットを渡す |
-| 状態 → 描画 | `LCMPDefaultGEQView(driver:)`、`ErmineChorusView(driver:)` | driverが公開する状態を描く。描画内から再生や解析を開始しない |
+| 状態 → 描画 | `LCMPDefaultGEQView(driver:)`、`ErmineChorusView(driver:)`、`PuppetShowView(driver:)` | driverが公開する状態を描く。描画内から再生や解析を開始しない |
 
 - 曲の選択は背景で非同期に確定する。前処理のバッファや全曲測定をUIへ持ち込まない。
 - sample peak専用の表示には検証済みの`currentTrackPeak`を使い、自動調整用の結果として流用しない。LUFS/true peakには`currentTrackMetrics`を使う。
@@ -236,7 +243,7 @@ PlayerUI/Players/
 
 ### 1つのPlayer UIに可視化デザインを追加する場合
 
-操作部を共通にしたまま、アニメーション領域の表示だけを切り替える場合の手順である。オコジョ合唱団はこの手順で追加した。
+操作部を共通にしたまま、アニメーション領域の表示だけを切り替える場合の手順である。オコジョ合唱団と教育番組はこの手順で追加した。
 
 1. `PlayerUI/Players/<デザインID>/`を作り、描画・状態・driver・View・サムネイルの描画を置く。型名にはデザイン固有の接頭辞を付ける。
 2. driverは`PlayerVisualizationDriver`（`synchronize(activity:visible:)`、`receive(_:)`、`reset()`）に準拠させ、「寿命の管理と画面への組み込み」の表と同じく、表示中かつ再生中だけ時計を動かす。
