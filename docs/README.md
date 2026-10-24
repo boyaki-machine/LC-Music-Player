@@ -28,6 +28,7 @@
 | [11 依存ライブラリと同梱構成](design/11_third-party-dependencies.md) | 依存を持たない構成、署名と権限、ライセンス表示、脆弱性の確認 |
 | [12 オコジョ合唱団の実装設計](design/12_ermine-chorus-implementation.md) | 原画と中割り、キャラクタごとの演出、音域と感度、セルの描画、時計と寿命 |
 | [13 iPhone版の実装設計](design/13_iphone-implementation.md) | 共用部分のOS分岐、画面の枠と配置、音声セッションとバックグラウンド再生、ウィジェットとURLスキーム、ファイルの選択、ビルド |
+| [14 教育番組（パペット）の実装設計](design/14_puppet-show-implementation.md) | 背景の時刻と層、パペットの組み立てと演出、素材の切り出し、Metalでの描画、時計と寿命 |
 
 ## 設計書の書き方
 

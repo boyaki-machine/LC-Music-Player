@@ -19,6 +19,7 @@ struct PlaybackVisualization: View {
             switch presentation.visualizationDesign {
             case .fluorescentLED: LCMPDefaultGEQView(driver: presentation.visualizationDriver)
             case .ermineChorus: ErmineChorusView(driver: presentation.ermineChorusDriver)
+            case .puppetShow: PuppetShowView(driver: presentation.puppetShowDriver)
             }
         }
         .onAppear { presentation.visualizationHostAppeared(); synchronize(); receive() }

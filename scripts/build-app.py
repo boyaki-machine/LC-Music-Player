@@ -13,6 +13,8 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parent.parent
+# Resource bundles SwiftPM builds for the app's targets (named <package>_<target>.bundle).
+RESOURCE_BUNDLES = ["LCMP_PlayerUI.bundle"]
 
 
 def main():
@@ -66,6 +68,12 @@ def main():
     bundle(ROOT, contents / "Resources/LCMPLicense")
     # Rendered by scripts/render-app-icon.swift; committed so builds do not redraw it.
     shutil.copy2(ROOT / "assets/AppIcon.icns", contents / "Resources/AppIcon.icns")
+    # The package's resources (the puppet show's art). In Contents/Resources, not the app's root, where an
+    # extra bundle breaks the app's signature; the code finds it there. Signed before the app that seals it.
+    for name in RESOURCE_BUNDLES:
+        target = contents / "Resources" / name
+        shutil.copytree(products / name, target)
+        subprocess.run(["codesign", "--force", "--sign", "-", str(target)], check=True)
     # One dotted version; the build number is its last part, not a separate value.
     version = resolve_version(ROOT)
     with (contents / "Info.plist").open("wb") as file:
