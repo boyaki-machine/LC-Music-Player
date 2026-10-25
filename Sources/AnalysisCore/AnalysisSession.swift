@@ -210,15 +210,19 @@ public final class AnalysisSession: @unchecked Sendable {
 }
 
 /// One stable context per observation AU. The owner stops its engine before releasing this source.
+/// Releasing it removes its render notification from the AU, so it keeps `owner` (the node that owns
+/// the AU) until then: an engine and its nodes may be released before the source, in any order.
 public final class AnalysisRenderSource: @unchecked Sendable {
     private let context: OpaquePointer
-    public init(unit: AudioUnit) throws {
+    private let owner: AnyObject?
+    public init(unit: AudioUnit, keeping owner: AnyObject? = nil) throws {
         guard let source = lcmp_render_source_create(unit) else { throw AnalysisError.allocationFailed }
-        context = source
+        context = source; self.owner = owner
     }
     fileprivate func bind(_ queue: OpaquePointer, rate: Double, latency: Double) -> OSStatus {
         lcmp_render_source_bind(context, queue, rate, latency)
     }
     fileprivate func clear(_ queue: OpaquePointer) { lcmp_render_source_clear(context, queue) }
+    // Stored properties, `owner` among them, are released after this runs.
     deinit { lcmp_render_source_destroy(context) }
 }

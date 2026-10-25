@@ -87,6 +87,7 @@ render側は次のように実装する。
 | appliedAudioDelay | 音声側が実際に適用した同期補償量。現在の実装では常に0 |
 | estimatedPresentationHostTime | 中央のhost時刻＋推定出力遅延＋適用済みの補償量 |
 | computationSeconds / droppedBuffers / queuedBufferHighWatermark | 計算時間、取得側の累積の欠落数、キューの最大使用スロット数（上限8） |
+| trackSeconds | 窓の中央が曲の何秒目か。再生側（`AudioEngineBackend`）が、窓のサンプル時刻をプレイヤーの時刻と再生を始めた位置から換算して入れる。一時停止中・換算できない場合はnil。曲の地図（[曲の地図の実装設計](15_track-map-implementation.md)）を再生と対応させるために使う |
 
 - host時刻や遅延を取得できない場合はnilとし、0で代用しない。
 - ノードの`outputPresentationLatency`は開始・再開・再設定時に取得し、機器の遅延を別に加えて二重に計上しない。macOSでは、この値は出力機器の遅延（Core Audioの`kAudioDevicePropertyLatency`）と一致し、IOバッファの長さを含まない。iOSでは、この値は`AVAudioSession.outputLatency`と一致し、Bluetoothなど経路の遅延を含む（[iPhone版の実装設計](13_iphone-implementation.md#出力遅延の取り方)）。どちらも、観測ノードのレンダー通知のhost時刻は呼び出しの時点よりIOバッファ約1回分先を指すので、host時刻＋報告値がOSの報告どおりの提示時刻になる。将来、下流の遅延段がノードの報告値に含まれる場合は、その既知の補償量を報告値から分離してから設定する。

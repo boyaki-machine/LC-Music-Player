@@ -1,4 +1,5 @@
 import AnalysisCore
+import AudioProcessingCore
 import VisualizationKit
 
 /// Visualizations this player UI can show in its animation area. Switching keeps the controls,
@@ -36,7 +37,14 @@ public enum VisualizationDesign: String, CaseIterable, Sendable {
 @MainActor protocol PlayerVisualizationDriver: AnyObject {
     func synchronize(activity: VisualizationActivity, visible: Bool)
     func receive(_ frame: AnalysisFrame)
+    /// The beats and lead vocal of the track being played, when known before playback; nil otherwise.
+    func receive(trackMap: TrackMap?)
     func reset()
+}
+
+extension PlayerVisualizationDriver {
+    /// Designs that do not follow the beat or the vocal ignore the map.
+    func receive(trackMap: TrackMap?) {}
 }
 
 extension VisualizationDriver: PlayerVisualizationDriver {}

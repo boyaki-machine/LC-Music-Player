@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>拍の正解の記録</title>
+<!--
+  拍の検出を評価するための正解を、曲に合わせてキーを叩いて記録する道具。
+  ブラウザでこのファイルを開き、手元の音源を選ぶ。音源も記録もどこへも送らず、
+  記録は「書き出し」でJSONとして保存する。音源と記録はリポジトリに入れない。
+  使い方は docs/design/15_beat-detection-implementation.md の「評価」を参照。
+-->
+<style>
+  :root { --bg: #f6f5f1; --fg: #222; --muted: #666; --line: #ccc; --accent: #c0392b; --beat: #2c6fbb; --bar: #c0392b; --tone: #3a9d5d; --shout: #d68910; --high: #8e44ad; --harmony: #16a085; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1c1c1e; --fg: #eee; --muted: #aaa; --line: #444; } }
+  body { background: var(--bg); color: var(--fg); font: 15px/1.6 -apple-system, "Hiragino Sans", sans-serif; margin: 0; padding: 16px; }
+  main { max-width: 960px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 8px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0; padding: 8px 12px; }
+  legend { color: var(--muted); }
+  label { margin-right: 12px; white-space: nowrap; }
+  input[type=number] { width: 5em; }
+  button { font: inherit; padding: 4px 12px; margin: 2px; }
+  #status { font-variant-numeric: tabular-nums; font-size: 18px; }
+  canvas { width: 100%; height: 140px; border: 1px solid var(--line); border-radius: 6px; background: transparent; }
+  kbd { border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; font-size: 13px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  table { border-collapse: collapse; } td { padding: 0 10px 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>拍の正解の記録</h1>
+  <p class="muted">曲を再生しながら拍に合わせてキーを叩きます。2回以上叩くと、各拍は回ごとの時刻の平均になります。記録は書き出したJSONに残り、どこにも送られません。</p>
+
+  <fieldset>
+    <legend>曲</legend>
+    <input type="file" id="file" accept="audio/*">
+    <label>ジャンル <select id="genre">
+      <option>ロック・バンド</option><option>テクノ・ユーロビート</option><option>ポップス</option><option>バラード</option>
+      <option>ファンク・裏拍</option><option>クラシック</option><option>環境音楽</option><option>3拍子</option><option>その他</option>
+    </select></label>
+    <label>拍子 <select id="meter"><option value="4">4</option><option value="3">3</option><option value="6">6</option><option value="2">2</option></select></label>
+    <label>区間 <input type="number" id="from" value="0" min="0" step="1"> 〜 <input type="number" id="to" value="90" min="1" step="1"> 秒</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>操作</legend>
+    <button id="play">叩く（再生）</button>
+    <button id="stop">止める</button>
+    <button id="review">確かめる（クリック付きで再生）</button>
+    <button id="undo">最後の回を消す</button>
+    <button id="export">書き出し</button>
+    <label><input type="checkbox" id="import-check"> 書き出したJSONを読み込む</label>
+    <input type="file" id="import" accept="application/json" hidden>
+    <div id="status">曲を選んでください</div>
+    <table class="muted">
+      <tr><td><kbd>Space</kbd> 拍</td><td><kbd>B</kbd> 小節の頭の拍</td><td><kbd>Esc</kbd> 止める</td></tr>
+      <tr><td>押している間：</td><td><kbd>L</kbd> ロングトーン</td><td><kbd>S</kbd> シャウト</td><td><kbd>H</kbd> ハイトーン</td><td><kbd>C</kbd> ハモり・コーラス</td></tr>
+    </table>
+  </fieldset>
+
+  <fieldset>
+    <legend>ずれの補正</legend>
+    <label>叩いた時刻を <input type="number" id="offset" value="0" step="5"> ms ずらす（負＝早める）</label>
+    <span class="muted">「確かめる」でクリックが音より遅れて聞こえるなら負の値にします。</span>
+    <div class="muted" id="latency"></div>
+  </fieldset>
+
+  <canvas id="view" width="1840" height="280"></canvas>
+  <p class="muted" id="summary"></p>
+</main>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+let ctx = null, buffer = null, fileName = "", source = null, startedAt = 0, startOffset = 0, mode = null;
+/** Each pass: {beats: [s], bars: [s], and [[start, end]] for each held key}. Times are track seconds before the offset. */
+let passes = [], current = null, held = {};
+let clicks = [];
+
+function audioContext() {
+  if (!ctx) ctx = new AudioContext({ latencyHint: "interactive" });
+  return ctx;
+}
+/** Seconds from the press of a key to the sound it answers: the output path's own delay. */
+function outputDelay() { return (ctx && ((ctx.outputLatency || 0) + (ctx.baseLatency || 0))) || 0; }
+function trackTime() { return mode ? startOffset + (ctx.currentTime - startedAt) - outputDelay() : 0; }
+
+$("file").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  fileName = f.name; passes = []; current = null;
+  $("status").textContent = "読み込み中…";
+  buffer = await audioContext().decodeAudioData(await f.arrayBuffer());
+  $("to").value = Math.min(Number($("to").value) || 90, Math.floor(buffer.duration));
+  $("status").textContent = `${fileName}（${buffer.duration.toFixed(1)}秒）`;
+  draw();
+});
+
+function start(kind) {
+  if (!buffer) return;
+  stop();
+  // A focused button would take the Space taps as clicks.
+  if (document.activeElement) document.activeElement.blur();
+  const from = Number($("from").value) || 0, to = Math.min(buffer.duration, Number($("to").value) || buffer.duration);
+  source = ctx.createBufferSource(); source.buffer = buffer; source.connect(ctx.destination);
+  startOffset = from; startedAt = ctx.currentTime + 0.1; mode = kind;
+  source.start(startedAt, from, to - from);
+  source.onended = () => { if (mode === kind) stop(); };
+  if (kind === "tap") { current = { beats: [], bars: [], longTones: [], shouts: [], highTones: [], harmonies: [] }; held = {}; }
+  if (kind === "review") scheduleClicks(from, to);
+  $("latency").textContent = `出力の遅延 ${(outputDelay() * 1000).toFixed(0)} ms を差し引いて記録します。`;
+  tick();
+}
+
+function stop() {
+  if (source) { source.onended = null; try { source.stop(); } catch (_) {} source = null; }
+  for (const c of clicks) { try { c.stop(); } catch (_) {} }
+  clicks = [];
+  if (mode === "tap" && current && current.beats.length + current.bars.length > 0) passes.push(current);
+  current = null; mode = null; draw();
+}
+
+function scheduleClicks(from, to) {
+  const offset = Number($("offset").value) / 1000;
+  for (const [t, bar] of merged().beats) {
+    const at = t + offset;
+    if (at < from || at > to) continue;
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.frequency.value = bar ? 1760 : 1100;
+    gain.gain.setValueAtTime(0.3, startedAt + at - from); gain.gain.exponentialRampToValueAtTime(0.001, startedAt + at - from + 0.05);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(startedAt + at - from); osc.stop(startedAt + at - from + 0.06);
+    clicks.push(osc);
+  }
+}
+
+/** Keys held over a stretch of the song, and the list each one records into. */
+const heldKinds = { l: "longTones", s: "shouts", h: "highTones", c: "harmonies" };
+
+document.addEventListener("keydown", e => {
+  if (e.target.tagName === "INPUT" && e.target.type !== "file" && e.target.type !== "checkbox") return;
+  if (e.key === "Escape") { stop(); return; }
+  if (mode !== "tap" || e.repeat) return;
+  const t = trackTime(), key = e.key.toLowerCase();
+  if (e.code === "Space") { current.beats.push(t); e.preventDefault(); }
+  else if (key === "b") { current.bars.push(t); }
+  else if (key in heldKinds) { held[key] = t; }
+});
+document.addEventListener("keyup", e => {
+  if (mode !== "tap") return;
+  if (e.code === "Space") e.preventDefault();
+  const key = e.key.toLowerCase();
+  if (key in heldKinds && held[key] !== undefined) {
+    current[heldKinds[key]].push([held[key], trackTime()]);
+    delete held[key];
+  }
+});
+
+/** The passes merged: each beat is the mean of the passes' taps within a third of the beat interval. */
+function merged() {
+  const all = passes.concat(current ? [current] : []);
+  const spans = kind => all.flatMap(p => p[kind] || []);
+  if (all.length === 0) return { beats: [], longTones: [], shouts: [], highTones: [], harmonies: [] };
+  const taps = all.map(p => p.beats.map(t => [t, false]).concat(p.bars.map(t => [t, true])).sort((a, b) => a[0] - b[0]));
+  const base = taps.reduce((a, b) => (b.length > a.length ? b : a));
+  const intervals = base.slice(1).map((x, i) => x[0] - base[i][0]).sort((a, b) => a - b);
+  const window = (intervals[Math.floor(intervals.length / 2)] || 0.5) / 3;
+  const beats = base.map(([t, bar]) => {
+    let sum = 0, n = 0, bars = 0;
+    for (const pass of taps) {
+      let best = null;
+      for (const x of pass) if (Math.abs(x[0] - t) <= window && (!best || Math.abs(x[0] - t) < Math.abs(best[0] - t))) best = x;
+      if (best) { sum += best[0]; n++; if (best[1]) bars++; }
+    }
+    return [sum / n, bars * 2 > n];
+  });
+  return { beats, longTones: spans("longTones"), shouts: spans("shouts"), highTones: spans("highTones"), harmonies: spans("harmonies") };
+}
+
+$("play").onclick = () => start("tap");
+$("stop").onclick = stop;
+$("review").onclick = () => start("review");
+$("undo").onclick = () => { passes.pop(); draw(); };
+$("offset").onchange = draw;
+
+$("export").onclick = () => {
+  const m = merged(), offset = Number($("offset").value) / 1000;
+  const ms = t => Math.max(0, Math.round((t + offset) * 1000));
+  const data = {
+    format: "lcmp-beat-annotation-1",
+    file: fileName,
+    genre: $("genre").value,
+    meter: Number($("meter").value),
+    excerptMilliseconds: [Math.round(Number($("from").value) * 1000), Math.round(Number($("to").value) * 1000)],
+    offsetMilliseconds: Number($("offset").value),
+    passes: passes.length,
+    beats: m.beats.map(([t, bar]) => ({ ms: ms(t), downbeat: bar })),
+    longTones: m.longTones.map(([s, e]) => [ms(s), ms(e)]),
+    shouts: m.shouts.map(([s, e]) => [ms(s), ms(e)]),
+    highTones: m.highTones.map(([s, e]) => [ms(s), ms(e)]),
+    harmonies: m.harmonies.map(([s, e]) => [ms(s), ms(e)]),
+    raw: passes,
+  };
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: "application/json" }));
+  a.download = fileName.replace(/\.[^.]+$/, "") + ".beats.json";
+  a.click();
+};
+$("import-check").onchange = e => { if (e.target.checked) $("import").click(); e.target.checked = false; };
+$("import").addEventListener("change", async e => {
+  const f = e.target.files[0]; if (!f) return;
+  const data = JSON.parse(await f.text());
+  passes = data.raw || []; $("offset").value = data.offsetMilliseconds || 0;
+  $("genre").value = data.genre; $("meter").value = String(data.meter);
+  $("from").value = data.excerptMilliseconds[0] / 1000; $("to").value = data.excerptMilliseconds[1] / 1000;
+  draw();
+});
+
+function tick() { draw(); if (mode) requestAnimationFrame(tick); }
+function draw() {
+  const c = $("view"), g = c.getContext("2d"), w = c.width, h = c.height;
+  g.clearRect(0, 0, w, h);
+  const from = Number($("from").value) || 0, to = Number($("to").value) || 90;
+  const x = t => (t - from) / (to - from) * w;
+  const style = getComputedStyle(document.documentElement);
+  const color = name => style.getPropertyValue(name).trim();
+  const m = merged(), offset = Number($("offset").value) / 1000;
+  for (const [s, e] of m.longTones) { g.fillStyle = color("--tone"); g.globalAlpha = 0.3; g.fillRect(x(s + offset), h * 0.55, x(e + offset) - x(s + offset), h * 0.2); }
+  for (const [s, e] of m.shouts) { g.fillStyle = color("--shout"); g.globalAlpha = 0.5; g.fillRect(x(s + offset), h * 0.78, Math.max(3, x(e + offset) - x(s + offset)), h * 0.2); }
+  for (const [s, e] of m.highTones) { g.fillStyle = color("--high"); g.globalAlpha = 0.4; g.fillRect(x(s + offset), h * 0.55, x(e + offset) - x(s + offset), h * 0.08); }
+  for (const [s, e] of m.harmonies) { g.fillStyle = color("--harmony"); g.globalAlpha = 0.3; g.fillRect(x(s + offset), h * 0.66, x(e + offset) - x(s + offset), h * 0.1); }
+  g.globalAlpha = 1;
+  for (const [t, bar] of m.beats) { g.fillStyle = color(bar ? "--bar" : "--beat"); g.fillRect(x(t + offset) - 1, bar ? 0 : h * 0.15, bar ? 3 : 2, h * (bar ? 0.5 : 0.35)); }
+  if (mode) { g.fillStyle = color("--fg"); g.fillRect(x(trackTime()), 0, 2, h); }
+  const intervals = m.beats.slice(1).map((b, i) => b[0] - m.beats[i][0]).sort((a, b) => a - b);
+  const median = intervals[Math.floor(intervals.length / 2)];
+  $("summary").textContent = `${passes.length}回分、拍 ${m.beats.length}（小節の頭 ${m.beats.filter(b => b[1]).length}）` +
+    (median ? `、約${(60 / median).toFixed(1)} BPM` : "") + `、ロングトーン ${m.longTones.length}、シャウト ${m.shouts.length}、ハイトーン ${m.highTones.length}、ハモり ${m.harmonies.length}`;
+  if (mode) $("status").textContent = `${mode === "tap" ? "記録中" : "確認中"} ${trackTime().toFixed(2)} 秒`;
+  else if (buffer) $("status").textContent = `${fileName}（${buffer.duration.toFixed(1)}秒）`;
+}
+</script>
+</body>
+</html>

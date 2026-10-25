@@ -133,6 +133,32 @@ final class MeasurementCache {
     }
     func accepts(_ owner: UUID?) -> Bool { owner.map { activeOwners?.contains($0) ?? true } ?? true }
     func load(_ request: MeasurementRequest, owner: UUID?) throws -> CachedMeasurement? {
+        guard let payload = try loadPayload(request, owner: owner) else { return nil }
+        return try PropertyListDecoder().decode(CachedMeasurement.self, from: payload)
+    }
+    func save(_ value: CachedMeasurement, request: MeasurementRequest, owners: [UUID?], validating url: URL, isCurrent: () -> Bool) throws {
+        let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
+        try savePayload(try encoder.encode(value), completedAt: value.completedAt, request: request, owners: owners, validating: url, isCurrent: isCurrent)
+    }
+    func mapRequest(_ url: URL) throws -> MeasurementRequest? {
+        guard let measured = try request(url, profile: nil) else { return nil }
+        return try MeasurementRequest(mapOf: measured.source, configuration: configuration)
+    }
+    /// A stored map of the configured analyzers; a map of other analyzers is never returned.
+    func loadMap(_ request: MeasurementRequest, owner: UUID?) throws -> TrackMap? {
+        guard let payload = try loadPayload(request, owner: owner) else { return nil }
+        let map = try TrackMap(encoded: payload)
+        guard map.beats.algorithm == configuration.trackAnalyzers.beats.algorithm,
+              map.vocals.algorithm == configuration.trackAnalyzers.vocals.algorithm else { throw PreprocessingFailure.invalidAudio }
+        return map
+    }
+    /// A long track's vocal map is kept in less detail to fit one record; a map whose beats alone do not
+    /// fit (beyond about an hour of beats) is not kept.
+    func saveMap(_ map: TrackMap, request: MeasurementRequest, owners: [UUID?], validating url: URL, isCurrent: () -> Bool) throws {
+        guard let payload = map.encoded(fitting: 32768) else { return }
+        try savePayload(payload, completedAt: Date(), request: request, owners: owners, validating: url, isCurrent: isCurrent)
+    }
+    private func loadPayload(_ request: MeasurementRequest, owner: UUID?) throws -> Data? {
         let db = try connection(), now = Date()
         try maintain(db, now: now)
         let rows = try db.query("SELECT payload, checksum, completed FROM measurements WHERE key=? AND context=? AND used>=?",
@@ -140,19 +166,17 @@ final class MeasurementCache {
         guard let row = rows.first, let payload = row[0].data, let checksum = row[1].data,
               row[2].number.map({ $0 <= now.timeIntervalSince1970+300 }) == true,
               payload.count <= 32768, Data(SHA256.hash(data: payload)) == checksum else { return nil }
-        let value = try PropertyListDecoder().decode(CachedMeasurement.self, from: payload)
         try db.transaction {
             try bind(request.key, owner: owner, db: db)
             try db.execute("UPDATE measurements SET used=? WHERE key=?", [.real(now.timeIntervalSince1970), .blob(request.key)])
         }
-        return value
+        return payload
     }
-    func save(_ value: CachedMeasurement, request: MeasurementRequest, owners: [UUID?], validating url: URL, isCurrent: () -> Bool) throws {
+    private func savePayload(_ payload: Data, completedAt: Date, request: MeasurementRequest, owners: [UUID?],
+                             validating url: URL, isCurrent: () -> Bool) throws {
         guard owners.contains(where: accepts), isCurrent() else { return }
         // Recheck the original provider revision after the successful EOF.
         try validate(request, for: url)
-        let encoder = PropertyListEncoder(); encoder.outputFormat = .binary
-        let payload = try encoder.encode(value)
         guard payload.count <= 32768 else { return }
         let db = try connection(), now = Date()
         try db.transaction {
@@ -172,7 +196,7 @@ final class MeasurementCache {
                 ON CONFLICT(key) DO UPDATE SET context=excluded.context,epoch=excluded.epoch,payload=excluded.payload,
                     checksum=excluded.checksum,completed=excluded.completed,used=excluded.used
                 """, [.blob(request.key), .blob(request.context), .blob(request.epoch), .blob(payload), .blob(Data(SHA256.hash(data: payload))),
-                      .real(value.completedAt.timeIntervalSince1970), .real(now.timeIntervalSince1970)])
+                      .real(completedAt.timeIntervalSince1970), .real(now.timeIntervalSince1970)])
             for owner in owners where accepts(owner) { try bind(request.key, owner: owner, db: db) }
             guard isCurrent() else { throw CancellationError() }
         }

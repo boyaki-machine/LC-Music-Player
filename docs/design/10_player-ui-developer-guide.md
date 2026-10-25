@@ -128,7 +128,8 @@ flowchart LR
 | 画面 → 解析の購読 | `PlaybackController.configureAnalysis(_:)` | 表示するデザインの`AnalysisConfiguration`を設定し、非表示時はnilで解除する |
 | 再生 → 画面 | `analysisFrame`、`analysisResetID`、`state` | 最新のフレームを渡し、状態・取消IDの変更を可視化へ反映する |
 | 画面 → デザインの選択 | `PlayerPresentation.setVisualizationDesign(_:)` | 表示タブから呼ぶ。旧デザインのdriverを止め、選択を`UserDefaults`へ保存する |
-| 画面 → 可視化の状態 | `PlayerVisualizationDriver`の`synchronize(activity:visible:)`、`receive(_:)`、`reset()` | MainActorで、表示中のデザインのdriverへ、再生状態・表示可否・解析結果・シーク等のリセットを渡す |
+| ライブラリ → 画面 | `currentTrackMap` | 再生中の曲の地図（拍とボーカル）。前処理で求めたもので、わかるまではnil |
+| 画面 → 可視化の状態 | `PlayerVisualizationDriver`の`synchronize(activity:visible:)`、`receive(_:)`、`receive(trackMap:)`、`reset()` | MainActorで、表示中のデザインのdriverへ、再生状態・表示可否・解析結果・曲の地図・シーク等のリセットを渡す。地図を使わないデザインは`receive(trackMap:)`を実装しない（既定で無視する） |
 | 状態 → 描画 | `LCMPDefaultGEQView(driver:)`、`ErmineChorusView(driver:)`、`PuppetShowView(driver:)` | driverが公開する状態を描く。描画内から再生や解析を開始しない |
 
 - 曲の選択は背景で非同期に確定する。前処理のバッファや全曲測定をUIへ持ち込まない。
@@ -191,6 +192,7 @@ playback.configureAnalysis(configuration)
 | --- | --- |
 | 表示・再生の開始 | デザインの解析設定を適用し、`synchronize(activity: .playing, visible: true)`。新しいフレームを`receive(_:)`へ渡す |
 | 新しい解析 | generationとsequenceの変更を観測して最新の1件を渡す。UI側で表示待ちを追加して二重に遅延させない |
+| 曲の地図 | 表示時・デザインの切り替え時と、`currentTrackMap`の変更で`receive(trackMap:)`へ渡す。曲の位置は解析フレームの`trackSeconds`で対応させる |
 | 一時停止 | `.paused`を渡して点灯セルを保持し、未来の待ちを破棄する。残光が消えたら時計を止める |
 | 再開 | `.playing`への遷移で旧状態を破棄し、新しい世代の解析から開始する |
 | 停止・自然終了・再生失敗 | `.inactive`で消灯し、待ち・描画の時計を解放する |

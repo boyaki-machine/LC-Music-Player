@@ -71,10 +71,12 @@ public struct MeasurementCacheConfiguration: Sendable {
     public var platform: MeasurementPlatformIdentity
     public var sourceIdentity: any MeasurementSourceIdentifying
     public var maximumBytes: Int = 64 * 1024 * 1024
-    public var maximumRecords: Int = 10_000
+    public var maximumRecords: Int = 15_000
     public var maximumAge: TimeInterval = 90 * 86400
     public var algorithmVersion: Int = MeasurementVersions.algorithm
     public var conversionVersion: Int = MeasurementVersions.conversion
+    /// Track maps are kept per pair of analyzers: another analyzer or version finds them again, and only them.
+    public var trackAnalyzers: TrackAnalyzers = .standard
     public init(url: URL, platform: MeasurementPlatformIdentity = .current,
                 sourceIdentity: any MeasurementSourceIdentifying = LocalMeasurementSourceIdentity()) {
         self.url = url; self.platform = platform; self.sourceIdentity = sourceIdentity
@@ -95,6 +97,13 @@ struct MeasurementRequest: Sendable {
         try self.init(source: source, platform: configuration.platform, algorithm: String(configuration.algorithmVersion),
                       conversion: String(configuration.conversionVersion), profile: profile.map { String($0.version) } ?? "native-peak-1",
                       rate: profile.map { String($0.sampleRate.bitPattern) } ?? "", channels: profile.map { String($0.channels) } ?? "")
+    }
+    /// The track map of a source. It shares the epoch of the levels, so that a record of either does
+    /// not remove the other; the analyzers are part of the key instead.
+    init(mapOf source: MeasurementSourceIdentity, configuration: MeasurementCacheConfiguration) throws {
+        try self.init(source: source, platform: configuration.platform, algorithm: String(configuration.algorithmVersion),
+                      conversion: String(configuration.conversionVersion),
+                      profile: "map/" + configuration.trackAnalyzers.identity, rate: "", channels: "")
     }
     init(source: MeasurementSourceIdentity, platform: MeasurementPlatformIdentity, algorithm: String, conversion: String,
          profile: String, rate: String, channels: String) throws {

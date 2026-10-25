@@ -1,4 +1,6 @@
 import AnalysisCore
+import AudioProcessingCore
+import LibraryCore
 import PlaybackCore
 import SwiftUI
 import VisualizationKit
@@ -8,6 +10,7 @@ import VisualizationKit
 struct PlaybackVisualization: View {
     let playback: PlaybackController
     let presentation: PlayerPresentation
+    let library: LibraryController?
     private var visible: Bool { presentation.visualizationVisible }
     private struct Stamp: Equatable { let generation: UUID; let sequence: UInt64 }
     private var stamp: Stamp? { playback.analysisFrame.map { Stamp(generation: $0.generation, sequence: $0.sequence) } }
@@ -22,10 +25,11 @@ struct PlaybackVisualization: View {
             case .puppetShow: PuppetShowView(driver: presentation.puppetShowDriver)
             }
         }
-        .onAppear { presentation.visualizationHostAppeared(); synchronize(); receive() }
+        .onAppear { presentation.visualizationHostAppeared(); synchronize(); receiveTrackMap(); receive() }
         .onChange(of: playback.state) { _, _ in synchronize(); receive() }
         .onChange(of: visible) { _, _ in synchronize(); receive() }
-        .onChange(of: presentation.visualizationDesign) { _, _ in synchronize(); receive() }
+        .onChange(of: presentation.visualizationDesign) { _, _ in synchronize(); receiveTrackMap(); receive() }
+        .onChange(of: library?.currentTrackMap) { _, _ in receiveTrackMap() }
         .onChange(of: playback.analysisResetID) { _, _ in presentation.activeVisualizationDriver.reset(); receive() }
         .onChange(of: stamp) { _, _ in receive() }
         .onDisappear {
@@ -39,5 +43,6 @@ struct PlaybackVisualization: View {
         if playback.analysisConfiguration != configuration { playback.configureAnalysis(configuration) }
         presentation.activeVisualizationDriver.synchronize(activity: activity, visible: visible)
     }
+    private func receiveTrackMap() { presentation.activeVisualizationDriver.receive(trackMap: library?.currentTrackMap) }
     private func receive() { if let frame = playback.analysisFrame { presentation.activeVisualizationDriver.receive(frame) } }
 }

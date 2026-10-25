@@ -65,4 +65,7 @@ public struct AnalysisFrame: Sendable {
     public let droppedBuffers: UInt64
     public let queuedBufferHighWatermark: UInt32
     public let computationSeconds: Double
+    /// Seconds into the track at the middle of the window, set by the player that knows the track's
+    /// timeline. Nil when it cannot tell.
+    public var trackSeconds: Double? = nil
 }

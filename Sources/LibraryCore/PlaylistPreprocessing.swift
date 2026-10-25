@@ -209,6 +209,9 @@ import AudioProcessingCore
                 if measure {
                     request.levels = try await worker.measureLevels(url, profile: profile, cancellation: request.cancellation, ownerID: candidate.track.id)
                     request.peak = request.levels?.sourcePeak
+                    // A new level scan maps the track as well; a track measured before track maps existed, or
+                    // with other analyzers, is scanned for its map once. A track that cannot be mapped still counts as measured.
+                    _ = try? await worker.trackMap(url, cancellation: request.cancellation, ownerID: candidate.track.id)
                 }
                 try request.cancellation.check()
                 guard let self else { return }

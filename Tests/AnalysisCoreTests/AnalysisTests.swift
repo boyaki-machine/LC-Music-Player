@@ -193,6 +193,26 @@ struct AnalysisTests {
         session.finish()
     }
 
+    /// The source keeps the observation node, and so its AU, until it has removed its notification:
+    /// a stopped engine left for the next track may release its graph before the source.
+    @Test func theRenderSourceOutlivesNeitherItsUnitNorTheEngine() throws {
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        var source: AnalysisRenderSource?
+        weak var weakNode: AVAudioUnitEQ?
+        weak var weakEngine: AVAudioEngine?
+        do {
+            let engine = AVAudioEngine(), observation = AVAudioUnitEQ(numberOfBands: 0)
+            weakNode = observation; weakEngine = engine
+            engine.attach(observation)
+            engine.connect(observation, to: engine.mainMixerNode, format: format)
+            source = try AnalysisRenderSource(unit: observation.audioUnit, keeping: observation)
+            engine.stop()
+        }
+        #expect(weakEngine == nil && weakNode != nil)
+        source = nil
+        #expect(weakNode == nil)
+    }
+
     /// A route change that keeps the engine running stamps later renders with the new latency.
     @Test func updatedOutputLatencyReachesLaterFramesOnly() async throws {
         let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
