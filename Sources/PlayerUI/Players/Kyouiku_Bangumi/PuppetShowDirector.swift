@@ -18,9 +18,14 @@ enum PuppetArmPose: Sendable, Equatable {
 /// Seconds left of each action; 0 is off.
 struct PuppetActions: Sendable, Equatable {
     var sparkle = 0.0, cry = 0.0, slump = 0.0, shout = 0.0, headbang = 0.0, shy = 0.0, blush = 0.0
+    /// From the vocal: arms up for a high note, eyes closed and swaying for a long tone.
+    var reach = 0.0, dreamy = 0.0
+    /// A smile: cheeks flushed and eyes narrowed.
+    var smile = 0.0
     mutating func elapse(_ dt: Double) {
         sparkle = max(0, sparkle - dt); cry = max(0, cry - dt); slump = max(0, slump - dt); shout = max(0, shout - dt)
         headbang = max(0, headbang - dt); shy = max(0, shy - dt); blush = max(0, blush - dt)
+        reach = max(0, reach - dt); dreamy = max(0, dreamy - dt); smile = max(0, smile - dt)
     }
 }
 
@@ -56,8 +61,10 @@ struct PuppetDirector: Sendable {
     private(set) var phrase = 0
     private var lastPhrase = Int.min, phraseClock = 0.0
     var actions = PuppetActions()
-    var cooldown = (sparkle: 0.0, shout: 0.0, headbang: 6.0)
+    var cooldown = (sparkle: 0.0, shout: 0.0, headbang: 6.0, cry: 0.0, smile: 4.0)
     private var silentFor = 0.0
+    /// Seconds the music has been sounding, so that the start of a song does not count as a swell.
+    private var soundingFor = 0.0
     /// From the ensemble: look somewhere (or away) until a time.
     var look: (turn: Double, until: Double)?
     /// From the ensemble: the same choreography as a partner for one phrase.
@@ -70,6 +77,7 @@ struct PuppetDirector: Sendable {
     private var slump = PuppetSpring(omega: 4), cry = PuppetSpring(omega: 5), sparkle = PuppetSpring(omega: 9)
     private var shout = PuppetSpring(omega: 9), bob = PuppetSpring(omega: 22), roll = PuppetSpring(omega: 8)
     private var headbang = PuppetSpring(omega: 6), shy = PuppetSpring(omega: 9), blush = PuppetSpring(omega: 4)
+    private var dreamy = PuppetSpring(omega: 3), lift = PuppetSpring(omega: 6), smile = PuppetSpring(omega: 6)
 
     init(member: PuppetMember) {
         self.member = member; random = PuppetRandom(seed: member.seed)
@@ -78,7 +86,7 @@ struct PuppetDirector: Sendable {
     var lookingUntil: Double { look?.until ?? -.infinity }
     /// Settled enough to stop the clock after a pause.
     var isSettled: Bool {
-        let springs = [armL, armR, turnSpring, slump, cry, sparkle, shout, bob, roll, headbang, shy, blush]
+        let springs = [armL, armR, turnSpring, slump, cry, sparkle, shout, bob, roll, headbang, shy, blush, dreamy, lift, smile]
         return springs.allSatisfy { abs($0.value - $0.target) < 0.002 && abs($0.velocity) < 0.01 } && mouth < 0.002
     }
 
@@ -90,8 +98,11 @@ struct PuppetDirector: Sendable {
 
     /// Advances by `dt`. `levels` are the four registers (0…1); `beat` is nil while the tempo is unknown.
     /// While not playing the levels are zero and the clock of phrases and actions does not run toward a slump.
-    mutating func update(dt: Double, now: Double, levels: [Double], beat: PuppetBeat?, playing: Bool = true) {
-        let level = levels[member.register.rawValue]
+    /// `vocal` is the lead vocal when the track's vocal map is followed, `part` this puppet's part in it and
+    /// `register` the band it follows for that part; without a vocal, everyone sings on the beat with its own band.
+    mutating func update(dt: Double, now: Double, levels: [Double], beat: PuppetBeat?, playing: Bool = true,
+                         vocal: PuppetVocal? = nil, part: PuppetVocalPart = .beat, register: PuppetRegister? = nil) {
+        let level = levels[(register ?? member.register).rawValue]
         func follow(_ envelope: Double, attack: Double, release: Double) -> Double {
             envelope + (level - envelope) * (1 - exp(-dt / (level > envelope ? attack : release)))
         }
@@ -101,6 +112,7 @@ struct PuppetDirector: Sendable {
         middle += (all - middle) * (1 - exp(-dt / 0.35))
         average += (all - average) * (1 - exp(-dt / 2.5))
         silentFor = playing && all < 0.06 ? silentFor + dt : 0
+        soundingFor = silentFor > 1.2 ? 0 : soundingFor + (playing ? dt : 0)
         beatCount = beat?.count ?? now * 2
 
         // Arms and facing are chosen per phrase: 8 beats, or 4 seconds while the tempo is unknown.
@@ -115,22 +127,45 @@ struct PuppetDirector: Sendable {
                 : e > 0.35 ? pick([(.neutral, 0.5), (.spread, 0.3), (.up, 0.2)])
                 : pick([(.neutral, 0.5), (.down, 0.5)])
             turn = pick([(-1, 0.3), (0, 0.4), (1, 0.3)])
+            // Often a smile at the start of a phrase, from anyone not singing the lead.
+            if part != .lead && average > 0.25 && cooldown.smile <= 0 && random.next() < Self.smileChance {
+                actions.smile = 2.4; cooldown.smile = 6
+            }
         }
         if let sync, sync.phrase == phrase { armPose = sync.pose; turn = sync.turn }
-        cooldown.sparkle -= dt; cooldown.shout -= dt; cooldown.headbang -= dt
+        cooldown.sparkle -= dt; cooldown.shout -= dt; cooldown.headbang -= dt; cooldown.cry -= dt; cooldown.smile -= dt
         let busy = actions.shout > 0 || actions.headbang > 0 || actions.shy > 0
+        // Everyone shouts with the singer; the ensemble keeps the shouts together.
+        if let vocal, vocal.shout && !busy && cooldown.shout <= 0 {
+            actions.shout = 1.6; cooldown.shout = 5; cooldown.sparkle = max(cooldown.sparkle, 3)
+        }
+        // The lead acts out the rest of the vocal: high tones (arms up, eyes lit), long tones (eyes closed,
+        // swaying), and tears for a long tone in a quiet or slow song.
+        if let vocal, part == .lead {
+            if vocal.highTone {
+                actions.reach = max(actions.reach, 0.5)
+                if cooldown.sparkle <= 0 && !busy { actions.sparkle = 1.4; cooldown.sparkle = 5 }
+            }
+            if vocal.longTone {
+                actions.dreamy = max(actions.dreamy, 0.5)
+                if cooldown.cry <= 0 && (average < 0.45 || (beat?.bpm ?? 120) < 88) { actions.cry = 3.5; cooldown.cry = 25 }
+            }
+        }
         // Shout: the strongest swell (stricter than sparkling eyes); not together with sparkling.
-        if !busy && cooldown.shout <= 0 && middle > 0.82 && middle - average > 0.26 {
-            actions.shout = 2.2; cooldown.shout = 20; cooldown.sparkle = max(cooldown.sparkle, 4)
+        // With a vocal, the lead shouts with the singer and only the puppet on the beat shouts from the level.
+        // Both need music sounding for a while: the start of a song is not a swell.
+        let settled = soundingFor >= Self.settleSeconds
+        if (vocal == nil || part == .beat) && !busy && cooldown.shout <= 0 && settled && middle > 0.72 && middle - average > 0.18 {
+            actions.shout = 2.2; cooldown.shout = 14; cooldown.sparkle = max(cooldown.sparkle, 4)
         }
         // Sparkling eyes: a sudden swell. The spiky-haired boy heats up more easily.
         let easy = member.name == "spiky" ? 0.08 : 0
-        if !busy && cooldown.sparkle <= 0 && middle > 0.7 - easy && middle - average > 0.22 - easy {
-            actions.sparkle = 1.8; cooldown.sparkle = 16
+        if !busy && cooldown.sparkle <= 0 && settled && middle > 0.62 - easy && middle - average > 0.16 - easy {
+            actions.sparkle = 1.8; cooldown.sparkle = 10
         }
         // Headbanging (spiky-haired boy): with a clear beat and loud music, for 8 beats.
-        if member.name == "spiky", let beat, !busy, cooldown.headbang <= 0, average > 0.6 {
-            actions.headbang = 8 * 60 / beat.bpm; cooldown.headbang = 22
+        if member.name == "spiky", let beat, !busy, cooldown.headbang <= 0, average > 0.5 {
+            actions.headbang = 8 * 60 / beat.bpm; cooldown.headbang = 16
         }
         // Slump when the music stops while playing.
         if silentFor > 1.2 { actions.slump = max(actions.slump, 0.6) }
@@ -138,7 +173,7 @@ struct PuppetDirector: Sendable {
 
         let slumping = actions.slump > 0, shouting = actions.shout > 0, isShy = actions.shy > 0
         // Arms rise in a shout and go to the mouth in shyness.
-        let arm = shouting ? -0.3 : isShy ? -0.15 : (slumping ? PuppetArmPose.down : armPose).angle
+        let arm = shouting ? -0.3 : isShy ? -0.15 : actions.reach > 0 ? PuppetArmPose.up.angle - 0.04 : (slumping ? PuppetArmPose.down : armPose).angle
         armL.target = arm; armR.target = arm
         var facing = turn
         if let look, now < look.until { facing = look.turn }
@@ -149,7 +184,11 @@ struct PuppetDirector: Sendable {
         shout.target = shouting ? 1 : 0
         headbang.target = actions.headbang > 0 ? 1 : 0
         shy.target = isShy ? 1 : 0
-        blush.target = actions.blush > 0 || isShy ? 1 : 0
+        blush.target = actions.blush > 0 || isShy || actions.smile > 0 ? 1 : 0
+        smile.target = actions.smile > 0 ? 1 : 0
+        dreamy.target = actions.dreamy > 0 ? 1 : 0
+        // The lead lifts its head on high notes and lowers it a little on low ones.
+        lift.target = part == .lead ? PuppetMath.clamp((vocal?.pitch ?? 0) * 2.5, -0.4, 1) : 0
 
         // Sink on the beat and sway every two beats; the mouth opens from just before the beat to after it.
         let swing: Double, chomp: Double
@@ -166,14 +205,33 @@ struct PuppetDirector: Sendable {
         let energy = 0.35 + 0.65 * PuppetMath.clamp(average * 1.3)
         bob.target = pulse * energy * (slumping ? 0.2 : 1)
         roll.target = swing * 0.045 * energy * (slumping ? 0.3 : 1)
-        for keyPath in [\Self.armL, \.armR, \.turnSpring, \.slump, \.cry, \.sparkle, \.shout, \.bob, \.roll, \.headbang, \.shy, \.blush] {
+        for keyPath in [\Self.armL, \.armR, \.turnSpring, \.slump, \.cry, \.sparkle, \.shout, \.bob, \.roll, \.headbang, \.shy, \.blush, \.dreamy, \.lift, \.smile] {
             self[keyPath: keyPath].step(dt)
         }
         // How wide: the register's strength, plus quick rises. When: the beat. Smaller in shyness.
         let strength = PuppetMath.clamp(slowEnvelope)
         let detail = PuppetMath.clamp((fastEnvelope - slowEnvelope) * 2.5)
-        mouth = PuppetMath.clamp(1.25 * strength * (0.25 + 0.75 * chomp) + detail * 0.6) * (1 - 0.8 * slump.value) * (1 - 0.6 * shy.value)
+        let onBeat = PuppetMath.clamp(1.25 * strength * (0.25 + 0.75 * chomp) + detail * 0.6)
+        // While the vocal sings, the lead sings its syllables and a harmony's partner joins in;
+        // the others keep the beat quietly. Between phrases everyone sings on the beat.
+        let sung: Double
+        if let vocal, vocal.singing {
+            switch part {
+            case .lead: sung = vocal.shout ? 1 : PuppetMath.clamp(vocal.mouth * 1.15)
+            case .sub: sung = PuppetMath.clamp(vocal.mouth * (vocal.harmony ? 0.95 : Self.subMouth))
+            case .beat: sung = onBeat
+            case .hum: sung = onBeat * Self.humMouth
+            }
+        } else { sung = onBeat }
+        mouth = sung * (1 - 0.8 * slump.value) * (1 - 0.6 * shy.value)
     }
+
+    /// The chance of a smile at the start of a phrase, for a puppet not singing the lead.
+    static let smileChance = 0.6
+    /// Seconds of sounding music before a swell can make a shout or sparkling eyes.
+    static let settleSeconds = 5.0
+    /// How much of the vocal's mouth the sub sings outside harmonies, and of the beat's mouth the hum keeps.
+    static let subMouth = 0.5, humMouth = 0.45
 
     /// The picture at `now`. With reduced motion the body holds still: no bobbing, swaying, headbanging or trembling.
     func pose(now: Double, reduceMotion: Bool = false) -> PuppetPose {
@@ -188,17 +246,23 @@ struct PuppetDirector: Sendable {
         let shyV = shy.value, tremble = (shyV * sin(now * 47) * 0.5 + shyV * sin(now * 29) * 0.5) * still
         // Shout: stretch up, face the sky, mouth wide open, shaking.
         let shoutV = shout.value, shake = shoutV * sin(now * 53) * still
-        p.bodyPosition = SIMD2(tremble * 0.35, -bobV * 3.2 * (1 - shoutV) + shoutV * 2.2)
+        // Dreamy: swaying slowly with the long tone. Lifted: the lead reaching for a high note.
+        let dreamV = dreamy.value, liftV = lift.value, smileV = smile.value
+        p.bodyPosition = SIMD2(tremble * 0.35, -bobV * 3.2 * (1 - shoutV) + shoutV * 2.2 + liftV * 0.8)
         p.bodyRotation = SIMD3(-shoutV * 0.06, turnSpring.value * 0.6,
-                               rollV * (1 - shoutV) + slump * 0.06 * sin(now * 0.8) * still + shake * 0.012 + tremble * 0.02)
-        p.headRotation = SIMD3(bobV * 0.08 * (1 - hb) + slump * 0.42 + cry.value * 0.12 - shoutV * 0.26 + hb * (0.12 + 0.3 * hbPhase) + shyV * 0.18,
+                               rollV * (1 - shoutV) + slump * 0.06 * sin(now * 0.8) * still + shake * 0.012 + tremble * 0.02
+                               + dreamV * 0.05 * sin(now * 1.4) * still)
+        p.headRotation = SIMD3(bobV * 0.08 * (1 - hb) + slump * 0.42 + cry.value * 0.12 - shoutV * 0.26 + hb * (0.12 + 0.3 * hbPhase) + shyV * 0.18
+                               - liftV * 0.12 - dreamV * 0.08,
                                turnSpring.value * 0.5,
                                -rollV * 0.6 + shoutV * 0.025 * sin(now * 41) * still)
         // Mouth: the upper head tips back and the jaw drops a little; a shout opens it to the limit.
         p.upperRotationX = -(mouth * 0.62 * (1 - shoutV) + shoutV * (0.78 + 0.04 * sin(now * 37) * still))
         p.jawRotationX = mouth * 0.22 * (1 - shoutV) + shoutV * 0.36 + cry.value * 0.03 * sin(now * 30) * still
         p.squeeze = shoutV > 0.05 ? clamp(shoutV * 1.6) : 0
-        p.closedEyes = shyV > 0.05 && shoutV < 0.05 ? clamp(shyV * 1.6) : 0
+        // A smile narrows the eyes about halfway.
+        p.closedEyes = shoutV < 0.05 ? max(shyV > 0.05 ? clamp(shyV * 1.6) : 0, dreamV > 0.05 ? clamp(dreamV * 0.9) : 0,
+                                           smileV > 0.05 ? clamp(smileV * 0.55) : 0) : 0
         p.blush = blush.value > 0.03 ? clamp(blush.value) : 0
         for i in 0..<6 {
             let f = clamp(shoutV * 1.4) * (0.6 + 0.4 * sin(now * 23 + Double(i) * 1.7))

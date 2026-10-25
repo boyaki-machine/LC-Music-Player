@@ -68,6 +68,11 @@ import AudioProcessingCore
     @ObservationIgnored private var measurementCancellation: PreparationCancellation?
     @ObservationIgnored private var measurementID = UUID()
     @ObservationIgnored private var measuredTrack: UUID?
+    /// The map of the current track (see `currentTrackMap`) and the request for it.
+    private var loadedTrackMap: LoadedTrackMap?
+    @ObservationIgnored private var mapTask: Task<Void, Never>?
+    @ObservationIgnored private var mapCancellation: PreparationCancellation?
+    @ObservationIgnored private var mapRequestURL: URL?
     @ObservationIgnored private var pendingAdvance = false
     @ObservationIgnored private var shuttingDown = false
     @ObservationIgnored private let tagReader: (any TrackTagReading)?
@@ -346,6 +351,19 @@ import AudioProcessingCore
         let first = shufflesPlayback ? list.entries.randomElement(using: &random) : list.entries.first
         guard let first else { return }
         selectEntry(first.id, in: id, autoPlay: true, shuffle: .restart)
+    }
+    /// Moves within the current track. After a track has played to its end it has given up its file
+    /// access, and the next track may be on its way; moving then plays the finished track again from
+    /// there, in place of the next one, through the library's access to it.
+    public func seek(to seconds: Double) {
+        guard !shuttingDown, seconds.isFinite else { return }
+        if playback.state == .finished, preprocessingEnabled, seconds < playback.duration,
+           let list = document.currentPlaylistID, let entry = document.currentEntryID {
+            pendingAdvance = false
+            beginPreparedSelection(entry, playlistID: list, autoPlay: true, position: max(0, seconds))
+            return
+        }
+        playback.seek(to: seconds)
     }
     public func togglePlayPause() {
         if playback.state == .playing || (playback.state == .paused && !normalizationNeedsPreparation) {
@@ -813,15 +831,17 @@ extension LibraryController {
     private func cancelPreparation() {
         playlistPreprocessingMayStart = false
         playlistPreprocessing?.suspend()
-        let previous = backgroundRetirement, selection = selectionTask, next = nextTask, measurement = measurementTask
-        if selection != nil || next != nil || measurement != nil {
+        let previous = backgroundRetirement, selection = selectionTask, next = nextTask, measurement = measurementTask, maps = mapTask
+        if selection != nil || next != nil || measurement != nil || maps != nil {
             backgroundRetirement = Task {
                 await previous?.value
                 await selection?.value
                 await next?.value
                 await measurement?.value
+                await maps?.value
             }
         }
+        cancelTrackMap()
         selectionCancellation?.cancel(); selectionCancellation = nil
         selectionTask?.cancel(); selectionTask = nil; selectionIntent = nil; preparationID = UUID(); isPreparing = false
         cancelNext(); cancelMeasurement()
@@ -1079,6 +1099,7 @@ extension LibraryController {
             playlistPreprocessingMayStart = true
             prepareNext()
             if playlistPreprocessing == nil || playlistPreprocessing?.supportsProfile == false { measureCurrent() }
+            loadTrackMap()
         } else if playback.state == .paused {
             let levels = measuredLevels
             cancelPreparation()
@@ -1111,6 +1132,43 @@ extension LibraryController {
                 if !(error is CancellationError) { self.peakMeasurement = .failed(error.localizedDescription) }
             }
         }
+    }
+}
+
+// MARK: - Track map
+
+struct LoadedTrackMap {
+    let url: URL
+    let map: TrackMap
+}
+
+extension LibraryController {
+    /// The beats and lead vocal of the track being played, found before playback (`AudioPreprocessing.trackMap`).
+    /// Nil until they are known, and for a track that could not be mapped. A paused or stopped track keeps its map.
+    public var currentTrackMap: TrackMap? {
+        guard let loadedTrackMap, loadedTrackMap.url == playback.selectedURL else { return nil }
+        return loadedTrackMap.map
+    }
+    /// Reads the current track's map from the cache, or joins or starts the scan that makes it. It shares
+    /// the playing track's file access, so it adds no lease.
+    private func loadTrackMap() {
+        guard let url = playback.selectedURL, let lease = playback.activeFileLease, let track = currentTrack,
+              loadedTrackMap?.url != url, mapRequestURL != url else { return }
+        cancelTrackMap()
+        mapRequestURL = url
+        let cancellation = PreparationCancellation(); mapCancellation = cancellation
+        mapTask = Task(priority: .utility) { [weak self, lease, preprocessor] in
+            defer { withExtendedLifetime(lease) {} }
+            let map = try? await preprocessor.trackMap(url, cancellation: cancellation, ownerID: track.id)
+            guard let self, self.mapCancellation === cancellation else { return }
+            self.mapTask = nil; self.mapCancellation = nil
+            // After a failure the request stays recorded, so the same track is not scanned again at once.
+            if let map { self.loadedTrackMap = LoadedTrackMap(url: url, map: map) }
+        }
+    }
+    private func cancelTrackMap() {
+        mapCancellation?.cancel(); mapCancellation = nil
+        mapTask?.cancel(); mapTask = nil; mapRequestURL = nil
     }
 }
 

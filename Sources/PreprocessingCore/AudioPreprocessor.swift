@@ -21,7 +21,8 @@ public final class AudioPreprocessor: AudioPreprocessing {
         return priority >= .userInitiated ? .userInitiated : priority <= .background ? .background : .utility
     }
     public init(cache: MeasurementCacheConfiguration? = nil, collectMeasurementTimings: Bool = false) {
-        state = PreprocessingState(cache: cache.map(MeasurementCache.init), collectTimings: collectMeasurementTimings)
+        state = PreprocessingState(cache: cache.map(MeasurementCache.init), collectTimings: collectMeasurementTimings,
+                                   maps: cache?.trackAnalyzers ?? .standard)
         LoudnessMeter.cleanAbandonedFiles()
     }
     public func statistics() async -> MeasurementStatistics {
@@ -38,6 +39,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
         queue.async(qos: .userInitiated) {
             for job in self.state.levels.values where job.waiters.contains(where: { $0.cancellation === cancellation }) { job.raise(.userInitiated) }
             for job in self.state.peaks.values where job.waiters.contains(where: { $0.cancellation === cancellation }) { job.raise(.userInitiated) }
+            for job in self.state.mapJobs.values where job.waiters.contains(where: { $0.cancellation === cancellation }) { job.raise(.userInitiated) }
         }
     }
     /// The QoS class a request from the current task runs at, for tests.
@@ -74,7 +76,8 @@ public final class AudioPreprocessor: AudioPreprocessing {
                             self.state.statistics.cacheHits += 1; continuation.resume(returning: result); return
                         }
                         self.state.statistics.cacheMisses += 1
-                        let scan = try LevelScan(url: url, profile: profile, cancellation: .init(), collectTimings: self.state.collectTimings)
+                        let scan = try LevelScan(url: url, profile: profile, cancellation: .init(), collectTimings: self.state.collectTimings,
+                                                 maps: self.state.maps)
                         let job = LevelJob(scan: scan, request: request, waiters: [waiter], qos: qos)
                         self.state.levels[key] = job; self.state.statistics.levelScans += 1
                         self.stepLevels(job, key: key)
@@ -85,10 +88,8 @@ public final class AudioPreprocessor: AudioPreprocessing {
     }
     private func stepLevels(_ job: LevelJob, key: MeasurementJobKey) {
         do {
-            guard job.waiters.contains(where: { (try? $0.cancellation.check()) != nil }) else { throw CancellationError() }
-            if let result = try job.scan.read(checkActive: {
-                guard job.waiters.contains(where: { (try? $0.cancellation.check()) != nil }) else { throw CancellationError() }
-            }) {
+            guard job.isActive else { throw CancellationError() }
+            if let result = try job.scan.read(checkActive: { guard job.isActive else { throw CancellationError() } }) {
                 try key.source.validate()
                 if let request = job.request { try state.cache?.validate(request, for: result.source.url) }
                 guard result.source == key.source else { throw PreprocessingFailure.sourceChanged }
@@ -106,12 +107,74 @@ public final class AudioPreprocessor: AudioPreprocessing {
                 state.statistics.measurementWorkSeconds += job.scan.workSeconds
                 state.statistics.nativePeakWorkSeconds += job.scan.nativePeakSeconds
                 job.scan.close(); state.levels[key] = nil
+                if let map = job.scan.trackMap {
+                    saveMap(map, url: result.source.url, owners: job.waiters.map(\.owner) + job.mapWaiters.map(\.owner),
+                              isCurrent: { job.isActive })
+                    for waiter in job.mapWaiters { waiter.finish(.success(map)) }
+                } else { for waiter in job.mapWaiters { waiter.finish(.failure(PreprocessingFailure.invalidAudio)) } }
                 for waiter in job.waiters { waiter.finish(.success(result)) }
             } else { queue.async(qos: job.qos, flags: .enforceQoS) { self.stepLevels(job, key: key) } }
         } catch {
             job.scan.close(); state.levels[key] = nil
             for waiter in job.waiters { waiter.finish(.failure(error)) }
+            for waiter in job.mapWaiters { waiter.finish(.failure(error)) }
         }
+    }
+
+    /// The map of a track: a stored map of the configured analyzers, the map made by a level scan of
+    /// the same source already under way, or a scan of its own.
+    public func trackMap(_ url: URL, cancellation: PreparationCancellation = .init(), ownerID: UUID? = nil) async throws -> TrackMap {
+        let qos = Self.requestedQoS
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                queue.async(qos: qos, flags: .enforceQoS) {
+                    do {
+                        try cancellation.check()
+                        let source = try SourceFingerprint(url: url)
+                        let key = MeasurementJobKey(source: source, profile: nil)
+                        let waiter = MeasurementWaiter(cancellation: cancellation, owner: ownerID, continuation: continuation)
+                        if let job = self.state.mapJobs[key] {
+                            job.waiters.append(waiter); job.raise(qos); self.state.statistics.coalescedRequests += 1; return
+                        }
+                        let request = try? self.state.cache?.mapRequest(url)
+                        if let request, let map = try? self.state.cache?.loadMap(request, owner: ownerID) {
+                            try self.state.cache?.validate(request, for: url)
+                            try source.validate(); try cancellation.check()
+                            self.state.statistics.cacheHits += 1; continuation.resume(returning: map); return
+                        }
+                        if let job = self.state.levels.first(where: { $0.key.source == source && $0.value.scan.mapsTrack })?.value {
+                            job.mapWaiters.append(waiter); job.raise(qos); self.state.statistics.coalescedRequests += 1; return
+                        }
+                        self.state.statistics.cacheMisses += 1
+                        let scan = try MapScan(url: url, analyzers: self.state.maps)
+                        let job = MapJob(scan: scan, waiters: [waiter], qos: qos)
+                        self.state.mapJobs[key] = job; self.state.statistics.mapScans += 1
+                        self.stepMap(job, key: key)
+                    } catch { continuation.resume(throwing: error) }
+                }
+            }
+        } onCancel: { cancellation.cancel() }
+    }
+    private func stepMap(_ job: MapJob, key: MeasurementJobKey) {
+        do {
+            guard job.isActive else { throw CancellationError() }
+            if let map = try job.scan.read() {
+                try key.source.validate()
+                job.scan.close(); state.mapJobs[key] = nil
+                saveMap(map, url: key.source.url, owners: job.waiters.map(\.owner), isCurrent: { job.isActive })
+                for waiter in job.waiters { waiter.finish(.success(map)) }
+            } else { queue.async(qos: job.qos, flags: .enforceQoS) { self.stepMap(job, key: key) } }
+        } catch {
+            job.scan.close(); state.mapJobs[key] = nil
+            for waiter in job.waiters { waiter.finish(.failure(error)) }
+        }
+    }
+    private func saveMap(_ map: TrackMap, url: URL, owners: [UUID?], isCurrent: () -> Bool) {
+        guard let cache = state.cache else { return }
+        do {
+            guard let request = try cache.mapRequest(url) else { return }
+            try cache.saveMap(map, request: request, owners: owners, validating: url, isCurrent: isCurrent)
+        } catch { state.statistics.cacheWriteFailures += 1 }
     }
 
     public func prepare(_ url: URL, cancellation: PreparationCancellation = .init(),
@@ -220,6 +283,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
 public struct MeasurementStatistics: Sendable {
     public internal(set) var levelScans = 0
     public internal(set) var peakScans = 0
+    public internal(set) var mapScans = 0
     public internal(set) var coalescedRequests = 0
     public internal(set) var cacheHits = 0
     public internal(set) var cacheMisses = 0
@@ -237,6 +301,7 @@ private struct MeasurementWaiter<Value: Sendable> {
     let cancellation: PreparationCancellation
     let owner: UUID?
     let continuation: CheckedContinuation<Value, any Error>
+    var isActive: Bool { (try? cancellation.check()) != nil }
     func finish(_ result: Result<Value, any Error>) {
         do { try cancellation.check(); continuation.resume(with: result) }
         catch { continuation.resume(throwing: error) }
@@ -247,6 +312,9 @@ private final class LevelJob: @unchecked Sendable {
     let scan: LevelScan
     let request: MeasurementRequest?
     var waiters: [MeasurementWaiter<TrackAudioMetrics>]
+    /// Requests for the map this scan also makes. They keep the scan going on their own.
+    var mapWaiters: [MeasurementWaiter<TrackMap>] = []
+    var isActive: Bool { waiters.contains { $0.isActive } || mapWaiters.contains { $0.isActive } }
     private(set) var qos: DispatchQoS
     init(scan: LevelScan, request: MeasurementRequest?, waiters: [MeasurementWaiter<TrackAudioMetrics>], qos: DispatchQoS) {
         self.scan = scan; self.request = request; self.waiters = waiters; self.qos = qos
@@ -263,13 +331,25 @@ private final class PeakJob: @unchecked Sendable {
     }
     func raise(_ requested: DispatchQoS) { if requested.qosClass.rawValue.rawValue > qos.qosClass.rawValue.rawValue { qos = requested } }
 }
+private final class MapJob: @unchecked Sendable {
+    let scan: MapScan
+    var waiters: [MeasurementWaiter<TrackMap>]
+    var isActive: Bool { waiters.contains { $0.isActive } }
+    private(set) var qos: DispatchQoS
+    init(scan: MapScan, waiters: [MeasurementWaiter<TrackMap>], qos: DispatchQoS) { self.scan = scan; self.waiters = waiters; self.qos = qos }
+    func raise(_ requested: DispatchQoS) { if requested.qosClass.rawValue.rawValue > qos.qosClass.rawValue.rawValue { qos = requested } }
+}
 private final class PreprocessingState: @unchecked Sendable {
     let cache: MeasurementCache?
     let collectTimings: Bool
+    let maps: TrackAnalyzers
     var statistics = MeasurementStatistics()
     var levels: [MeasurementJobKey: LevelJob] = [:]
     var peaks: [MeasurementJobKey: PeakJob] = [:]
-    init(cache: MeasurementCache?, collectTimings: Bool) { self.cache = cache; self.collectTimings = collectTimings }
+    var mapJobs: [MeasurementJobKey: MapJob] = [:]
+    init(cache: MeasurementCache?, collectTimings: Bool, maps: TrackAnalyzers) {
+        self.cache = cache; self.collectTimings = collectTimings; self.maps = maps
+    }
 }
 
 /// Exclusive to the utility queue; each continuation is resumed exactly once.

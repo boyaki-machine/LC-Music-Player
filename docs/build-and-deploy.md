@@ -198,6 +198,12 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 - `--no-parallel`を外してスイートを並列に実行しても成功します。
 - 実出力のテストを追加するときは、並列でも成功するように書きます。固定の待ち時間ではなく条件が成り立つまで待ち、負荷が高くても待つ間に自然送りが起きない長さ（数秒以上）の音源を使います。共有の`AudioPreprocessor.shared`ではなく専用のインスタンスを渡し、LibraryControllerが裏で行うキャッシュの照合などは、完了を確かめてから次へ進みます。共有の一時フォルダは、件数ではなく自分が作ったファイルだけを確かめます。
 
+拍とボーカルの解析を実際の曲で評価する場合は、`scripts/beat-annotator.html`で記録した正解と音源を同じディレクトリに置き、次を実行します。音源と正解はリポジトリに入れません。記録の方法と指標は[曲の地図の実装設計](design/15_track-map-implementation.md#実際の曲での評価)を参照してください。
+
+```sh
+LCMP_BEAT_EVAL=<音源と正解のディレクトリ> ./scripts/swift.sh test --filter BeatEvaluationTests
+```
+
 ## iPhone版
 
 iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwiftパッケージのライブラリ（LibraryCore・PlayerUI・PlaybackCore・ControlSurfaces）を参照し、iOSだけの部分（アプリの入口・音声セッション・ファイルの選択）を`iOS/LCMPiOS/`に、ホーム画面のウィジェットを`iOS/LCMPWidgets/`（アプリに埋め込む拡張）に置きます。

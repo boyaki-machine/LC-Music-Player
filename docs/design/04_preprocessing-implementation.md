@@ -7,7 +7,7 @@
 前処理は、音源参照と[単曲再生](02_playback-implementation.md)の間で、再生に使う先頭PCMと全曲の測定値を背景で準備する。
 
 - **先頭PCM**：次に再生する曲の先頭を読み込んでおき、再生へ引き継ぐ。
-- **全曲測定**：全プレイリストの曲を1曲ずつ走査し、Integrated LUFS・true peak・sample peakを求めて保存する。
+- **全曲測定**：全プレイリストの曲を1曲ずつ走査し、Integrated LUFS・true peak・sample peakを求めて保存する。同じ走査で、拍とリードボーカルの動きを求める（[曲の地図の実装設計](15_track-map-implementation.md)）。
 - **最大音量の表示**：現在曲のsample peakを表示用に公開する。
 
 前処理は再生音のゲインや周波数特性を変更しない。LUFS・true peakの測定方式と、音量自動調整ONのときの再生待ちは[音量自動調整の実装設計](06_volume-normalization-implementation.md)、測定値の保存は[永続キャッシュ](05_measurement-cache-implementation.md)に記載する。[周波数解析](07_analysis-implementation.md)は再生経路のPCMを観測する別の機能である。
@@ -102,7 +102,7 @@ mono/stereo変換、短い曲、gatingの対象がない曲、true-peak補間の
 - インポート中は巡回を始めず、登録用アクセスの寿命が終わってから開始する。
 - 優先順位は、明示的な再生要求、再生中の現在曲、直後、直前、現在リストの残り、他リストの保存順とする。直後・直前は再生順序に従い、ランダム再生では一巡の記録の直前と、控えた次の曲を使う。リストの端は折り返さず、同じtrackIDの重複行を除く。別IDの同じsource/profileは、既存のキャッシュ照合と所有対応を使う。
 - 閲覧中のリストは再生リストを変更しない。
-- `measureLevels`で有効なキャッシュを検索し、未測定ならLUFS・true peak・sample peakを1回の走査で求める。
+- `measureLevels`で有効なキャッシュを検索し、未測定ならLUFS・true peak・sample peakと曲の地図を1回の走査で求める。続けて`trackMap`を要求し、地図より前に測定済みだった曲や解析器の版が変わった曲だけ、地図を一度走査する。
 - 音量自動調整のON/OFFと測定値の表示のON/OFFは巡回の開始条件ではない。補正OFFの音声経路と設定値はそのまま維持する。最大音量の表示を有効にした場合は、現在曲のnative sample peak専用の経路を維持する。
 
 先行処理の枠とleaseは次のように扱う。

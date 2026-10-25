@@ -73,6 +73,54 @@ struct AudioOutputTests {
         #expect(last > backend.duration - 0.1)
     }
 
+    /// Frames say where in the track their window is: just behind the rendered position, through
+    /// pausing and seeking.
+    @Test func analysisFramesCarryTheTrackPosition() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-position-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44100 * 4))
+        buffer.frameLength = buffer.frameCapacity
+        let samples = try #require(buffer.floatChannelData)[0]
+        for frame in 0..<Int(buffer.frameLength) { samples[frame] = 0.05 * sin(Float(frame) * 2 * .pi * 440 / 44100) }
+        do { try AVAudioFile(forWriting: url, settings: format.settings).write(from: buffer) }
+        let controller = PlaybackController()
+        defer { controller.close() }
+        controller.setVolume(0.05)
+        controller.select(url)
+        controller.togglePlayPause()
+        /// Frames for a while: each position against the rendered position when it arrived.
+        func observe(_ seconds: Double) async throws -> [(track: Double, rendered: Double)] {
+            var seen: [(Double, Double)] = []
+            var last: UInt64?
+            let deadline = ContinuousClock.now + .seconds(seconds)
+            while ContinuousClock.now < deadline {
+                if let frame = controller.analysisFrame, frame.sequence != last {
+                    last = frame.sequence
+                    seen.append((try #require(frame.trackSeconds), controller.currentTime))
+                }
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            return seen
+        }
+        let playing = try await observe(0.6)
+        #expect(playing.count >= 5)
+        // The rendered position is read from the player's last render, which can trail the newest
+        // rendered buffer the window came from by an I/O buffer or two.
+        for (track, rendered) in playing {
+            #expect(track <= rendered + 0.05 && rendered - track < 0.3, "track \(track) rendered \(rendered)")
+        }
+        #expect(zip(playing.dropFirst(), playing).allSatisfy { $0.track > $1.track })
+        controller.togglePlayPause()
+        let paused = controller.currentTime
+        controller.togglePlayPause()
+        let resumed = try await observe(0.3)
+        #expect(resumed.first.map { $0.track >= paused - 0.1 && $0.track < paused + 0.3 } == true, "\(paused) \(resumed.first.map { $0.track } ?? -1)")
+        controller.seek(to: 2.5)
+        let sought = try await observe(0.3)
+        #expect(sought.first.map { $0.track >= 2.45 && $0.track < 2.8 } == true, "\(sought.first.map { $0.track } ?? -1)")
+    }
+
     @Test func actualPauseResumeStopAndRestartPreserveSystemVolume() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-output-\(UUID()).wav")
         defer { try? FileManager.default.removeItem(at: url) }

@@ -5,12 +5,16 @@ import Foundation
 /// - The ponytail girl glances at the boy with glasses; when their eyes meet she looks away, blushing, her eyes glowing pink.
 /// - The twin-tailed girl watches the two boys; when one notices, she closes her eyes, blushes and trembles.
 /// - The two girls sometimes share the same choreography at the start of a phrase.
+/// - When one starts to shout, the others shout with it.
 struct PuppetEnsemble: Sendable {
     private var random = PuppetRandom(seed: 4)
     private var next = (spiky: 4.0, pony: 3.0, twin: 6.0)
     private var lastPhrase = -1
     private var ponyPending: (at: Double, meet: Bool)?
     private var twinShyAt: Double?
+    private var lastShout: Int?
+    /// A shout with more than this many seconds left has just begun, and the others join it.
+    static let joinWindow = 1.2
     /// The latest exchanges, newest first, for tests and inspection.
     private(set) var log: [String] = []
 
@@ -34,6 +38,16 @@ struct PuppetEnsemble: Sendable {
 
     mutating func update(_ d: inout [PuppetDirector], now: Double) {
         let (twin, spiky, glasses, pony) = (Self.twin, Self.spiky, Self.glasses, Self.pony)
+        // A shout just begun: everyone who can joins in for the rest of it.
+        if let leader = d.indices.first(where: { d[$0].actions.shout > Self.joinWindow }) {
+            let rest = d[leader].actions.shout
+            for i in d.indices where d[i].actions.shout == 0 && d[i].actions.slump <= 0 && d[i].actions.shy <= 0 && d[i].actions.headbang <= 0 {
+                d[i].actions.shout = rest; d[i].cooldown.shout = max(d[i].cooldown.shout, d[leader].cooldown.shout)
+            }
+            if d.allSatisfy({ $0.actions.shout > 0 || $0.actions.slump > 0 || $0.actions.shy > 0 || $0.actions.headbang > 0 }), lastShout != leader {
+                lastShout = leader; say(now, "\(d[leader].member.label)に合わせて全員でシャウト")
+            }
+        } else if d.allSatisfy({ $0.actions.shout == 0 }) { lastShout = nil }
         if now > next.spiky {
             next.spiky = now + 6 + random.next() * 5
             if Self.free(d[spiky], now) {

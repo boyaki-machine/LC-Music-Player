@@ -109,7 +109,7 @@ public final class AudioEngineBackend: PlaybackBackend {
         guard run != nil, let node = analysisNode,
               let analysisConfiguration, receiveAnalysis != nil,
               let session = try? AnalysisSession(configuration: analysisConfiguration) else { return }
-        if analysisSource == nil { analysisSource = try? AnalysisRenderSource(unit: node.audioUnit) }
+        if analysisSource == nil { analysisSource = try? AnalysisRenderSource(unit: node.audioUnit, keeping: node) }
         guard let source = analysisSource else { session.finish(); return }
         let status = session.attach(to: source, sampleRate: node.outputFormat(forBus: 0).sampleRate,
                                     outputLatency: node.outputPresentationLatency)
@@ -125,9 +125,24 @@ public final class AudioEngineBackend: PlaybackBackend {
         analysisTask = Task { [weak self, frames = session.frames, id = session.generation] in
             for await frame in frames {
                 guard !Task.isCancelled, let self, self.analysisGeneration == id else { break }
-                self.receiveAnalysis?(frame)
+                var located = frame
+                located.trackSeconds = self.trackSeconds(of: frame)
+                self.receiveAnalysis?(located)
             }
         }
+    }
+
+    /// Where in the track the middle of the frame's window is: the window's sample time in the engine,
+    /// through the player's timeline, after the position the run started from.
+    private func trackSeconds(of frame: AnalysisFrame) -> Double? {
+        guard let run, !paused, let start = frame.timing.windowStartSample, frame.timing.sampleRate > 0 else { return nil }
+        let center = start + Double(frame.timing.windowFrameCount) / 2
+        guard center.isFinite, abs(center) < 1e15 else { return nil }
+        let nodeTime = AVAudioTime(sampleTime: AVAudioFramePosition(center.rounded()), atRate: frame.timing.sampleRate)
+        guard let playerTime = run.player.playerTime(forNodeTime: nodeTime), playerTime.isSampleTimeValid,
+              playerTime.sampleRate > 0 else { return nil }
+        let seconds = run.startTime + Double(playerTime.sampleTime) / playerTime.sampleRate
+        return seconds.isFinite && seconds >= 0 ? min(duration, seconds) : nil
     }
 
     private func endAnalysis() {

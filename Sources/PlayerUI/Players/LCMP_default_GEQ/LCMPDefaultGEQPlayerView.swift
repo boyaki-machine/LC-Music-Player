@@ -88,7 +88,7 @@ struct LCMPDefaultGEQPlayerView: View {
     private func player(_ metrics: Metrics) -> some View {
         VStack(spacing: 0) {
             ZStack(alignment: .bottom) {
-                PlaybackVisualization(playback: playback, presentation: presentation)
+                PlaybackVisualization(playback: playback, presentation: presentation, library: library)
                     .environment(\.geqAxisLabelSize, metrics.axisLabelSize)
                 AnimationDragSurface { presentation.seekVisible.toggle() }
                 VStack {
@@ -158,7 +158,10 @@ struct LCMPDefaultGEQPlayerView: View {
                     if seekPreview == nil { seekSelection = playback.selectedURL }
                     seekPreview = $0
                 }), range: 0...max(1, playback.duration), vertical: false, label: "再生位置", commit: {
-                    if let seekPreview, seekSelection == playback.selectedURL { playback.seek(to: seekPreview) }
+                    // The library replays a track that has just ended; it holds the access the player gave up.
+                    if let seekPreview, seekSelection == playback.selectedURL {
+                        if let library { library.seek(to: seekPreview) } else { playback.seek(to: seekPreview) }
+                    }
                     seekPreview = nil
                 }, cancel: { presentation.closeOverlays(); seekPreview = nil }, focusChanged: { focused in
                     if focused { presentation.cancelSeekHide() } else { presentation.scheduleSeekHide() }

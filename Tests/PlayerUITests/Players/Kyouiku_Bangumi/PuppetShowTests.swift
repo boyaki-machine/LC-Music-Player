@@ -3,6 +3,7 @@ import Foundation
 import simd
 import Testing
 @testable import AnalysisCore
+import AudioProcessingCore
 @testable import PlayerUI
 @testable import VisualizationKit
 
@@ -76,9 +77,9 @@ import Testing
         #expect(shouted, "the strongest swell makes the puppet shout")
         let pose = d.pose(now: 7.3)
         #expect(pose.upperRotationX < -0.5 && pose.squeeze > 0.5 && pose.shoutLines.allSatisfy { $0.x > 0.5 })
-        // A shout lasts 2.2s and then waits 20s before the next.
+        // A shout lasts 2.2s and then waits 14s before the next.
         _ = Self.run(&d, seconds: 3, level: 1, start: 7.4)
-        #expect(d.actions.shout == 0 && d.cooldown.shout > 10)
+        #expect(d.actions.shout == 0 && d.cooldown.shout > 6)
     }
 
     @Test func onlyTheSpikyHairedBoyHeadbangsAndOnlyOnAClearBeat() {
@@ -250,6 +251,175 @@ import Testing
     }
 }
 
+/// A track map with these beats and, unless given, no vocal.
+func trackMap(_ beats: BeatMap, vocals: VocalMap? = nil) -> TrackMap {
+    TrackMap(beats: beats, vocals: vocals ?? VocalMap(algorithm: 1, durationMilliseconds: beats.durationMilliseconds, register: .unknown,
+                                                      medianNote: 0, frameMilliseconds: 40, mouth: [], notes: [], events: []))
+}
+
+/// A vocal over 30 seconds whose syllables open the mouth fully for 0.2s every 0.4s within its phrases
+/// (by default one, from 2 to 10s), at `note` (`median` overall), with the given extra events.
+func vocalMap(register: VocalMap.Register, median: UInt8, note: UInt8? = nil, phrases: [(Double, Double)] = [(2, 10)],
+              events: [VocalMap.Event] = [], duration: UInt32 = 30_000) -> VocalMap {
+    func sung(_ t: Double) -> Bool { phrases.contains { $0.0 <= t && t < $0.1 } }
+    let mouth = (0..<Int(duration / 40)).map { i -> UInt8 in sung(Double(i) * 0.04) && i % 10 < 5 ? 15 : 0 }
+    let notes = (0..<Int(duration / 80)).map { i -> UInt8 in sung(Double(i) * 0.08) ? (note ?? median) : 0 }
+    let phraseEvents = phrases.map { VocalMap.Event(kind: .phrase, startMilliseconds: UInt32($0.0 * 1000),
+                                                    durationMilliseconds: UInt32(($0.1 - $0.0) * 1000), strength: 100) }
+    return VocalMap(algorithm: 1, durationMilliseconds: duration, register: register, medianNote: median, frameMilliseconds: 40,
+                    mouth: mouth, notes: notes, events: (phraseEvents + events).sorted { $0.startMilliseconds < $1.startMilliseconds })
+}
+
+@Suite struct PuppetShowVocalTests {
+    static let twin = PuppetMember.index("twin"), spiky = PuppetMember.index("spiky")
+    static let glasses = PuppetMember.index("glasses"), pony = PuppetMember.index("pony")
+    /// Nine phrases of 0.8s a second apart from 1s, a pause, and three more from 12s.
+    static let phrases: [(Double, Double)] = {
+        let first = (0..<9).map { (i: Int) -> (Double, Double) in (1 + Double(i), 1.8 + Double(i)) }
+        let after = (0..<3).map { (i: Int) -> (Double, Double) in (12 + Double(i), 12.8 + Double(i)) }
+        return first + after
+    }()
+
+    @Test func eachSongHasOneLeadAndTheOtherPartsMove() {
+        let casting = PuppetCasting(vocals: vocalMap(register: .low, median: 50, phrases: Self.phrases))
+        // Sections: four phrases, four more, the ninth, then the phrases after the pause.
+        #expect(casting.sections.map(\.start) == [0, 5, 9, 12])
+        for section in casting.sections { #expect(Set(section.parts) == Set(PuppetVocalPart.allCases)) }
+        let leads = casting.sections.map { $0.parts.firstIndex(of: .lead)! }
+        #expect(Set(leads).count == 1 && casting.part(of: leads[0], at: 6) == .lead && casting.part(of: leads[0], at: 0.5) == .lead)
+        // The other parts are dealt again: not every section gives the sub to the same puppet.
+        #expect(Set(casting.sections.map { $0.parts.firstIndex(of: .sub)! }).count > 1)
+        // The same song is cast the same way; across songs every puppet gets to lead.
+        #expect(casting == PuppetCasting(vocals: vocalMap(register: .low, median: 50, phrases: Self.phrases)))
+        var everyLead = Set<Int>()
+        for d in 0..<12 {
+            let other = PuppetCasting(vocals: vocalMap(register: .low, median: 50, phrases: Self.phrases, duration: 30_000 + UInt32(d) * 1000))
+            everyLead.formUnion(other.sections.map { $0.parts.firstIndex(of: .lead)! })
+        }
+        #expect(everyLead == Set(PuppetMember.all.indices))
+        // The bands move with the parts: the lead follows the voice's band.
+        #expect(casting.register(for: .lead) == .lowMid && casting.register(for: .sub) == .highMid)
+        #expect(casting.register(for: .beat) == .bass && casting.register(for: .hum) == .high)
+        #expect(PuppetCasting(vocals: vocalMap(register: .high, median: 64)).register(for: .lead) == .highMid)
+    }
+
+    @Test func theVocalIsReadAheadWithItsEvents() throws {
+        let map = vocalMap(register: .low, median: 50, events: [
+            .init(kind: .longTone, startMilliseconds: 3000, durationMilliseconds: 1000, strength: 100),
+            .init(kind: .shout, startMilliseconds: 5000, durationMilliseconds: 500, strength: 100)])
+        // Syllables open at 2.0, 2.4, ...: just before one, the mouth already opens.
+        #expect(map.puppetVocal(at: 2.37).mouth > 0.5 && map.puppetVocal(at: 2.37, lead: 0).mouth < 0.5)
+        let long = map.puppetVocal(at: 3.5)
+        #expect(long.singing && long.longTone && !long.shout && long.pitch == 0)
+        #expect(map.puppetVocal(at: 5.2).shout)
+        #expect(map.puppetVocal(at: 11) == PuppetVocal())
+    }
+
+    /// Runs a director at `bpm` with a level and an optional vocal, returning its mouth samples.
+    static func run(_ d: inout PuppetDirector, seconds: Double, level: Double = 0.7, bpm: Double = 120,
+                    vocal: (Double) -> PuppetVocal?, part: PuppetVocalPart) -> [Double] {
+        var out: [Double] = []
+        var t = 0.0
+        while t < seconds {
+            t += 1 / 30
+            d.update(dt: 1 / 30, now: t, levels: Array(repeating: level, count: 4), beat: PuppetBeat(count: t * bpm / 60, bpm: bpm),
+                     vocal: vocal(t), part: part)
+            out.append(d.mouth)
+        }
+        return out
+    }
+
+    @Test func eachPartSingsItsOwnWay() {
+        // The vocal opens fully for 0.2s every 0.4s, off the 0.5s beat.
+        let syllables: (Double) -> PuppetVocal? = { t in
+            var v = PuppetVocal(); v.singing = true; v.mouth = t.truncatingRemainder(dividingBy: 0.4) < 0.2 ? 1 : 0; return v
+        }
+        var lead = PuppetDirector(member: PuppetMember.all[Self.twin])
+        let sung = Self.run(&lead, seconds: 4, vocal: syllables, part: .lead).suffix(60)
+        #expect(sung.max()! == 1 && sung.min()! == 0)
+        var sub = PuppetDirector(member: PuppetMember.all[Self.spiky])
+        let along = Self.run(&sub, seconds: 4, vocal: syllables, part: .sub).suffix(60)
+        #expect(abs(along.max()! - PuppetDirector.subMouth) < 1e-9 && along.min()! == 0)
+        var harmony = PuppetDirector(member: PuppetMember.all[Self.spiky])
+        let joined = Self.run(&harmony, seconds: 4, vocal: { t in var v = syllables(t)!; v.harmony = true; return v }, part: .sub).suffix(60)
+        #expect(abs(joined.max()! - 0.95) < 1e-9)
+        var beat = PuppetDirector(member: PuppetMember.all[Self.glasses]), alone = beat
+        #expect(Self.run(&beat, seconds: 4, vocal: syllables, part: .beat) == Self.run(&alone, seconds: 4, vocal: { _ in nil }, part: .beat))
+        var hum = PuppetDirector(member: PuppetMember.all[Self.pony]), reference = hum
+        let quiet = Self.run(&hum, seconds: 4, vocal: syllables, part: .hum).suffix(60)
+        let onBeat = Self.run(&reference, seconds: 4, vocal: { _ in nil }, part: .hum).suffix(60)
+        for (q, b) in zip(quiet, onBeat) { #expect(abs(q - b * PuppetDirector.humMouth) < 1e-9) }
+        // Between phrases every part sings on the beat.
+        var between = PuppetDirector(member: PuppetMember.all[Self.glasses]), plain = between
+        #expect(Self.run(&between, seconds: 2, vocal: { _ in PuppetVocal() }, part: .hum)
+                == Self.run(&plain, seconds: 2, vocal: { _ in nil }, part: .hum))
+    }
+
+    @Test func whoeverLeadsActsOutTheVocal() {
+        func with(_ change: @escaping (inout PuppetVocal) -> Void) -> (Double) -> PuppetVocal? {
+            { _ in var v = PuppetVocal(); v.singing = true; v.mouth = 0.5; change(&v); return v }
+        }
+        for member in PuppetMember.all.indices {
+            // Everyone shouts with the singer, whatever the part.
+            for part in PuppetVocalPart.allCases {
+                var shouting = PuppetDirector(member: PuppetMember.all[member])
+                _ = Self.run(&shouting, seconds: 1, vocal: with { $0.shout = true }, part: part)
+                #expect(shouting.actions.shout > 0)
+            }
+            var high = PuppetDirector(member: PuppetMember.all[member])
+            _ = Self.run(&high, seconds: 1, vocal: with { $0.highTone = true }, part: .lead)
+            #expect(high.actions.reach > 0 && high.actions.sparkle > 0 && high.pose(now: 1).armL < -0.2)
+            var long = PuppetDirector(member: PuppetMember.all[member])
+            _ = Self.run(&long, seconds: 1.5, vocal: with { $0.longTone = true }, part: .lead)
+            #expect(long.actions.dreamy > 0 && long.pose(now: 1.5).closedEyes > 0.5 && long.actions.cry == 0)
+        }
+        // Tears: a long tone in a slow song, or a quiet one.
+        var slow = PuppetDirector(member: PuppetMember.all[Self.spiky])
+        _ = Self.run(&slow, seconds: 1, bpm: 80, vocal: with { $0.longTone = true }, part: .lead)
+        var quiet = PuppetDirector(member: PuppetMember.all[Self.glasses])
+        _ = Self.run(&quiet, seconds: 4, level: 0.3, vocal: with { $0.longTone = true }, part: .lead)
+        #expect(slow.actions.cry > 0 && quiet.actions.cry > 0)
+        // The lead lifts its head for high notes.
+        var lifted = PuppetDirector(member: PuppetMember.all[Self.glasses]), level = lifted
+        _ = Self.run(&lifted, seconds: 1, vocal: with { $0.pitch = 0.4 }, part: .lead)
+        _ = Self.run(&level, seconds: 1, vocal: with { _ in }, part: .lead)
+        #expect(lifted.pose(now: 1).headRotation.x < level.pose(now: 1).headRotation.x - 0.05)
+    }
+
+    @Test func theOthersSmileNowAndThenAndSwellsMakeShouts() {
+        var smiles = 0, leadSmiles = 0
+        for member in PuppetMember.all.indices {
+            var d = PuppetDirector(member: PuppetMember.all[member]), lead = d
+            var t = 0.0
+            while t < 60 {
+                t += 1 / 30
+                d.update(dt: 1 / 30, now: t, levels: Array(repeating: 0.6, count: 4), beat: PuppetBeat(count: t * 2, bpm: 120), part: .hum)
+                lead.update(dt: 1 / 30, now: t, levels: Array(repeating: 0.6, count: 4), beat: PuppetBeat(count: t * 2, bpm: 120),
+                            vocal: PuppetVocal(), part: .lead)
+                if d.actions.smile > 1.7 { smiles += 1 }
+                if lead.actions.smile > 0 { leadSmiles += 1 }
+            }
+        }
+        #expect(smiles >= 12 && leadSmiles == 0, "\(smiles)")
+        let smiling = { () -> PuppetDirector in
+            var d = PuppetDirector(member: PuppetMember.all[0]); d.actions.smile = 1.8
+            d.update(dt: 0.5, now: 0.5, levels: [0.5, 0.5, 0.5, 0.5], beat: nil); return d
+        }()
+        #expect(smiling.pose(now: 0.5).blush > 0 && smiling.pose(now: 0.5).closedEyes > 0)
+        // A swell after the music has been going: from quiet to loud makes the puppet on the beat shout,
+        // not the one humming. Loud music from the very start is no swell.
+        var start = PuppetDirector(member: PuppetMember.all[Self.glasses])
+        _ = Self.run(&start, seconds: 4, level: 0.95, vocal: { _ in nil }, part: .beat)
+        #expect(start.actions.shout == 0 && start.actions.sparkle == 0)
+        var beat = PuppetDirector(member: PuppetMember.all[Self.glasses]), hum = beat
+        _ = Self.run(&beat, seconds: 6, level: 0.3, vocal: { _ in PuppetVocal() }, part: .beat)
+        _ = Self.run(&beat, seconds: 1.5, level: 0.95, vocal: { _ in PuppetVocal() }, part: .beat)
+        _ = Self.run(&hum, seconds: 6, level: 0.3, vocal: { _ in PuppetVocal() }, part: .hum)
+        _ = Self.run(&hum, seconds: 1.5, level: 0.95, vocal: { _ in PuppetVocal() }, part: .hum)
+        #expect(beat.actions.shout > 0 && hum.actions.shout == 0)
+    }
+}
+
 @Suite(.serialized) @MainActor struct PuppetShowDriverTests {
     @Test func adoptsDueFramesAdvancesTheDayOnlyWhilePlayingAndReportsMissingData() {
         let driver = PuppetShowDriver()
@@ -319,6 +489,93 @@ import Testing
         }
         #expect(counts.allSatisfy { $0 >= 0 } && zip(counts, counts.dropFirst()).allSatisfy { $1 >= $0 })
         #expect(abs((driver.beat?.bpm ?? 0) - 120) < 1e-9)
+    }
+
+    /// A clear map of the track's beats leads; without it, or without the track position, the live estimate decides.
+    @Test func aClearBeatMapLeadsAndTheLiveEstimateStandsIn() throws {
+        struct HalfSecondBeat: PuppetBeatSource {
+            mutating func reset() {}
+            mutating func feed(registerDB: [Double], at time: Double) {}
+            func beat(at time: Double) -> (index: Int, phase: Double, period: Double)? { (Int(time / 0.5), 0, 0.5) }
+        }
+        let driver = PuppetShowDriver()
+        driver.beats = HalfSecondBeat()
+        driver.synchronize(activity: .playing, visible: true)
+        defer { driver.synchronize(activity: .inactive, visible: false) }
+        // 150 BPM from one second in.
+        let beats = (0..<40).map { (i: Int) -> BeatMap.Beat in
+            BeatMap.Beat(milliseconds: UInt32(1000 + i * 400), strength: 100, isDownbeat: i % 4 == 0)
+        }
+        let map = trackMap(BeatMap(algorithm: 1, durationMilliseconds: 30_000, clarity: 1, tempos: [.init(startMilliseconds: 1000, bpm: 150)], beats: beats))
+        driver.receive(trackMap: map)
+        var located = frame(levels: Array(repeating: 0.6, count: 16), sequence: 1)
+        located.trackSeconds = 2.1
+        driver.receive(located)
+        let heard = try #require(located.timing.estimatedPresentationHostTime)
+        // Heard at `heard`, the track is at 2.1s: three quarters past the beat at 1.8s.
+        let beat = try #require(driver.trackedBeat(at: heard))
+        #expect(beat.index == 2 && abs(beat.phase - 0.75) < 1e-6 && abs(beat.period - 0.4) < 1e-9)
+        #expect(driver.trackedBeat(at: heard + 0.2)?.index == 3)
+        driver.step(now: heard + 0.1)
+        #expect(abs((driver.beat?.bpm ?? 0) - 150) < 1e-6)
+        // Before the map's first beat there is no beat, whatever the live estimate says.
+        var intro = frame(levels: Array(repeating: 0.6, count: 16), generation: located.generation, sequence: 2)
+        intro.trackSeconds = 0.5
+        driver.receive(intro)
+        #expect(driver.trackedBeat(at: try #require(intro.timing.estimatedPresentationHostTime)) == nil)
+        // The track position is not extrapolated for long.
+        #expect(driver.trackedBeat(at: heard + PuppetShowDriver.trackClockLimit + 0.5)?.period == 0.5)
+        // An unclear map, a seek and a frame without its position leave the beat to the live estimate.
+        driver.receive(trackMap: trackMap(BeatMap(algorithm: 1, durationMilliseconds: 30_000, clarity: 0.1, tempos: [], beats: beats)))
+        driver.receive(located)
+        #expect(driver.trackedBeat(at: heard)?.period == 0.5)
+        driver.receive(trackMap: map)
+        driver.reset()
+        #expect(driver.trackedBeat(at: heard)?.period == 0.5)
+        driver.receive(frame(levels: Array(repeating: 0.6, count: 16), sequence: 9))
+        #expect(driver.trackedBeat(at: heard)?.period == 0.5)
+        driver.receive(trackMap: nil)
+        #expect(driver.beatMap == nil)
+    }
+
+    /// The driver reads the vocal at the moment it shows and gives each puppet its part.
+    @Test func theDriverCastsTheVocal() throws {
+        let driver = PuppetShowDriver()
+        driver.synchronize(activity: .playing, visible: true)
+        defer { driver.synchronize(activity: .inactive, visible: false) }
+        driver.receive(trackMap: trackMap(BeatMap(algorithm: 1, durationMilliseconds: 30_000, clarity: 0, tempos: [], beats: []),
+                                          vocals: vocalMap(register: .high, median: 64)))
+        let casting = try #require(driver.casting)
+        #expect(casting.sections.count == 1)
+        var located = frame(levels: Array(repeating: 0.6, count: 16), sequence: 1)
+        // 2.0s into the track a syllable opens (read slightly ahead).
+        located.trackSeconds = 2.0
+        driver.receive(located)
+        let heard = try #require(located.timing.estimatedPresentationHostTime)
+        driver.step(now: heard - VisualizationClock.presentationLead)
+        #expect(driver.vocal?.singing == true)
+        // The lead sings the vocal's open syllable.
+        let lead = try #require(casting.sections[0].parts.firstIndex(of: .lead))
+        #expect(driver.directors[lead].mouth > 0)
+        // A map without a sung phrase casts no one.
+        driver.receive(trackMap: trackMap(BeatMap(algorithm: 1, durationMilliseconds: 30_000, clarity: 0, tempos: [], beats: [])))
+        #expect(driver.casting == nil)
+    }
+
+    /// One shout starts the others: everyone free joins for the rest of it, at the same time.
+    @Test func everyoneShoutsTogether() {
+        var directors = PuppetMember.all.map { PuppetDirector(member: $0) }
+        var ensemble = PuppetEnsemble()
+        directors[1].actions.shout = 2.2; directors[1].cooldown.shout = 14
+        directors[3].actions.shy = 2
+        ensemble.update(&directors, now: 1)
+        #expect(directors[0].actions.shout == 2.2 && directors[2].actions.shout == 2.2 && directors[3].actions.shout == 0)
+        #expect(directors[0].cooldown.shout == 14)
+        // A shout nearly over draws no one in.
+        var late = PuppetMember.all.map { PuppetDirector(member: $0) }
+        late[0].actions.shout = 0.5
+        ensemble.update(&late, now: 2)
+        #expect(late[1...].allSatisfy { $0.actions.shout == 0 })
     }
 
     @Test func theDesignIsListedAndOwnsItsDriver() {
