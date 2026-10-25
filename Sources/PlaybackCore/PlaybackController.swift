@@ -4,9 +4,9 @@ import OSLog
 import AnalysisCore
 import AudioProcessingCore
 
-/// The shutdown steps and their timings, never song names or paths. Console: subsystem `local.lcmp.player`.
+/// The shutdown steps and their timings, never song names or paths. Console: subsystem `io.github.boyaki-machine.LC-Music-Player`.
 extension Logger {
-    public static let shutdown = Logger(subsystem: "local.lcmp.player", category: "shutdown")
+    public static let shutdown = Logger(subsystem: "io.github.boyaki-machine.LC-Music-Player", category: "shutdown")
 }
 
 @Observable

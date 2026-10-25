@@ -11,7 +11,7 @@ public final class AnalysisSession: @unchecked Sendable {
     private let continuation: AsyncStream<AnalysisFrame>.Continuation
     private var renderSource: AnalysisRenderSource?
     private let transport: OpaquePointer
-    private let worker = DispatchQueue(label: "local.lcmp.analysis", qos: .userInitiated)
+    private let worker = DispatchQueue(label: "io.github.boyaki-machine.LC-Music-Player.analysis", qos: .userInitiated)
     private let timer: DispatchSourceTimer
     private let analyzer: SpectrumAnalyzer
     private let stateLock = NSLock()

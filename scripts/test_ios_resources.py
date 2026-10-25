@@ -24,7 +24,7 @@ class IOSResourcesTests(unittest.TestCase):
             app = Path(folder) / 'LCMP.app'
             app.mkdir()
             with (app / 'Info.plist').open('wb') as file:
-                plistlib.dump({'CFBundleIdentifier': 'local.lcmp.player', 'CFBundleShortVersionString': '1.0.0'},
+                plistlib.dump({'CFBundleIdentifier': 'io.github.boyaki-machine.LC-Music-Player', 'CFBundleShortVersionString': '1.0.0'},
                               file, fmt=plistlib.FMT_BINARY)
             self.run_phase(app)
             self.assertEqual((app / 'LCMPLicense/LICENSE').read_bytes(), (ROOT / 'LICENSE').read_bytes())
@@ -34,7 +34,7 @@ class IOSResourcesTests(unittest.TestCase):
                 info = plistlib.load(file)
             self.assertEqual(info['CFBundleShortVersionString'], '1.4.80')
             self.assertEqual(info['CFBundleVersion'], '1.4.80')
-            self.assertEqual(info['CFBundleIdentifier'], 'local.lcmp.player')
+            self.assertEqual(info['CFBundleIdentifier'], 'io.github.boyaki-machine.LC-Music-Player')
 
     def test_extension_gets_the_version_without_licenses(self):
         with tempfile.TemporaryDirectory() as folder:

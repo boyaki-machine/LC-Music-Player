@@ -16,8 +16,11 @@ LEARNINGS_CLAUDE.md
 # Local design mockups (HTML)
 /prototypes/
 
-# Xcode and Swift build products
+# Signing settings that name the developer (macOS Developer ID, iPhone team)
+/Signing.local.xcconfig
 /iOS/Local.xcconfig
+
+# Xcode and Swift build products
 DerivedData/
 build/
 .build/

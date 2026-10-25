@@ -11,7 +11,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
     public static let shared = AudioPreprocessor()
     /// No QoS of its own: a queue's QoS is a floor under its work, which would keep background
     /// requests off the efficiency cores. Each request brings its QoS (`requestedQoS`).
-    private let queue = DispatchQueue(label: "local.lcmp.preprocessing")
+    private let queue = DispatchQueue(label: "io.github.boyaki-machine.LC-Music-Player.preprocessing")
     private let state: PreprocessingState
     /// A standalone instance has no persistent side effects unless configured.
     /// The priority of work requested by the current task.

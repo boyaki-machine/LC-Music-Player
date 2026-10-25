@@ -36,7 +36,7 @@ open build/release/LCMP.app
 ```
 
 - 起動中のアプリと同じ出力先を置き換えないでください。終了してから再ビルドするか、`make release RELEASE_OUTPUT=build/preview/LCMP.app`のように別の出力先を指定します。
-- 開発用は`make debug`、ローカル検証用のZIPは`make archive`、配布用に作り直したアプリを入れたインストーラー（DMG）は`make dmg`です。
+- 開発用は`make debug`、ローカル検証用のZIPは`make archive`、配布用に作り直したアプリを入れたインストーラー（DMG）は`make dmg`です。署名の設定があれば、Developer IDの署名と公証まで行います（[署名と公証](docs/build-and-deploy.md#署名と公証)）。
 - パッケージの依存はなく、ビルドにネットワーク接続は要りません。
 - アプリのバージョンは`<メジャー>.<マイナー>.<ビルド番号>`の形で、ビルド時にGitの履歴から決まります。決め方は[バージョン](docs/build-and-deploy.md#バージョン)を参照してください。
 

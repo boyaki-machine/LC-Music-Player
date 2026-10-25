@@ -54,6 +54,7 @@ test:
 	$(PYTHON) scripts/test_app_version.py
 	$(PYTHON) scripts/test_app_icon.py
 	$(PYTHON) scripts/test_build_dmg.py
+	$(PYTHON) scripts/test_signing.py
 	$(PYTHON) scripts/test_ios_resources.py
 	@# Tests must not leave UserDefaults suite plists behind.
 	@set -eu; \
@@ -82,7 +83,7 @@ ios-sim: ios-build
 	xcrun simctl launch "$(IOS_SIMULATOR)" "$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$(IOS_SIM_APP)/Info.plist")"
 
 ios-device:
-	@test -f iOS/Local.xcconfig || { printf '%s\n' 'Create iOS/Local.xcconfig with DEVELOPMENT_TEAM and LCMP_BUNDLE_PREFIX (see IPHONE_DEVELOPMENT.md).' >&2; exit 1; }
+	@test -f iOS/Local.xcconfig || { printf '%s\n' 'Create iOS/Local.xcconfig with DEVELOPMENT_TEAM (see docs/build-and-deploy.md).' >&2; exit 1; }
 	@grep -Eq '^[[:space:]]*DEVELOPMENT_TEAM[[:space:]]*=[[:space:]]*[A-Z0-9]{10}[[:space:]]*$$' iOS/Local.xcconfig || { printf '%s\n' 'DEVELOPMENT_TEAM in iOS/Local.xcconfig must be the 10-character team ID, not an e-mail address or a name.' >&2; exit 1; }
 	@# Building for the connected iPhone lets Xcode register it with the team for the provisioning profile.
 	udid=$$($(PYTHON) scripts/ios_install.py udid "$(IOS_DEVICE)") && \

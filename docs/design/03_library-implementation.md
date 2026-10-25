@@ -42,7 +42,7 @@
 
 ### 保存と復元
 
-保存先はアプリのコンテナ内のApplication Support（`~/Library/Containers/local.lcmp.player/Data/Library/Application Support/LCMP/library.json`）である。パスはFoundationで求め、ハードコードしない。ライブラリ・設定・測定キャッシュはApp Sandboxのコンテナ内だけに置き、コンテナ外の旧保存先からの移行機能は持たない。
+保存先はアプリのコンテナ内のApplication Support（`~/Library/Containers/io.github.boyaki-machine.LC-Music-Player/Data/Library/Application Support/LCMP/library.json`）である。パスはFoundationで求め、ハードコードしない。ライブラリ・設定・測定キャッシュはApp Sandboxのコンテナ内だけに置き、コンテナ外の旧保存先からの移行機能は持たない。
 
 - schemaVersionは1で、UUIDと音源参照（元ファイルのパスとブックマーク）をJSONに保存する。
 - リスト名が空、IDの重複、存在しない音源・現在エントリへの参照、非ローカルURLは不正データとして拒否する。
@@ -252,7 +252,7 @@
 - 終了コマンドはAppDelegateの専用アクションで受け付け、開いているファイル選択・保存シートを取り消し、オーバーレイと待機タイマーを解除する。
 - `LibraryController.shutdown`は編集と次曲送りを無効にし、音声エンジンと参照アクセスを解放する。その後、アプリは`terminateNow`で終了する。
 - ライブラリは編集時に保存済みのため、終了時の全件保存は行わない。
-- 終了要求、アプリ側の受付、再生エンジンの停止とアクセスの解放、選択の解除、終了直前の時刻を、OSLogのsubsystem `local.lcmp.player`／category `shutdown`（`Logger.shutdown`）へ記録する。曲名やファイルパスはログへ含めない。遅延の調査ではConsoleでこのカテゴリを確認し、入力受付前の遅延と後片付けの遅延を分ける。
+- 終了要求、アプリ側の受付、再生エンジンの停止とアクセスの解放、選択の解除、終了直前の時刻を、OSLogのsubsystem `io.github.boyaki-machine.LC-Music-Player`／category `shutdown`（`Logger.shutdown`）へ記録する。曲名やファイルパスはログへ含めない。遅延の調査ではConsoleでこのカテゴリを確認し、入力受付前の遅延と後片付けの遅延を分ける。
 
 ## 5. 検証
 
