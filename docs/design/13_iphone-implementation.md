@@ -129,7 +129,7 @@
 - `AppLinkTests`の一覧の検査を更新し、未知の値で何も起きないことを引き続き確かめる。
 - ウィジェットのタイムラインは状態が変わるまで更新しない（`.never`）。App Groupがあるときだけ、`ControlSurfaceController`が状態を共有のUserDefaultsへ書いてウィジェットを再読み込みする。再生の状態の`ready`（曲の選択・切り替えの途中）は表示を変えず、停止は0.6秒続いたときだけ反映する。曲の自然な終わりから次の曲へ移る間に光が消えないようにし、再読み込みの回数も抑えるためである。App Groupがないときはウィジェットは状態を知らず、切り替えの記号を出す。
 - ライブアクティビティ（ActivityKit）は使わない。iOSの仕様でロック画面への表示が必ず伴い、システムの「再生中」と二重になるためである。Dynamic Islandには、音声を再生しているアプリとしてシステムの「再生中」が出る。
-- App Groupは、ビルド設定`LCMP_APP_GROUP_ENABLED`が`YES`のときだけ権利（`iOS/AppGroup.entitlements`）を付ける。既定は`NO`で、App Groupを使えない無料の個人チームでもそのまま署名できる。グループ名は`group.<接頭辞>.player`で、アプリと拡張のInfo.plistの`LCMPAppGroup`に入れる。
+- App Groupは、ビルド設定`LCMP_APP_GROUP_ENABLED`が`YES`のときだけ権利（`iOS/AppGroup.entitlements`）を付ける。既定は`NO`で、App Groupを使えない無料の個人チームでもそのまま署名できる。グループ名は`group.$(LCMP_BUNDLE_ID)`で、アプリと拡張のInfo.plistの`LCMPAppGroup`に入れる。
 
 ### 書類の選択
 
@@ -166,10 +166,10 @@
 
 ### ビルドの構成
 
-- `iOS/Shared.xcconfig`（Git管理）に共通の設定を置き、Git管理外の`iOS/Local.xcconfig`を任意で読み込む。Team IDとバンドルIDの接頭辞はLocal.xcconfigだけに置く。既定のバンドルIDは`local.lcmp.player`である。
+- `iOS/Shared.xcconfig`（Git管理）に共通の設定を置き、Git管理外の`iOS/Local.xcconfig`を任意で読み込む。Team IDはLocal.xcconfigだけに置く。アプリの識別子は`LCMP_BUNDLE_ID`で、既定はmacOS版と同じ`io.github.boyaki-machine.LC-Music-Player`である。別のチームで署名するときは、Local.xcconfigで`LCMP_BUNDLE_ID`を上書きする。ウィジェット拡張・UIテスト・App Groupの識別子は`LCMP_BUNDLE_ID`から作る。
 - アプリのソースはファイルシステムと同期するグループで参照し、ファイルの追加でプロジェクトを編集しない。
 - Info.plistはビルド設定から生成し、`iOS/LCMPiOS-Info.plist`の項目（バックグラウンドの音声、URLスキーム`lcmp`、App Groupの名前）を合わせる。
-- ウィジェット拡張のターゲットは`LCMPWidgets`（バンドルIDは`<接頭辞>.player.widgets`）とし、アプリに埋め込む。拡張の最後の段では`scripts/ios_resources.py --version-only`がアプリと同じバージョンだけを書き込む。
+- ウィジェット拡張のターゲットは`LCMPWidgets`（バンドルIDは`$(LCMP_BUNDLE_ID).widgets`）とし、アプリに埋め込む。拡張の最後の段では`scripts/ios_resources.py --version-only`がアプリと同じバージョンだけを書き込む。
 - 最後のビルドの段で`scripts/ios_resources.py`を実行し、LICENSE/NOTICEを`LCMPLicense/`へ、空の依存の索引を`ThirdPartyLicenses/`へ入れ、Gitの履歴から決めたバージョンをInfo.plistへ書き込む。依存を加えたときは、この段で依存のnoticeも入れる必要があり、スクリプトはPackage.resolvedがあると失敗して知らせる。
 - パッケージにもmacOS版の実行ファイル`LCMP`があるため、iPhoneのターゲットとスキームの名前は`LCMPiOS`とする（アプリの名前は`LCMP.app`）。
 - 指の操作のテストはUIテストのターゲット`LCMPiOSUITests`（`iOS/LCMPiOSUITests/`）に置き、共有のスキーム`LCMPiOS`のテストに含める。

@@ -33,7 +33,9 @@ LCMPは第三者のライブラリを使用しません。音声の読み込み�
 
 ### 署名と権限
 
-- ローカル起動用のアプリには、秘密鍵やキーチェーンの認証を必要としないアドホック署名を使用します。アプリの署名は`scripts/signing.py`に集約し、すべてのビルドでhardened runtimeを有効にします。これにより、dyldは`DYLD_INSERT_LIBRARIES`等の環境変数による注入を無視します。
+- アプリの署名は`scripts/signing.py`に集約し、すべてのビルドでhardened runtimeを有効にします。これにより、dyldは`DYLD_INSERT_LIBRARIES`等の環境変数による注入を無視します。
+- 署名は、Git管理外の`Signing.local.xcconfig`にDeveloper IDの証明書を設定していればその証明書、なければ秘密鍵やキーチェーンの認証を必要としないアドホック署名です。配布するDMG（`make dmg`）は、Developer IDの署名に時刻印を付け、公証してstapleします。手順と検証は[ビルド・配置とローカル配布](../build-and-deploy.md#署名と公証)を参照してください。
+- アプリの識別子は`io.github.boyaki-machine.LC-Music-Player`で、iPhone版と共通です。
 - ライブラリの検証は有効のままとします。アプリはOSのライブラリだけを読み込みます。
 - App Sandboxを有効にし、`com.apple.security.app-sandbox`、利用者が選んだファイルの読み書き（`com.apple.security.files.user-selected.read-write`）、security-scoped bookmark（`com.apple.security.files.bookmarks.app-scope`）だけを許可します。ネットワーク・カメラ等の権限は持ちません。
 - データの保存先は[ライブラリの実装設計](03_library-implementation.md)を参照してください。

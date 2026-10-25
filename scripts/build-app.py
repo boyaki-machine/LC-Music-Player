@@ -5,7 +5,7 @@ import json
 from acknowledgements import generate
 from app_version import resolve as resolve_version
 from project_license import bundle, documents
-from signing import sign_app
+from signing import read_settings, sign_app
 from pathlib import Path
 import plistlib
 import re
@@ -15,6 +15,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parent.parent
 # Resource bundles SwiftPM builds for the app's targets (named <package>_<target>.bundle).
 RESOURCE_BUNDLES = ["LCMP_PlayerUI.bundle"]
+# The same identifier as the iPhone app (iOS/Shared.xcconfig). The App Sandbox container is named after it.
+BUNDLE_IDENTIFIER = "io.github.boyaki-machine.LC-Music-Player"
 
 
 def main():
@@ -24,7 +26,11 @@ def main():
                         help="Output .app path; use a different path while the current app is running")
     parser.add_argument("--prefix-map", action="store_true",
                         help="Remove this checkout's path from compiled file/debug locations (apps for distribution)")
+    parser.add_argument("--timestamp", action="store_true",
+                        help="Add a secure timestamp to a Developer ID signature (needed for notarization)")
     args = parser.parse_args()
+    # Read first so that broken settings fail before the build.
+    settings = read_settings()
     documents(ROOT)
     command = [str(ROOT / "scripts/swift.sh"), "build", "-c", args.configuration]
     if args.prefix_map:
@@ -70,22 +76,23 @@ def main():
     shutil.copy2(ROOT / "assets/AppIcon.icns", contents / "Resources/AppIcon.icns")
     # The package's resources (the puppet show's art). In Contents/Resources, not the app's root, where an
     # extra bundle breaks the app's signature; the code finds it there. Signed before the app that seals it.
-    for name in RESOURCE_BUNDLES:
-        target = contents / "Resources" / name
+    bundles = [contents / "Resources" / name for name in RESOURCE_BUNDLES]
+    for name, target in zip(RESOURCE_BUNDLES, bundles):
         shutil.copytree(products / name, target)
-        subprocess.run(["codesign", "--force", "--sign", "-", str(target)], check=True)
     # One dotted version; the build number is its last part, not a separate value.
     version = resolve_version(ROOT)
     with (contents / "Info.plist").open("wb") as file:
         plistlib.dump({
-            "CFBundleExecutable": "LCMP", "CFBundleIdentifier": "local.lcmp.player",
+            "CFBundleExecutable": "LCMP", "CFBundleIdentifier": BUNDLE_IDENTIFIER,
             "CFBundleName": "LCMP", "CFBundleDisplayName": "LC Music Player",
             "CFBundlePackageType": "APPL", "CFBundleShortVersionString": version,
             "CFBundleVersion": version, "LSMinimumSystemVersion": "14.0",
             "CFBundleIconFile": "AppIcon", "NSHighResolutionCapable": True,
         }, file)
-    # Ad-hoc signing uses no private signing key and does not read Keychain.
-    sign_app(app)
+    # Ad-hoc signing uses no private signing key and does not read Keychain; a Developer ID signature uses the
+    # identity's key in Keychain, which may ask once for access.
+    print(f"Signing: {settings.describe()}")
+    sign_app(app, bundles, settings, timestamp=args.timestamp)
     print(app)
 
 

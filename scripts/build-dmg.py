@@ -3,15 +3,19 @@
 import argparse
 import os
 from pathlib import Path
+import json
 import plistlib
+import re
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+from signing import SETTINGS_FILE, NOTARY_PROFILE_KEY, check_signer, codesign_command, read_settings
 
 ROOT = Path(__file__).resolve().parent.parent
-BACKGROUND = ROOT / 'assets/DMGBackground.tiff'
+# Drawn by scripts/render-dmg-background.swift. Only the ad-hoc one explains how to open an app Gatekeeper blocks.
+BACKGROUNDS = {'ad-hoc': ROOT / 'assets/DMGBackground.tiff', 'notarized': ROOT / 'assets/DMGBackground-Notarized.tiff'}
 # Finder layout in points. The background (scripts/render-dmg-background.swift) is drawn for the same values.
 WINDOW = (640, 400)
 WINDOW_ORIGIN = (200, 120)
@@ -217,7 +221,60 @@ def lay_out(volume, ds_store):
     raise RuntimeError(f'Finder did not save the window layout: {"; ".join(problems)}')
 
 
-def build(app, output, work):
+def background(notarized):
+    return BACKGROUNDS['notarized' if notarized else 'ad-hoc']
+
+
+def signature_problems(display, runtime=False):
+    """What a Developer ID distribution needs but `codesign -dvv` (its stderr) does not show; empty when it is all there."""
+    problems = []
+    authorities = re.findall(r'^Authority=(.*)$', display, re.MULTILINE)
+    if not authorities or not authorities[0].startswith('Developer ID Application:'):
+        problems.append('not signed with a Developer ID Application certificate')
+    # A secure timestamp shows as Timestamp=; a signature without one shows only Signed Time=.
+    if not re.search(r'^Timestamp=', display, re.MULTILINE):
+        problems.append('no secure timestamp')
+    if runtime and not re.search(r'^CodeDirectory .*flags=\S*\(([^)]*,)?runtime[,)]', display, re.MULTILINE):
+        problems.append('no hardened runtime')
+    return problems
+
+
+def check_signature(path, runtime=False):
+    display = subprocess.run(['codesign', '-dvv', str(path)], capture_output=True, text=True).stderr
+    problems = signature_problems(display, runtime)
+    if problems:
+        raise RuntimeError(f'{path.name}: {"; ".join(problems)}')
+
+
+def submission_status(output):
+    """Status and id from `notarytool submit --output-format json`; None for what it did not report."""
+    try:
+        result = json.loads(output)
+    except ValueError:
+        return None, None
+    return (result.get('status'), result.get('id')) if isinstance(result, dict) else (None, None)
+
+
+def notarize(image, profile, run=subprocess.run):
+    """Upload the signed image to Apple's notary service, wait for the result and staple the ticket to the image."""
+    print('Submitting to the Apple notary service and waiting for the result (usually a few minutes)', file=sys.stderr)
+    result = run(['xcrun', 'notarytool', 'submit', str(image), '--keychain-profile', profile,
+                  '--wait', '--output-format', 'json'], capture_output=True, text=True)
+    status, submission = submission_status(result.stdout)
+    if status != 'Accepted':
+        log = (f'xcrun notarytool log {submission} --keychain-profile {profile}' if submission
+               else f'xcrun notarytool history --keychain-profile {profile}')
+        detail = ' '.join(result.stderr.split())[-300:]
+        raise RuntimeError(f'Notarization was not accepted (status: {status or "unknown"}). {detail}\n'
+                           f'Read the reason with: {log}')
+    run(['xcrun', 'stapler', 'staple', str(image)], check=True)
+
+
+def is_signed(image):
+    return subprocess.run(['codesign', '-d', str(image)], capture_output=True).returncode == 0
+
+
+def build(app, output, work, settings):
     version = app_version(app)
     volume = volume_name(version)
     if Path('/Volumes', volume).exists():
@@ -227,7 +284,7 @@ def build(app, output, work):
     subprocess.run(['ditto', str(app), str(staging / APP_NAME)], check=True)
     (staging / 'Applications').symlink_to('/Applications')
     (staging / '.background').mkdir()
-    shutil.copy2(BACKGROUND, staging / '.background/background.tiff')
+    shutil.copy2(background(settings.developer_id), staging / '.background/background.tiff')
 
     writable = work / 'writable.dmg'
     megabytes = directory_size(staging) * 12 // 10 // 2**20 + 16
@@ -247,23 +304,48 @@ def build(app, output, work):
     temporary = work / output.name
     subprocess.run(['hdiutil', 'convert', '-quiet', str(writable), '-format', 'UDZO',
                     '-imagekey', 'zlib-level=9', '-o', str(temporary)], check=True)
-    verify(temporary)
+    # The layout is checked before the upload, which takes minutes.
+    verify(temporary, notarized=settings.developer_id)
+    if settings.developer_id:
+        subprocess.run(codesign_command(temporary, settings, timestamp=True), check=True)
+        check_signer(temporary, settings)
+        notarize(temporary, settings.notary_profile)
+        verify(temporary)
     shutil.move(str(temporary), output)
     return output
 
 
-def verify(image):
-    """Check the compressed image: checksum, the signed app, the Applications link and the saved window layout."""
+def verify(image, notarized=None):
+    """Check the compressed image: checksum, the signed app, the Applications link and the saved window layout.
+    A signed image must also be a notarized Developer ID distribution that Gatekeeper accepts. `notarized` chooses
+    the expected background of an image not signed yet; by default a signed image is expected to be notarized."""
     subprocess.run(['hdiutil', 'verify', '-quiet', str(image)], check=True)
+    signed = is_signed(image)
+    notarized = signed if notarized is None else notarized
+    if signed:
+        subprocess.run(['codesign', '--verify', '--strict', str(image)], check=True)
+        check_signature(image)
+        subprocess.run(['xcrun', 'stapler', 'validate', '-q', str(image)], check=True)
+        subprocess.run(['spctl', '--assess', '--type', 'open', '--context', 'context:primary-signature',
+                        str(image)], check=True)
     with tempfile.TemporaryDirectory(prefix='lcmp-dmg-verify-') as temporary:
         mount_point = attach(image, '-readonly', '-nobrowse', '-mountpoint', temporary)
         try:
-            subprocess.run(['codesign', '--verify', '--deep', '--strict', str(mount_point / APP_NAME)], check=True)
+            app = mount_point / APP_NAME
+            subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
+            if signed:
+                check_signature(app, runtime=True)
+                assessment = subprocess.run(['spctl', '--assess', '--type', 'execute', '-vv', str(app)],
+                                            capture_output=True, text=True)
+                if assessment.returncode != 0 or 'source=Notarized Developer ID' not in assessment.stderr:
+                    raise RuntimeError(f'Gatekeeper does not accept the app as notarized: {assessment.stderr.strip()}')
             if os.readlink(mount_point / 'Applications') != '/Applications':
                 raise RuntimeError('Applications must link to /Applications')
             for name in ['.background/background.tiff', '.DS_Store']:
                 if not (mount_point / name).is_file():
                     raise RuntimeError(f'Missing {name} in the image')
+            if (mount_point / '.background/background.tiff').read_bytes() != background(notarized).read_bytes():
+                raise RuntimeError(f'The background is not {background(notarized).name}')
             problems = layout_problems(mount_point / '.DS_Store')
             if problems:
                 raise RuntimeError(f'Wrong window layout: {"; ".join(problems)}')
@@ -274,12 +356,20 @@ def verify(image):
             detach(mount_point)
 
 
-def release_app(work):
+def release_app(work, settings):
     """Build the release app without this checkout's path in the executable."""
     app = work / 'release' / APP_NAME
-    subprocess.run([sys.executable, str(ROOT / 'scripts/build-app.py'), '--configuration', 'release',
-                    '--prefix-map', '--output', str(app)], check=True)
+    command = [sys.executable, str(ROOT / 'scripts/build-app.py'), '--configuration', 'release',
+               '--prefix-map', '--output', str(app)]
+    subprocess.run(command + (['--timestamp'] if settings.developer_id else []), check=True)
     return app
+
+
+def check_app(app, settings):
+    """An existing app to package must be signed as the image will be: by the same Developer ID, with a timestamp."""
+    if settings.developer_id:
+        check_signer(app, settings)
+        check_signature(app, runtime=True)
 
 
 def main():
@@ -292,12 +382,20 @@ def main():
         verify(args.verify.resolve())
         print(f'Verified {args.verify}')
         return
+    settings = read_settings()
+    if settings.developer_id and not settings.notary_profile:
+        raise SystemExit(f'Set {NOTARY_PROFILE_KEY} in {SETTINGS_FILE.name}: a Developer ID DMG is notarized')
+    print(f'Signing: {settings.describe()}', file=sys.stderr)
     (ROOT / 'build').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.lcmp-dmg-', dir=ROOT / 'build') as temporary:
         work = Path(temporary)
-        app = args.app.resolve(strict=True) if args.app else release_app(work)
+        if args.app:
+            app = args.app.resolve(strict=True)
+            check_app(app, settings)
+        else:
+            app = release_app(work, settings)
         output = (args.output or default_output(app_version(app))).resolve()
-        print(build(app, output, work))
+        print(build(app, output, work, settings))
 
 
 if __name__ == '__main__':

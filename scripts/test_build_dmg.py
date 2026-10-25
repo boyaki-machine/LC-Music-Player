@@ -94,12 +94,22 @@ class BuildDMGTests(unittest.TestCase):
         self.assertIn(f'if bounds of container window is not {bounds} then error', script)
         self.assertGreater(build_dmg.LAYOUT_ATTEMPTS, 1)
 
-    def test_background_has_standard_and_retina_images(self):
-        info = subprocess.check_output(['tiffutil', '-info', str(build_dmg.BACKGROUND)], text=True)
-        sizes = [tuple(map(int, size)) for size in re.findall(r'Image Width: (\d+) Image Length: (\d+)', info)]
-        width, height = build_dmg.WINDOW
-        self.assertEqual(sizes, [(width, height), (width * 2, height * 2)])
-        self.assertEqual(re.findall(r'Resolution: (\d+), \d+', info), ['72', '144'])
+    def test_backgrounds_have_standard_and_retina_images(self):
+        for background in build_dmg.BACKGROUNDS.values():
+            info = subprocess.check_output(['tiffutil', '-info', str(background)], text=True)
+            sizes = [tuple(map(int, size)) for size in re.findall(r'Image Width: (\d+) Image Length: (\d+)', info)]
+            width, height = build_dmg.WINDOW
+            self.assertEqual(sizes, [(width, height), (width * 2, height * 2)])
+            self.assertEqual(re.findall(r'Resolution: (\d+), \d+', info), ['72', '144'])
+
+    def test_only_the_ad_hoc_background_explains_the_way_past_gatekeeper(self):
+        self.assertEqual(build_dmg.background(False).name, 'DMGBackground.tiff')
+        self.assertEqual(build_dmg.background(True).name, 'DMGBackground-Notarized.tiff')
+        self.assertNotEqual(build_dmg.background(False).read_bytes(), build_dmg.background(True).read_bytes())
+        source = (ROOT / 'scripts/render-dmg-background.swift').read_text()
+        self.assertIn('let note = notarized ? notarizedNote : adHocNote', source)
+        self.assertIn('「このまま開く」', source.split('let adHocNote = ')[1].split('\n')[0])
+        self.assertNotIn('このまま開く', source.split('let notarizedNote = ')[1].split('\n')[0])
 
     def test_renderer_draws_for_the_finder_layout(self):
         source = (ROOT / 'scripts/render-dmg-background.swift').read_text()
@@ -130,6 +140,51 @@ class BuildDMGTests(unittest.TestCase):
             version = build_dmg.app_version(app)
             self.assertEqual(build_dmg.default_output(version), ROOT / 'build/dmg/LCMP-0.22.58.dmg')
             self.assertEqual(build_dmg.volume_name(version), 'LC Music Player 0.22.58')
+
+    def test_signature_of_a_distribution(self):
+        app = ('Executable=/Volumes/x/LCMP.app/Contents/MacOS/LCMP\n'
+               'CodeDirectory v=20500 size=12532 flags=0x10000(runtime) hashes=380+7 location=embedded\n'
+               'Authority=Developer ID Application: Example (ABCDE12345)\nAuthority=Developer ID Certification Authority\n'
+               'Authority=Apple Root CA\nTimestamp=26 Oct 2026 at 0:51:30\n')
+        self.assertEqual(build_dmg.signature_problems(app, runtime=True), [])
+        self.assertEqual(build_dmg.signature_problems(app.replace('flags=0x10000(runtime)', 'flags=0x0(none)'), runtime=True),
+                         ['no hardened runtime'])
+        self.assertEqual(build_dmg.signature_problems(app.replace('Timestamp=', 'Signed Time=')), ['no secure timestamp'])
+        ad_hoc = 'CodeDirectory v=20500 size=12530 flags=0x10002(adhoc,runtime) hashes=381+7\nSignature=adhoc\n'
+        self.assertEqual(build_dmg.signature_problems(ad_hoc, runtime=True),
+                         ['not signed with a Developer ID Application certificate', 'no secure timestamp'])
+        development = app.replace('Developer ID Application:', 'Apple Development:')
+        self.assertEqual(build_dmg.signature_problems(development),
+                         ['not signed with a Developer ID Application certificate'])
+
+    def notarize(self, stdout, stderr=''):
+        calls = []
+
+        def run(command, **options):
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, stdout if 'submit' in command else '', stderr)
+
+        build_dmg.notarize(Path('LCMP.dmg'), 'LCMP-notary', run)
+        return calls
+
+    def test_notarization_waits_for_the_result_and_staples_the_ticket(self):
+        calls = self.notarize('{"id": "e894", "status": "Accepted", "message": "Processing complete"}')
+        self.assertEqual(calls, [
+            ['xcrun', 'notarytool', 'submit', 'LCMP.dmg', '--keychain-profile', 'LCMP-notary',
+             '--wait', '--output-format', 'json'],
+            ['xcrun', 'stapler', 'staple', 'LCMP.dmg']])
+
+    def test_a_rejected_submission_fails_with_the_way_to_its_log(self):
+        with self.assertRaises(RuntimeError) as raised:
+            self.notarize('{"id": "e894", "status": "Invalid", "message": "Processing complete"}')
+        self.assertIn('status: Invalid', str(raised.exception))
+        self.assertIn('xcrun notarytool log e894 --keychain-profile LCMP-notary', str(raised.exception))
+        # No answer at all (no network, wrong profile): point to the history and keep notarytool's message.
+        with self.assertRaises(RuntimeError) as raised:
+            self.notarize('', 'Error: No Keychain password item found for profile: LCMP-notary')
+        self.assertIn('status: unknown', str(raised.exception))
+        self.assertIn('No Keychain password item found', str(raised.exception))
+        self.assertIn('xcrun notarytool history --keychain-profile LCMP-notary', str(raised.exception))
 
     def test_make_target_builds_the_dmg(self):
         makefile = (ROOT / 'Makefile').read_text()
