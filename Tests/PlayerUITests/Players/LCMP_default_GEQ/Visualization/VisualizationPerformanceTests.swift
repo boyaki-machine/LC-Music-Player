@@ -3,13 +3,15 @@ import AppKit
 import AVFAudio
 import Darwin
 import Foundation
+import Metal
+import MetalKit
 import SwiftUI
 import Testing
 import AnalysisCore
 import PlaybackCore
 import PreprocessingCore
 import VisualizationKit
-import PlayerUI
+@testable import PlayerUI
 
 /// Opt-in: real output at app volume zero; offscreen native rasterization.
 /// This measures CPU/readback readiness, not photons or physical audio onset.
@@ -30,6 +32,49 @@ import PlayerUI
     @Test(arguments: SourceCondition.allCases)
     func comparesSourceConditions(_ condition: SourceCondition) async throws {
         try await measure(fft: 2048, seconds: 6, label: "source-\(condition.rawValue)", source: condition)
+    }
+
+    /// The LED in a visible window at 30 Hz, drawn by the Canvas renderer and by the Metal view in turns.
+    /// Only the drawing runs (no playback), so the difference is the renderer's own cost.
+    @Test func comparesOnScreenRenderers() async throws {
+        var results: [String: [(cpu: Double, milliwatts: Double, wakeups: Double)]] = [:]
+        for renderer in ["canvas", "metal", "canvas", "metal"] {
+            results[renderer, default: []].append(try await measureOnScreen(metal: renderer == "metal"))
+        }
+        var summary: [String: Any] = ["label": "onscreen-renderers"]
+        for (name, samples) in results {
+            summary[name] = ["cpuPercentOneCore": samples.map(\.cpu), "energyMilliwatts": samples.map(\.milliwatts),
+                             "wakeupsPerSecond": samples.map(\.wakeups)]
+        }
+        let json = try JSONSerialization.data(withJSONObject: summary, options: [.prettyPrinted, .sortedKeys])
+        print("LED_ONSCREEN \(String(decoding: json, as: UTF8.self))")
+        if let directory = ProcessInfo.processInfo.environment["LCMP_VISUALIZATION_REPORT_DIR"] {
+            let destination = URL(fileURLWithPath: directory, isDirectory: true)
+            try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+            try json.write(to: destination.appendingPathComponent("onscreen-renderers.json"), options: .atomic)
+        }
+        let canvas = results["canvas", default: []].map(\.milliwatts).reduce(0, +)
+        let metal = results["metal", default: []].map(\.milliwatts).reduce(0, +)
+        #expect(metal < canvas)
+    }
+
+    private func measureOnScreen(metal: Bool, seconds: Double = 15) async throws -> (cpu: Double, milliwatts: Double, wakeups: Double) {
+        let states = LCMPDefaultGEQMetalTests.states()
+        let ticker = OnScreenTicker()
+        let host = NSHostingView(rootView: OnScreenLED(ticker: ticker, states: states.map(\.frame), metal: metal))
+        let window = NSWindow(contentRect: CGRect(x: 200, y: 200, width: 360, height: 144), styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = host
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil); window.contentView = nil }
+        try await Task.sleep(for: .seconds(1))
+        let cpuStart = cpuSeconds(), energyStart = energy(), start = VisualizationClock.now()
+        while VisualizationClock.now() - start < seconds {
+            ticker.tick += 1
+            try await Task.sleep(for: .milliseconds(33))
+        }
+        let elapsed = VisualizationClock.now() - start, energyEnd = energy()
+        return ((cpuSeconds() - cpuStart) / elapsed * 100, Double(energyEnd.nanojoules - energyStart.nanojoules) / elapsed / 1e6,
+                Double(energyEnd.wakeups - energyStart.wakeups) / elapsed)
     }
 
     private func measure(fft: Int, seconds: Double, label: String, source: SourceCondition = .wav48k) async throws {
@@ -57,6 +102,13 @@ import PlayerUI
             if let center = frame.timing.windowCenterHostTime { age.add(frame.timing.producedHostTime - center) }
         }
         defer { backend.stop(); driver.synchronize(activity: .inactive, visible: false) }
+        // The view's Metal renderer, with the glow images it keeps between frames.
+        let metal = try #require(LCMPDefaultGEQMetal.shared)
+        let glow = try #require(LCMPDefaultGEQGlow(layout: LCMPDefaultGEQLayout(size: CGSize(width: 360, height: 144), axisLabelSize: 9),
+                                                   scale: 1, device: metal.device))
+        let scratch = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: LCMPDefaultGEQMetal.colorFormat, width: 360, height: 144, mipmapped: false)
+        scratch.usage = .renderTarget; scratch.storageMode = .private
+        let target = try #require(metal.device.makeTexture(descriptor: scratch))
         try backend.play()
         let start = VisualizationClock.now(), cpuStart = cpuSeconds()
         var checkpoint = start, next = start
@@ -68,15 +120,18 @@ import PlayerUI
         while VisualizationClock.now() - start < seconds {
             let snapshot = driver.snapshot, time = driver.drawTime
             let began = VisualizationClock.now()
+            let frame = LCMPDefaultGEQFrame(snapshot: snapshot, now: time)
             let success = autoreleasepool {
-                let content = Canvas { context, size in
+                // Listing the rectangles alone, into a pass that is never committed.
+                let pass = MTLRenderPassDescriptor()
+                pass.colorAttachments[0].texture = target
+                if let buffer = metal.queue.makeCommandBuffer(), let encoder = buffer.makeRenderCommandEncoder(descriptor: pass) {
                     let began = VisualizationClock.now()
-                    LCMPDefaultGEQRenderer.draw(context: context, size: size, snapshot: snapshot, now: time)
+                    metal.encode(frame, glow: glow, into: encoder, scale: 1)
                     commands.add(VisualizationClock.now() - began)
-                }.frame(width: 360, height: 144)
-                let renderer = ImageRenderer(content: content)
-                renderer.scale = 1
-                return renderer.cgImage != nil
+                    encoder.endEncoding()
+                }
+                return metal.image(frame, glow: glow) != nil
             }
             let ended = VisualizationClock.now()
             render.add(ended - began); rasterized += 1
@@ -142,6 +197,32 @@ import PlayerUI
             #expect((warmed.max() ?? 0) - (warmed.min() ?? 0) < 15)
         }
     }
+}
+
+@Observable @MainActor private final class OnScreenTicker { var tick = 0 }
+
+/// The two ways `LCMPDefaultGEQView` draws, fed the comparison frames in turn.
+private struct OnScreenLED: View {
+    let ticker: OnScreenTicker
+    let states: [LCMPDefaultGEQFrame]
+    let metal: Bool
+    var body: some View {
+        let frame = states[ticker.tick % states.count]
+        if metal, let renderer = LCMPDefaultGEQMetal.shared {
+            FrameStageView(metal: renderer, frame: frame).overlay { LCMPDefaultGEQLabels(axisLabelSize: 9) }
+        } else {
+            Canvas { context, size in LCMPDefaultGEQRenderer.draw(context: context, size: size, snapshot: frame.snapshot, now: frame.now) }
+        }
+    }
+}
+
+/// The Metal view shown a given frame rather than following a driver.
+struct FrameStageView: NSViewRepresentable {
+    let metal: LCMPDefaultGEQMetal
+    let frame: LCMPDefaultGEQFrame
+    func makeCoordinator() -> LCMPDefaultGEQStageCoordinator { LCMPDefaultGEQStageCoordinator(metal: metal) }
+    func makeNSView(context: Context) -> MTKView { context.coordinator.makeView() }
+    func updateNSView(_ view: MTKView, context: Context) { context.coordinator.show(frame) }
 }
 
 /// Generated test sources. Each repeats one second of the same stereo tones.
@@ -226,6 +307,14 @@ private struct BoundedHistogram {
 private func cpuSeconds() -> Double {
     var usage = rusage(); guard getrusage(RUSAGE_SELF, &usage) == 0 else { return .nan }
     return Double(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) + Double(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1e6
+}
+/// The process's CPU energy (all cores) and wakeups, readable without privileges.
+private func energy() -> (nanojoules: UInt64, wakeups: UInt64) {
+    var info = rusage_info_v6()
+    let result = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V6, $0) }
+    }
+    return result == 0 ? (info.ri_energy_nj, info.ri_pkg_idle_wkups + info.ri_interrupt_wkups) : (0, 0)
 }
 private func rssMB() -> Double {
     var info = mach_task_basic_info()

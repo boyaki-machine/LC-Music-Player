@@ -63,6 +63,20 @@
 - OFFへ変わったセルだけ、別のレイヤーに最大0.25の残光を置き、`0.25 × (1 − 経過時間 / 0.2秒)²`で消す。再点灯で残光を取り消し、200ms後に時刻情報を除く。
 - 周辺光は色別にまとめたPathへ薄いぼかしを重ね、セル本体より先に描く。これにより隣のセルの光が発光面を覆わない。4pt/9pt程度のぼかしと低い不透明度で広がりを作る。残光にも薄い周辺光を添える。ブラウザーの試作のCSSとネイティブの描画ではぼかしの計算が異なるため、数値の一致より外観を基準にする。
 - OSの「動きを減らす」設定では残光を描かない。
+
+画面への描画はMetal（`LCMPDefaultGEQMetal`、`MTKView`）で行う。
+
+- SwiftUIの`Canvas`で毎フレーム描くと、ラスタライズ自体はGPUで行われても、毎回の描画命令の組み立てと受け渡しにCPUを使う（360×144ptの画面上の測定で、描画分のCPUの電力が約13mW）。Metalでは、毎フレームのCPUの仕事をセルの四角形の一覧（最大で約800個、約0.03ms）に限る。
+- セル本体は四角形として描き、端は画素の被覆率でアンチエイリアスする（Core Graphicsの塗りと同じ考え方）。
+- 周辺光は毎フレームぼかさない。点灯は列の下から連続するので、1列の光は点灯数（1〜24）だけで決まる。半径ごとに24通りの列の光と、色ごとの残光の光を、`LCMPDefaultGEQRenderer`と同じぼかしの描画（`drawLitGlow`・`drawAfterglowGlow`）で一度だけ画像にし、毎フレームは位置と不透明度を変えて重ねる。画像は表示の大きさ・倍率・目盛りの文字の大きさが変わったときに作り直す（2倍で約7〜11ms）。
+- 光の画像の解像度は、4ptの光と残光は最大2倍、9ptの光は1倍とする。ぼかしが広いほど細部がないため、倍率を下げても外観は変わらず、メモリが減る（360×144pt・2倍で約4MB）。
+- 重ねる順は`Canvas`と同じく、消灯セル、4ptの光、9ptの光、残光の光、点灯セルと残光のセルとする。合成は事前乗算のsource-overで、Core Graphicsと同じく保存された値（sRGB）のまま行う。
+- 新しいフレームはSwiftUIを通さずに描く。`MTKView`の描画部（`LCMPDefaultGEQStageCoordinator`）がdriverの`snapshot`と`drawTime`をObservationで直接見張り、変わったら自分の層だけを描き直す。`LCMPDefaultGEQView`の本体は毎フレームの値を読まないので、フレームごとにSwiftUIのビューの更新や、SwiftUI自身の層の描き直しが起きない。SwiftUIを通していたときは、描画の方式をMetalにしてもこの更新が負荷の大半を占めた（実際の再生での測定で、`Canvas`約58mW、Metalのみ約48mW、SwiftUIを通さない形で約28mW、解析だけなら約6mW）。
+- 描くタイミングはdriverが値を更新したときで、SwiftUIを通していたときと同じである。Observationの通知は値を書き込む前に届き、driverは時刻とセルを続けて書き込むため、両方をMainActorの次の順番で読む。
+- 「解析データを待っています」と支援技術への値は、driverの`waitingForData`（`snapshot.waitingForData`が変わったときだけ書き込む）から作る。「動きを減らす」と目盛りの文字の大きさはSwiftUIから描画部へ渡す。
+- 表示を片付けると（`dismantleNSView`/`dismantleUIView`）、描画部はdriverの見張りをやめる。見張りの登録ごとに番号を持ち、片付けた後に届く古い通知は無視する。
+- 目盛りの文字は、Metalの上に重ねた別のビュー（`LCMPDefaultGEQLabels`）の`Canvas`で描く。入力（文字の大きさ）が変わらないので、再生中に描き直されない。
+- Metalが使えない環境では、従来の`Canvas`の描画（`LCMPDefaultGEQRenderer`）で同じ絵を描く。`Canvas`の描画は、Metalの外観を確かめる基準としても残す。
 - 表示名と解析データの待機を支援技術へ公開するが、毎フレームのレベルは読み上げない。
 - 描画面は入力イベントを受けず、ドラッグ移動・シーク・音量の操作面を妨げない。
 
@@ -104,10 +118,12 @@
 - 通常の`./scripts/swift.sh test --disable-automatic-resolution`で、状態と寿命を確認する。
 - `LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --disable-automatic-resolution --no-parallel`で、実出力からPlayerViewまでの接続を確認する。全体の実出力の検証では`--no-parallel`を明示し、他のMainActorの処理による短い音源の観測漏れを避ける。suiteの`.serialized`だけでは、別のsuiteとの並行実行は止まらない。
 - 可視化専用の生成音源はアプリ音量0で再生し、元のファイルやOS音量を変更しない。
+- `LCMPDefaultGEQMetalTests`で、Metalの描画を`Canvas`の描画と1・2・3倍で比べる（全消灯・一部点灯・全点灯・残光あり、目盛りの文字の上まで）。基準は、平均の差が1/255未満、最大の差が40/255以下、4/255を超える差が1.5%未満とする。実測は平均0.6以下、最大27（セルの端のアンチエイリアス）、0.6%程度だった。あわせて、点灯セルの周辺光、「動きを減らす」での残光の省略、光の画像の作り直しの条件とメモリを確かめる。光の画像を作り直すと、ぼかしの結果が1〜2/255ほど揺れることがあるため、完全一致を比べるときは同じ画像を使う。
+- 同じスイートで、描画部がSwiftUIを通さずにdriverの新しいフレームを受け取ること、設定の変更を反映すること、片付けた後はdriverを見張らないこと、`waitingForData`が毎フレームには通知されないことを確かめる。
 
 ### 画像による確認
 
-`LCMP_UI_SNAPSHOTS=build/visualization-native-qa`を指定して`VisualizationLifecycleTests`と`VisualizationIntegrationTests`を実行すると、ネイティブの単体表示と、実PCMを表示するメインの画像を保存する。点灯色、OFFのセル、周辺光、セルの境界、操作部との重なりを目視する。
+`LCMP_UI_SNAPSHOTS=build/visualization-native-qa`を指定して`VisualizationLifecycleTests`と`VisualizationIntegrationTests`を実行すると、ネイティブの単体表示と、実PCMを表示するメインの画像を保存する。点灯色、OFFのセル、周辺光、セルの境界、操作部との重なりを目視する。`cacheDisplay`はMetalの表示を写さないため、単体表示の画像は同じフレームを画面外のMetalで描き、目盛りの文字を重ねて保存する。
 
 ### 負荷と同期の測定
 
@@ -141,9 +157,22 @@ LCMP_VISUALIZATION_REPORT_DIR=build/visualization-soak \
   --filter 'VisualizationPerformanceTests/tenMinuteRenderingRemainsBounded'
 ```
 
-- 既定のデバイスで独自のステレオPCMをアプリ音量0で再生し、実際の解析とdriverを動かしながら、360×144ptをImageRendererで約30回/秒ラスタライズする。
-- 描画コマンドのCPU処理と、SwiftUIの準備・ラスタライズ・画像の取得を含む全体を分けて測る。後者はオフスクリーンの測定であり、画面上の実際の提示時刻ではない。
+- 既定のデバイスで独自のステレオPCMをアプリ音量0で再生し、実際の解析とdriverを動かしながら、360×144ptを画面と同じMetalの描画で約30回/秒オフスクリーンに描いて読み出す。
+- 描画コマンドのCPU処理（四角形の一覧の作成とエンコード）と、GPUの描画・画像の読み出しを含む全体を分けて測る。後者はオフスクリーンの測定であり、画面上の実際の提示時刻ではない。
 - 固定容量のヒストグラムで時間のp50/p95/maxを求め、受信・採用・異なる結果を描いた回数、待ちの上限、PCMの欠落、CPU、30秒ごとのRSSを記録する。CPUは再生・解析・テストの描画を含むプロセス全体の値で、100%を1コアとする。
+
+画面上の描画の負荷（`Canvas`とMetalの比較）：
+
+```sh
+LCMP_VISUALIZATION_PROFILE=1 \
+LCMP_VISUALIZATION_REPORT_DIR=build/visualization-onscreen \
+./scripts/swift.sh test --disable-automatic-resolution --no-parallel \
+  --filter 'VisualizationPerformanceTests/comparesOnScreenRenderers'
+```
+
+- 360×144ptの見えるウインドウで、比較用の4つの状態を約30回/秒で切り替え、`Canvas`とMetalを交互に15秒ずつ2回描く。再生と解析は動かさないので、差は描画方式だけによる。
+- プロセスのCPU時間・CPUの電力（`proc_pid_rusage`の`ri_energy_nj`、権限不要）・起床回数をJSONに残す。GPUとWindowServerの電力は含まない。測定は時間帯でCPUの電力が動くため、比べる2つを交互に測る。
+- 基準：Metalの電力が`Canvas`より小さい。実測（Release、Apple Silicon）では、`Canvas`約15〜17mW・Metal約6.4mW、起床は約58→27回/秒だった。
 
 受け入れの基準は次のとおりとする。時刻差の実測値も残し、しきい値だけで同期の精度を表さない。
 

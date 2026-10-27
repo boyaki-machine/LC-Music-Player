@@ -241,8 +241,16 @@ private func sample(_ id: UUID, _ sequence: UInt64, level: Float = 1,
         #expect(host.fittingSize.width <= 360 && host.fittingSize.height <= 144)
         if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
             try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
-            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: rep)
+            // cacheDisplay does not capture the Metal view: draw the same frame off screen under the labels.
+            let size = CGSize(width: 360, height: 144)
+            let cells = try #require(LCMPDefaultGEQMetal.shared?.image(LCMPDefaultGEQFrame(snapshot: driver.snapshot, now: driver.drawTime),
+                                                                       size: size, scale: 2))
+            let renderer = ImageRenderer(content: ZStack {
+                Image(decorative: cells, scale: 2)
+                Canvas { context, size in LCMPDefaultGEQRenderer.drawLabels(context: context, size: size, axisLabelSize: 9) }
+            }.frame(width: size.width, height: size.height))
+            renderer.scale = 2
+            let rep = NSBitmapImageRep(cgImage: try #require(renderer.cgImage))
             try #require(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: directory).appendingPathComponent("fluorescent-native.png"))
         }
         driver.synchronize(activity: .inactive, visible: false)
