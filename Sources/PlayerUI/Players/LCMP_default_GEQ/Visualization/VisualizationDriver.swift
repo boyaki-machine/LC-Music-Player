@@ -8,6 +8,9 @@ import VisualizationKit
 public final class VisualizationDriver {
     public private(set) var snapshot = SpectrumSnapshot()
     public private(set) var drawTime = 0.0
+    /// `snapshot.waitingForData` on its own, set only when it changes: views that show only the
+    /// waiting message are not invalidated by every frame.
+    public private(set) var waitingForData = false
     @ObservationIgnored public private(set) var presentation = SpectrumPresentation()
     @ObservationIgnored public private(set) var activity: VisualizationActivity = .inactive
     @ObservationIgnored public private(set) var isVisible = false
@@ -32,6 +35,7 @@ public final class VisualizationDriver {
     public func reset() {
         tickerID = UUID(); ticker?.cancel(); ticker = nil
         presentation.reset(); snapshot = presentation.snapshot; drawTime = VisualizationClock.now()
+        updateWaiting()
         if isVisible, activity == .playing { presentation.begin(now: drawTime); updateTicker() }
     }
 
@@ -50,6 +54,11 @@ public final class VisualizationDriver {
             drawTime = now
             snapshot = presentation.snapshot
         }
+        updateWaiting()
+    }
+
+    private func updateWaiting() {
+        if waitingForData != snapshot.waitingForData { waitingForData = snapshot.waitingForData }
     }
 
     private func updateTicker() {
