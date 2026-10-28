@@ -5,12 +5,17 @@ import LibraryCore
 /// that typing a query only scans prepared bytes. Thousands of tracks filter in about a millisecond.
 struct SourceCatalog {
     let groups: [SourceFolderGroup]
+    /// Songs registered more than once, and every track in them.
+    let duplicateSets: [[UUID]]
+    let duplicates: Set<UUID>
     /// The search text of each track, in the same order as `groups` and their tracks.
     private let keys: [[[UInt8]]]
 
     init(_ tracks: [LibraryTrack]) {
         groups = SourceFolderGroup.groups(tracks)
         keys = groups.map { $0.tracks.map { Array(Self.searchText($0).utf8) } }
+        duplicateSets = DuplicateTracks.sets(tracks)
+        duplicates = Set(duplicateSets.joined())
     }
 
     /// The title, file name with its extension, folder path, album, artist and album artist, one per
@@ -63,15 +68,33 @@ struct SourceCatalog {
     private var tracks: [LibraryTrack] = []
     private var catalog = SourceCatalog([])
     private var last: (query: String, hidden: Set<UUID>, groups: [SourceFolderGroup])?
+    private var playlists: [MusicPlaylist] = []
+    private var memberships: [UUID: Int] = [:]
 
-    func groups(_ tracks: [LibraryTrack], matching query: String, hiding hidden: Set<UUID>) -> [SourceFolderGroup] {
+    private func update(_ tracks: [LibraryTrack]) {
         // Comparing an unchanged array is immediate: both share one buffer.
         if tracks != self.tracks { self.tracks = tracks; catalog = SourceCatalog(tracks); last = nil }
+    }
+    func groups(_ tracks: [LibraryTrack], matching query: String, hiding hidden: Set<UUID>) -> [SourceFolderGroup] {
+        update(tracks)
         if let last, last.query == query, last.hidden == hidden { return last.groups }
         let groups = catalog.groups(matching: query, hiding: hidden)
         last = (query, hidden, groups)
         return groups
     }
+    func duplicateSets(_ tracks: [LibraryTrack]) -> [[UUID]] { update(tracks); return catalog.duplicateSets }
+    /// What the rows show beside each track's format.
+    func marks(_ document: LibraryDocument) -> SourceMarks {
+        update(document.tracks)
+        if document.playlists != playlists { playlists = document.playlists; memberships = document.playlistMemberships }
+        return SourceMarks(memberships: memberships, duplicates: catalog.duplicates)
+    }
+}
+
+/// How many playlists hold each track, and which tracks are copies of a song registered more than once.
+struct SourceMarks {
+    var memberships: [UUID: Int] = [:]
+    var duplicates: Set<UUID> = []
 }
 
 /// Which of the shown tracks are chosen for removal.

@@ -12,11 +12,14 @@ import LibraryCore
     }
     private let width = 360, height = 300
 
+    private let tracks = (1...4).map { LibraryTrack(name: "\($0)", reference: TrackReference(bookmark: nil, lastKnownURL: URL(fileURLWithPath: "/Music/Alpha/\($0).wav")), registration: .folder) }
+        + (1...3).map { LibraryTrack(name: "\($0)", reference: TrackReference(bookmark: nil, lastKnownURL: URL(fileURLWithPath: "/Music/Beta/\($0).mp3")), registration: .folder) }
+
     /// Renders the list on black and returns the bitmap, also written for review when asked.
-    private func render(query: String, selecting: Bool = false, snapshot: String) throws -> NSBitmapImageRep {
-        let tracks = (1...4).map { track("/Music/Alpha/\($0).wav") } + (1...3).map { track("/Music/Beta/\($0).mp3") }
+    private func render(query: String, selecting: Bool = false, marks: SourceMarks = SourceMarks(), snapshot: String) throws -> NSBitmapImageRep {
+        let tracks = tracks
         let selection = Binding<Set<UUID>>(get: { [tracks[0].id] }, set: { _ in })
-        let root = SourceFolderList(tracks: tracks, unavailable: [:], query: query, selection: selecting ? selection : nil, select: { _ in })
+        let root = SourceFolderList(tracks: tracks, unavailable: [:], query: query, selection: selecting ? selection : nil, marks: marks, select: { _ in })
             .font(.system(size: 12)).foregroundStyle(.white.opacity(0.85)).frame(width: CGFloat(width), height: CGFloat(height), alignment: .topLeading)
             .background(Color.black).preferredColorScheme(.dark)
         let host = NSHostingView(rootView: root); host.frame = NSRect(x: 0, y: 0, width: width, height: height)
@@ -71,6 +74,30 @@ import LibraryCore
     /// The overlay scroller of macOS draws a thin knob but takes clicks across its whole width at
     /// the right edge. The trash buttons stay clear of it: with only group rows shown, the rightmost
     /// thing drawn is a trash glyph, which sits 6pt inside its 24pt button.
+    /// The second line of a row tells how many playlists hold the track and marks a duplicate in amber.
+    @Test func rowsMarkPlaylistMembershipAndDuplicates() throws {
+        let marks = SourceMarks(memberships: [tracks[0].id: 2, tracks[1].id: 1], duplicates: [tracks[1].id])
+        let plain = try render(query: "alpha", snapshot: "source-unmarked.png")
+        let marked = try render(query: "alpha", marks: marks, snapshot: "source-marks.png")
+        let scale = marked.pixelsWide / width
+        /// Lit pixels and amber pixels in the second line of a track row, right of the format.
+        func count(_ rep: NSBitmapImageRep, row: Int) -> (lit: Int, amber: Int) {
+            var lit = 0, amber = 0
+            for y in (24 + 40 * row + 22) * scale ..< (24 + 40 * row + 36) * scale {
+                for x in 60 * scale ..< 160 * scale {
+                    guard let c = rep.colorAt(x: x, y: y) else { continue }
+                    if max(c.redComponent, c.greenComponent, c.blueComponent) > 0.2 { lit += 1 }
+                    if c.redComponent > 0.5 && c.redComponent - c.blueComponent > 0.25 { amber += 1 }
+                }
+            }
+            return (lit, amber)
+        }
+        #expect(count(plain, row: 0).lit == 0 && count(plain, row: 1).lit == 0)
+        #expect(count(marked, row: 0).lit > 20 && count(marked, row: 0).amber == 0)
+        #expect(count(marked, row: 1).amber > 20)
+        #expect(count(marked, row: 2).lit == 0)
+    }
+
     @Test func trashButtonsStayClearOfTheScroller() throws {
         let scroller = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .overlay)
         let groups = try render(query: "", snapshot: "source-trash-groups.png")

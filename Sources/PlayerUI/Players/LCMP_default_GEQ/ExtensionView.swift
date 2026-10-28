@@ -40,6 +40,9 @@ public struct ExtensionView: View {
     @State private var selectingSources = false
     @State private var selectedSources: Set<UUID> = []
     @State private var confirmSelection = false
+    /// The selection came from choosing duplicates: removing it moves playlist entries to the copies that stay.
+    @State private var duplicateSelection = false
+    @State private var choosingDuplicates = false
     @State private var sourceCatalog = SourceCatalogCache()
     @FocusState private var searchFocused: Bool
     @State private var rowDrag: RowDrag?
@@ -208,12 +211,25 @@ public struct ExtensionView: View {
                                 isPresented: Binding(get: { confirmFolder != nil }, set: { if !$0 { confirmFolder = nil } })) {
                 Button("\(confirmFolder?.kindName ?? "フォルダ")を除外", role: .destructive) { if let group = confirmFolder { library.excludeTracks(group.tracks.map(\.id)) }; confirmFolder = nil }
             }
-            .confirmationDialog("選んだ\(selectedSources.count)曲を、ライブラリと各プレイリストから除外します。元ファイルは削除しません。", isPresented: $confirmSelection) {
+            .confirmationDialog(duplicateSelection
+                                ? "選んだ\(selectedSources.count)曲を、ライブラリから除外します。プレイリストに入っている曲は、残す方の曲に付け替えます。元ファイルは削除しません。"
+                                : "選んだ\(selectedSources.count)曲を、ライブラリと各プレイリストから除外します。元ファイルは削除しません。", isPresented: $confirmSelection) {
                 Button("\(selectedSources.count)曲を除外", role: .destructive) {
-                    library.excludeTracks(library.document.tracks.map(\.id).filter(selectedSources.contains))
-                    selectedSources = []; selectingSources = false
+                    let ids = library.document.tracks.map(\.id).filter(selectedSources.contains)
+                    if duplicateSelection { library.excludeDuplicates(ids) } else { library.excludeTracks(ids) }
+                    selectedSources = []; selectingSources = false; duplicateSelection = false
                 }
             }
+        }
+    }
+    /// Chooses every copy but one of each song; the kind of file to keep comes first.
+    private func chooseDuplicates(_ sets: [[UUID]], keep: DuplicateTracks.Keep) {
+        choosingDuplicates = true
+        Task { @MainActor in
+            defer { choosingDuplicates = false }
+            let lossless = await library.losslessFlags(Array(sets.joined()))
+            selectedSources = Set(DuplicateTracks.surplus(sets, keep: keep, lossless: lossless, memberships: library.document.playlistMemberships))
+            duplicateSelection = true
         }
     }
     private func closeSourceSearch() { searchingSources = false; sourceQuery = ""; searchFocused = false }
@@ -436,7 +452,7 @@ public struct ExtensionView: View {
                         if searchingSources { closeSourceSearch() } else { searchingSources = true; searchFocused = true }
                     }
                     LEDToggle(symbol: "checkmark.circle", label: selectingSources ? "選択を終了" : "曲を選択して除外", isOn: selectingSources) {
-                        selectingSources.toggle(); selectedSources = []
+                        selectingSources.toggle(); selectedSources = []; duplicateSelection = false
                     }.disabled(!library.canEdit || library.document.tracks.isEmpty)
                 }
                 .padding(.trailing, 37)
@@ -461,11 +477,24 @@ public struct ExtensionView: View {
             }
             if selectingSources {
                 HStack(spacing: 8) {
-                    Button(filtering ? "一致をすべて選択" : "すべて選択") { selectedSources.formUnion(shown.flatMap(\.tracks).map(\.id)) }
-                    Button("選択を解除") { selectedSources = [] }.disabled(selectedSources.isEmpty)
+                    Button(filtering ? "一致をすべて選択" : "すべて選択") { selectedSources.formUnion(shown.flatMap(\.tracks).map(\.id)); duplicateSelection = false }
+                    Button("選択を解除") { selectedSources = []; duplicateSelection = false }.disabled(selectedSources.isEmpty)
                     Spacer(minLength: 0)
                     Button("\(selectedSources.count)曲を除外") { confirmSelection = true }.disabled(selectedSources.isEmpty || !library.canEdit)
                 }.buttonStyle(SoftGlassButtonStyle()).lineLimit(1)
+                // While searching, only songs with a copy among the matches are chosen.
+                let shownIDs = Set(shown.flatMap(\.tracks).map(\.id))
+                let sets = sourceCatalog.duplicateSets(library.document.tracks).filter { !filtering || $0.contains(where: shownIDs.contains) }
+                if !sets.isEmpty {
+                    HStack(spacing: 8) {
+                        Text("重複\(sets.count)曲").foregroundStyle(SourceFolderList.duplicateColor).fixedSize()
+                        Spacer(minLength: 0)
+                        Button("可逆形式を残す") { chooseDuplicates(sets, keep: .lossless) }
+                            .help("FLAC・ALAC・WAV・AIFF を残し、ほかの形式の重複を選びます")
+                        Button("非可逆形式を残す") { chooseDuplicates(sets, keep: .lossy) }
+                            .help("AAC・MP3 を残し、ほかの形式の重複を選びます")
+                    }.buttonStyle(SoftGlassButtonStyle()).lineLimit(1).disabled(choosingDuplicates || !library.canEdit)
+                }
             } else {
                 HStack(spacing: 8) {
                     Button { actions.files(nil) } label: { Label("ファイル", systemImage: "doc.badge.plus") }
@@ -478,6 +507,7 @@ public struct ExtensionView: View {
             scrolled {
                 SourceFolderList(tracks: library.document.tracks, unavailable: library.unavailable, canRemove: library.canEdit,
                                  query: sourceQuery, selection: selectingSources ? $selectedSources : nil, catalog: sourceCatalog,
+                                 marks: sourceCatalog.marks(library.document),
                                  select: { id in sourceID = id; originID = nil }, removeFolder: { confirmFolder = $0 },
                                  removeTrack: { confirmSource = $0.id })
             }
