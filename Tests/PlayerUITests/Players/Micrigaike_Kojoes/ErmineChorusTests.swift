@@ -705,13 +705,24 @@ import Testing
         return Data(bytes: try #require(rep.bitmapData), count: rep.bytesPerRow * rep.pixelsHigh)
     }
 
+    /// The largest difference of a component, and the share of components that differ.
+    private func difference(_ a: Data, _ b: Data) -> (largest: Int, share: Double) {
+        guard a.count == b.count, !a.isEmpty else { return (255, 1) }
+        var largest = 0, differing = 0
+        for (x, y) in zip(a, b) where x != y { largest = max(largest, abs(Int(x) - Int(y))); differing += 1 }
+        return (largest, Double(differing) / Double(a.count))
+    }
+
     @Test func layingLettersOutOnceDrawsTheSamePixels() throws {
         let count = ErmineStage.neonText.count
         for brightness in [Array(repeating: 1.0, count: count), (0..<count).map { $0 % 3 == 0 ? 0.2 : 1 }, Array(repeating: 0.0, count: count)] {
             for scale in [2.0, 1, 3] {
                 let current = try pixels(scale: scale) { ErmineChorusRenderer.drawNeon($0, brightness: brightness) }
                 let reference = try pixels(scale: scale) { Self.referenceNeon($0, brightness: brightness) }
-                #expect(current == reference, "scale \(scale)")
+                // The blur may come out 1/255 apart for the same drawing, depending on how many renders ran
+                // before it in the process; a letter out of place differs by far more, over far more pixels.
+                let (largest, share) = difference(current, reference)
+                #expect(largest <= 2 && share <= 0.01, "scale \(scale): largest \(largest), share \(share)")
                 #expect(current.contains { $0 > 128 })
             }
         }

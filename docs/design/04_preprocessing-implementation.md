@@ -154,7 +154,7 @@ mono/stereo変換、短い曲、gatingの対象がない曲、true-peak補間の
 
 1. `LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --disable-automatic-resolution --no-parallel`で、上の合格基準を確認する。
 2. `NextPreparationTests`は非同期workerの返却を制御し、測定未完了・先頭未完了の同じ要求が一度だけ実行されること、手動・自然送り、停止、保存失敗、別エントリ、削除、設定変更とlease最大2を確認する。
-3. `PlaylistPreprocessingTests`は、固定profileと待機できるworkerで、順位・全リストの巡回・重複・失敗後の続行・測定中の移譲・割込み時の退役・音源とprofileの失効・永続結果の再利用・追加と停止を検証する。
+3. `PlaylistPreprocessingTests`は、固定profileと待機できるworkerで、順位・全リストの巡回・重複・失敗後の続行・測定中の移譲・割込み時の退役・音源とprofileの失効・永続結果の再利用・追加と停止を検証する。現在の曲から離れた曲の優先度backgroundは、負荷のかかったiOSシミュレータでは数分待たされることがある。そのため、優先度を確かめるテストとLibraryController経由のテストを除き、DEBUGビルドだけにある`farPriority`でutilityへ上げて実行する。
 4. `LCMP_UI_SNAPSHOTS=<出力先>`で、設定のON/OFFを最小240ptの拡張画面へ描き、説明が読めることを確認する。
 
 ### 性能測定

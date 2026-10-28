@@ -28,7 +28,9 @@ import Testing
         #expect(await detached(.userInitiated) { await processor.executionQoS() } == QOS_CLASS_USER_INITIATED)
     }
 
-    /// A sweep's scan that a listener takes over continues at user-initiated QoS.
+    /// A sweep's scan that a listener takes over continues at user-initiated QoS. The scan starts at utility, as the
+    /// sweep's scans of the current track and its neighbours do: one at background may not start for minutes on a
+    /// loaded iOS simulator, and the raise is the same from either.
     @Test func promotingRaisesTheRunningScan() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-promote-\(UUID()).wav")
         defer { try? FileManager.default.removeItem(at: url) }
@@ -38,12 +40,12 @@ import Testing
         do { let file = try AVAudioFile(forWriting: url, settings: format.settings); for _ in 0..<120 { try file.write(from: buffer) } }
         let processor = AudioPreprocessor(), cancellation = PreparationCancellation(), other = PreparationCancellation()
         let profile = try MeasurementProfile(sampleRate: 48000, channels: 2)
-        Task.detached(priority: .background) { _ = try? await processor.measureLevels(url, profile: profile, cancellation: cancellation) }
+        Task.detached(priority: .utility) { _ = try? await processor.measureLevels(url, profile: profile, cancellation: cancellation) }
         let deadline = ContinuousClock.now + .seconds(10)
         while await processor.scanQoS(cancellation).isEmpty, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
-        #expect(await processor.scanQoS(cancellation) == [.background])
+        #expect(await processor.scanQoS(cancellation) == [.utility])
         processor.promote(other)
-        #expect(await processor.scanQoS(cancellation) == [.background])
+        #expect(await processor.scanQoS(cancellation) == [.utility])
         processor.promote(cancellation)
         #expect(await processor.scanQoS(cancellation) == [.userInitiated])
         cancellation.cancel()

@@ -36,6 +36,13 @@ import AudioProcessingCore
     var isEnergyConstrained: @MainActor () -> Bool = {
         ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
     }
+    #if DEBUG
+    /// The priority of the sweep away from the current track. Tests that do not look at it raise it to utility:
+    /// a loaded iOS simulator can hold background work back for minutes.
+    var farPriority: TaskPriority = .background
+    #else
+    let farPriority: TaskPriority = .background
+    #endif
     private var energyObservers: [any NSObjectProtocol] = []
     private var publishedCurrent: UUID?
     private var currentURL: URL?
@@ -195,7 +202,7 @@ import AudioProcessingCore
         let sharedURL = sharedLease == nil ? nil : currentURL
         // The current track and its neighbours run at utility, behind a listener's request. The rest of
         // the sweep runs at background, on the efficiency cores: about a sixth of the energy, six times slower.
-        task = Task(priority: near ? .utility : .background) { [weak self] in
+        task = Task(priority: near ? .utility : farPriority) { [weak self] in
             do {
                 await previous?.value
                 try request.cancellation.check()
