@@ -211,6 +211,14 @@
 - 選択モードの選択は曲のIDの集合で持つ。見出しのチェックは`SourceSelection`で、表示中の曲がすべて選ばれていれば外し、そうでなければすべて選ぶ。除外は、選んだ曲のうちライブラリに残っているものを`excludeTracks(_:)`へ渡す。
 - 参照切れも元の場所に残し、ブックマークの更新後は更新した場所で表示する。
 
+### 重複とプレイリストの印
+
+- `DuplicateTracks.sets`は、ライブラリの曲を同じ曲ごとに分け、2曲以上の組をライブラリの順で返す。鍵はアルバム（`TrackTags.albumKey`）・ディスク番号（なければ1）・トラック番号、トラック番号がなければアルバムと曲名、アルバムのタグがなければ親フォルダの名前と曲名とする。文字は大文字小文字と全角半角を畳み、NFCにそろえる。タグのない「ミュージック」の曲は対象外。
+- `DuplicateTracks.surplus`は、組ごとに残す1曲を、選んだ種類（`Keep.lossless`／`.lossy`）に当たる曲、プレイリストの数の多い曲、組の中で先の曲の順で決め、残りを返す。種類の分からない曲はどちらにも当たらない。
+- 種類は`AudioEncoding`で判断する。FLAC・WAV・AIFFは可逆、MP3は非可逆と拡張子で決め、M4Aは`AVAudioFile`の`fileFormat`の`mFormatID`がApple Losslessかで決める。`LibraryController.losslessFlags(_:)`は、M4Aだけ参照を解決して、アクセスを保ったまま別スレッドで開く。押したときの重複の組の曲だけを読むので、ライブラリ全体は開かない。
+- `LibraryController.excludeDuplicates(_:)`は、`excludeTracks(_:)`と同じく1回の保存で曲を外す。除外する曲が重複の組にあり、組に残る曲があれば、プレイリストのエントリの`trackID`をその曲（プレイリストの数が多い方、次に組の先の方）へ替え、エントリのIDと位置は保つ。そのリストがすでに残す曲を持っていれば、エントリを外す。現在の再生対象を除外したときは、`excludeTracks(_:)`と同じく選択を解除する。
+- `LibraryDocument.playlistMemberships`は、曲ごとに入っているプレイリストの数を返す。`SourceCatalog`は曲の配列が変わったときに重複の組も作り、`SourceCatalogCache.marks(_:)`はプレイリストが変わったときだけ数え直して、行に渡す`SourceMarks`を返す。
+
 ### アルバムのタグ
 
 - `LibraryTrack.tags`は任意の項目で、nilは未読を表す。タグを読んでアルバムがなかった曲は空の`TrackTags`を持ち、読み直さない。ただし`TrackTags.version`（読み取り方の版、nilは1）が`TrackTags.currentVersion`より古く、アルバムがなかった曲は、新しい読み取り方で一度だけ読み直す（版2でWAVのLIST INFOに対応した）。読んだ値には現在の版を付けて保存する。tagsを持たないschemaVersion 1のデータはそのまま読み込む。
@@ -280,7 +288,7 @@
 ./scripts/swift.sh test --filter Shuffle
 ./scripts/swift.sh test --filter SleepTimer
 ./scripts/swift.sh test --filter 'TrackTagsTests|LibraryTagReadingTests|RIFFInfoTests|SourceGroupTests'
-./scripts/swift.sh test --filter LibraryEditingTests
+./scripts/swift.sh test --filter 'LibraryEditingTests|DuplicateTracksTests'
 ./scripts/swift.sh test --filter LibraryOrganizationTests
 ./scripts/swift.sh test --filter 'SourceSearchTests|SourceListLayoutTests'
 LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --filter ShufflePlaybackTests
@@ -300,3 +308,4 @@ LCMP_UI_SNAPSHOTS="$PWD/build/library-ui-qa" ./scripts/swift.sh test --filter Li
 9. 1曲だけファイル登録した後に同じフォルダの別の曲をファイル登録し、両方がそのフォルダのまとまりへ移ることを確認する。フォルダのゴミ箱で全曲が除外され、各リストからも外れ、元ファイルが残ることを確認する。曲の行のゴミ箱で1曲だけが除外されることも確認する。スクロールバーをつかんでスクロールしても、ゴミ箱が反応しないことを確認する。
 10. ランダム再生の右の睡眠タイマーを長押しして曲数を選び、点灯と残りの曲数を確認する。指定した曲数で止まること（mac版はアプリが終了すること）、曲が進むにつれ音量が少しずつ下がること、途中でタップしてオフにすると、音量が2〜3秒かけて元に戻ることを確認する。音量のスライダーの位置はフェードで動かない。
 11. 数千曲のライブラリで虫眼鏡から検索欄を開き、曲名・拡張子・フォルダ名で絞り込む。入力が待たされないこと、一致したまとまりが開くこと、×と虫眼鏡で元の表示に戻ることを確認する。選択モードで検索結果をすべて選び、1回の確認で除外できることを確認する。
+12. 同じアルバムを FLAC と AAC（M4A）の両方で登録し、音源一覧で両方に「重複」が付くこと、プレイリストに入れた曲に数が付くことを確認する。選択モードで「可逆形式を残す」を押すと AAC の側だけが選ばれ、除外の後、プレイリストの曲が FLAC の側に付け替わって曲順が変わらないことを確認する。

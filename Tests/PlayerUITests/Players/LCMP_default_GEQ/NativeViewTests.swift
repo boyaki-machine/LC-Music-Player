@@ -265,6 +265,37 @@ struct NativeViewTests {
 }
 
 extension LibraryNativeViewTests {
+    /// The volume slider runs the visualization's height, minus the popup's margin and padding, beside
+    /// the value and the mute button, and its whole 44pt width takes clicks.
+    @Test(arguments: [(PlayerFrame.window, CGSize(width: 360, height: 210), 144.0), (PlayerFrame.panel, CGSize(width: 360, height: 420), 420.0 - 76 - 10)])
+    func volumeSliderSpansTheVisualizationHeight(frame: PlayerFrame, size: CGSize, visualization: Double) async throws {
+        let playback = PlaybackController(makeBackend: { _ in UIBackend() }); defer { playback.close() }
+        let model = PlayerPresentation()
+        let host = NSHostingView(rootView: PlayerView(playback: playback, presentation: model, chooseFile: {}, toggleExtension: {})
+            .environment(\.playerFrame, frame))
+        host.frame = CGRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        window.contentView = host; defer { model.closeOverlays(); window.contentView = nil }
+        model.volumeVisible = true
+        host.layoutSubtreeIfNeeded(); try await Task.sleep(for: .milliseconds(60)); host.layoutSubtreeIfNeeded()
+        func allViews(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(allViews) }
+        let slider = try #require(allViews(host).compactMap { $0 as? NativeSlider.CommitSlider }.first { $0.volumeCurve })
+        let rect = slider.convert(slider.bounds, to: host)
+        let top = host.isFlipped ? rect.minY : host.bounds.height - rect.maxY
+        let padding = 8.0, margin = 8.0
+        #expect(rect.width == 44, "\(rect)")
+        #expect(abs(rect.height - (visualization - margin - padding)) < 1, "\(rect)")
+        // The popup stays inside the visualization: below its top edge, above the buttons.
+        #expect(top >= (frame == .panel ? 10 : 0) && top + rect.height <= visualization + (frame == .panel ? 10 : 0), "\(rect)")
+        if let directory = ProcessInfo.processInfo.environment["LCMP_UI_SNAPSHOTS"] {
+            try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+            host.cacheDisplay(in: host.bounds, to: rep)
+            try #require(rep.representation(using: .png, properties: [:]))
+                .write(to: URL(fileURLWithPath: directory).appendingPathComponent("volume-\(frame).png"))
+        }
+    }
+
     @Test func hostedRowMouseClicksReachPlaybackAndMissingSourceDetail() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-row-ui-\(UUID())")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)

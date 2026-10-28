@@ -237,6 +237,51 @@ import AudioProcessingCore
         let removed = document.tracks.count - next.tracks.count
         if commit(next), removed > 1 { message = "\(removed)曲をライブラリから除外しました。" }
     }
+    /// Removes the chosen copies of songs registered more than once (`DuplicateTracks`). A playlist
+    /// entry of a removed copy moves to a remaining copy, the one in the most playlists, unless the
+    /// playlist already holds that copy. Entries of other removed tracks go, as with `excludeTracks`.
+    public func excludeDuplicates(_ ids: [UUID]) {
+        let ids = Set(ids)
+        guard canEdit, !ids.isEmpty else { return }
+        let memberships = document.playlistMemberships
+        var replacement: [UUID: UUID] = [:]
+        for set in DuplicateTracks.sets(document.tracks) {
+            let remaining = set.filter { !ids.contains($0) }
+            guard let kept = remaining.enumerated().min(by: { a, b in
+                (-(memberships[a.element] ?? 0), a.offset) < (-(memberships[b.element] ?? 0), b.offset)
+            })?.element else { continue }
+            for id in set where ids.contains(id) { replacement[id] = kept }
+        }
+        var next = document, moved = 0
+        if let current = currentTrack?.id, ids.contains(current) { next.currentEntryID = nil }
+        next.tracks.removeAll { ids.contains($0.id) }
+        for i in next.playlists.indices {
+            var held = Set(next.playlists[i].entries.map(\.trackID).filter { !ids.contains($0) })
+            next.playlists[i].entries = next.playlists[i].entries.compactMap { entry in
+                guard ids.contains(entry.trackID) else { return entry }
+                guard let kept = replacement[entry.trackID], held.insert(kept).inserted else { return nil }
+                var entry = entry; entry.trackID = kept; moved += 1
+                return entry
+            }
+        }
+        let removed = document.tracks.count - next.tracks.count
+        if commit(next) { message = "\(removed)曲を除外しました。" + (moved > 0 ? "リストの\(moved)曲は残した方に付け替えました。" : "") }
+    }
+    /// Whether each track stores its audio without loss, left out where unknown. Only M4A files are
+    /// opened, since they may hold either Apple Lossless or AAC; the rest are known by extension.
+    public func losslessFlags(_ ids: [UUID]) async -> [UUID: Bool] {
+        var flags: [UUID: Bool] = [:], opened: [(UUID, ResolvedTrack)] = []
+        for id in ids {
+            guard let track = track(id) else { continue }
+            if let known = AudioEncoding.isLosslessByExtension(track.reference.lastKnownURL) { flags[id] = known; continue }
+            if let resolved = try? await references.resolved(track.reference) { opened.append((id, resolved)) }
+        }
+        let read = await Task.detached(priority: .userInitiated) {
+            opened.compactMap { id, resolved in withExtendedLifetime(resolved.lease) { AudioEncoding.isLossless(resolved.url).map { (id, $0) } } }
+        }.value
+        for (id, lossless) in read { flags[id] = lossless }
+        return flags
+    }
 
     // MARK: File references and availability
 

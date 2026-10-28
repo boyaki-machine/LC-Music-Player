@@ -111,7 +111,9 @@ struct LCMPDefaultGEQPlayerView: View {
                 #endif
                 if presentation.seekVisible { seekBar.padding(.horizontal, 12).padding(.bottom, 5) }
                 if presentation.volumeVisible {
-                    volumePopup.frame(width: 54, height: 132).offset(x: metrics.volumePopupOffset, y: -6)
+                    // As tall as the visualization, leaving its margin, so the slider is long under a finger.
+                    volumePopup.frame(width: Self.volumePopupWidth).padding(.vertical, Self.volumePopupMargin)
+                        .frame(maxHeight: .infinity, alignment: .bottom).offset(x: metrics.volumePopupOffset)
                 }
             }
             .padding(.top, metrics.insets.top).padding(.leading, metrics.insets.leading).padding(.trailing, metrics.insets.trailing)
@@ -172,18 +174,36 @@ struct LCMPDefaultGEQPlayerView: View {
         .onHover { inside in if inside { presentation.cancelSeekHide() } else { presentation.scheduleSeekHide() } }
         .background(VolumeClickRegion(handler: seekOutsideClick, isPopup: true, dismiss: presentation.scheduleSeekHide))
     }
+    static let volumePopupMargin: CGFloat = 4
+    /// The whole width takes touches and clicks, not just the thin track.
+    static let volumeSliderWidth: CGFloat = 44
+    /// The pointer needs no 44pt target, so the Mac's mute button leaves more length to the slider.
+    #if os(macOS)
+    static let volumeMuteSize = LEDButtonSize(frame: 32, symbol: 15)
+    #else
+    static let volumeMuteSize = LEDButtonSize()
+    #endif
+    /// The slider, then a column with the value above the mute button.
+    static var volumePopupWidth: CGFloat { 4 + volumeSliderWidth + 2 + volumeMuteSize.frame + 4 }
     private var volumePopup: some View {
         VolumeFocusScope(content: volumeContents, dismiss: { presentation.volumeVisible = false })
             .background(VolumeClickRegion(handler: volumeOutsideClick, isPopup: true, dismiss: { presentation.volumeVisible = false }))
     }
     private var volumeContents: some View {
-        VStack(spacing: 3) {
-            Text("\(Int((Double(playback.volume) * 100).rounded()))%").font(.system(size: 10, design: .monospaced))
+        // Side by side, so the slider takes the popup's whole height.
+        HStack(spacing: 2) {
             NativeSlider(value: Binding(get: { Double(playback.volume) }, set: { playback.setVolume(Float($0)); presentation.volumeInteraction() }),
                          range: 0...1, vertical: true, label: "アプリ内音量", cancel: { presentation.closeOverlays() },
-                         volumeCurve: true, trackingChanged: presentation.trackVolume).frame(width: 28, height: 64)
-            LEDButton(symbol: "speaker.slash.fill", label: playback.isMuted ? "ミュート解除" : "ミュート",
-                      activeColor: playback.isMuted ? .green : nil) { playback.toggleMute(); presentation.volumeInteraction() }
+                         volumeCurve: true, trackingChanged: presentation.trackVolume)
+                .frame(width: Self.volumeSliderWidth).frame(maxHeight: .infinity)
+            VStack(spacing: 0) {
+                Text("\(Int((Double(playback.volume) * 100).rounded()))%").font(.system(size: 10, design: .monospaced))
+                    .fixedSize().padding(.top, 4)
+                Spacer(minLength: 0)
+                LEDButton(symbol: "speaker.slash.fill", label: playback.isMuted ? "ミュート解除" : "ミュート",
+                          activeColor: playback.isMuted ? .green : nil) { playback.toggleMute(); presentation.volumeInteraction() }
+                    .environment(\.ledButtonSize, Self.volumeMuteSize)
+            }.frame(width: Self.volumeMuteSize.frame)
         }.padding(4).background(Color(white: 0.1).opacity(0.96), in: RoundedRectangle(cornerRadius: 6))
     }
 }
@@ -241,7 +261,7 @@ extension View {
     }
 }
 
-/// Size of the LED transport buttons; the volume popup's mute button keeps the default.
+/// Size of the LED transport buttons; the volume popup's mute button has its own.
 struct LEDButtonSize: Sendable {
     var frame: CGFloat = 44
     var symbol: CGFloat = 17

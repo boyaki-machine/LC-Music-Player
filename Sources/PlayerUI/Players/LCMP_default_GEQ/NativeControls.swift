@@ -102,6 +102,11 @@ struct NativeSlider: NSViewRepresentable {
         slider.isEnabled = context.environment.isEnabled
         if !slider.isEnabled, slider.window?.firstResponder === slider { slider.window?.makeFirstResponder(nil) }
     }
+    /// A vertical slider takes the width it is offered, so clicks beside the thin track still reach it.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSlider, context: Context) -> CGSize? {
+        guard vertical, let width = proposal.width, let height = proposal.height else { return nil }
+        return CGSize(width: width, height: height)
+    }
     @MainActor final class Coordinator: NSObject {
         var parent: NativeSlider
         init(_ parent: NativeSlider) { self.parent = parent }

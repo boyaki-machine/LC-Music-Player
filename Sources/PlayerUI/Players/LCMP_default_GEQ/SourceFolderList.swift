@@ -111,6 +111,7 @@ struct SourceFolderList: View {
     var selection: Binding<Set<UUID>>? = nil
     /// Shared with the screen, which counts the matches from the same result.
     var catalog: SourceCatalogCache? = nil
+    var marks = SourceMarks()
     let select: (UUID) -> Void
     var removeFolder: (SourceFolderGroup) -> Void = { _ in }
     var removeTrack: (LibraryTrack) -> Void = { _ in }
@@ -153,10 +154,23 @@ struct SourceFolderList: View {
     private func details(_ track: LibraryTrack) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             OverflowTitle(name: track.name)
-            Text(unavailable[track.id] ?? track.reference.lastKnownURL.pathExtension.uppercased())
-                .font(.ui(11)).foregroundStyle(unavailable[track.id] == nil ? Color.white.opacity(0.55) : .orange).lineLimit(1)
+            if let reason = unavailable[track.id] {
+                Text(reason).font(.ui(11)).foregroundStyle(.orange).lineLimit(1)
+            } else {
+                HStack(spacing: 4) {
+                    Text(track.reference.lastKnownURL.pathExtension.uppercased())
+                    if let count = marks.memberships[track.id] {
+                        Text("· \(Image(systemName: "music.note.list"))\(count)").accessibilityLabel("\(count)つのリストに入っています")
+                            .help("\(count)つのプレイリストに入っています")
+                    }
+                    if marks.duplicates.contains(track.id) {
+                        Text("· 重複").foregroundStyle(Self.duplicateColor).help("同じ曲が別のファイルでも登録されています")
+                    }
+                }.font(.ui(11)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+            }
         }
     }
+    static let duplicateColor = Color(red: 0.93, green: 0.8, blue: 0.45).opacity(0.85)
 }
 
 /// The trash button of a group or a track.

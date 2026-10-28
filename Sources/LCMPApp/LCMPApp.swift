@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private let shutdownLog = Logger.shutdown
     private var quitRequestedAt: ContinuousClock.Instant?
     private var preferredExtensionHeight = WindowLayout.extensionSize.height
+    private var editingShortcuts: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         mainWindow = makeWindow(size: WindowLayout.mainSize, title: "LCMP")
@@ -52,6 +53,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         extensionWindow.delegate = self
         mainWindow.center()
         installMenus()
+        // Only the player's own windows: the open panel's window handles its own keys.
+        editingShortcuts = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            // Local monitors run on the main thread.
+            nonisolated(unsafe) let event = event
+            let handled = MainActor.assumeIsolated {
+                guard let self, let window = event.window,
+                      [self.mainWindow, self.extensionWindow, self.acknowledgements.window].contains(where: { $0 === window }) else { return false }
+                return TextEditingCommands.perform(event, in: window)
+            }
+            return handled ? nil : event
+        }
         deviceVolume = DeviceVolumeMemory(playback: playback, system: CoreAudioOutputVolume())
         library.restore()
         // The sleep timer ends the evening by quitting, which also releases the audio device.
@@ -257,11 +269,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu("LCMP", items: [("LCMPについて", #selector(showAbout), ""), ("LCMPを終了", #selector(quitPlayer), "q")])
         bar.items.last?.submenu?.insertItem(.separator(), at: 1)
         menu("ファイル", items: [("音楽ファイルを登録…", #selector(chooseFile), "o"), ("M3U8を読み込む…", #selector(importPlaylist), "i"), ("閉じる", #selector(closePlayer), "w")])
-        let edit = NSMenuItem(); edit.title = "編集"
-        let editMenu = NSMenu(title: "編集")
-        editMenu.addItem(withTitle: "コピー", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "すべてを選択", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        edit.submenu = editMenu; bar.addItem(edit)
         menu("再生", items: [("再生／一時停止", #selector(playPause), " "), ("停止", #selector(stopPlayback), ".")])
         bar.items.last?.submenu?.items.first?.keyEquivalentModifierMask = []
         menu("表示", items: [("シークバー", #selector(toggleSeek), "s"), ("音量", #selector(toggleVolume), "u"), ("拡張画面", #selector(toggleExtension), "e")])
