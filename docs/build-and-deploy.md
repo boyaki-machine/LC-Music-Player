@@ -297,7 +297,7 @@ iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwif
 | コマンド | 内容 |
 | --- | --- |
 | `make ios-build` | シミュレータ向けにビルドします（署名なし）。成果物は`build/ios/app/Build/Products/Debug-iphonesimulator/LCMP.app`です。 |
-| `make ios-test` | 共用モジュールのテストをiOSシミュレータで実行します。AppKitの画面のテストはmacOSだけで実行します。 |
+| `make ios-test` | 共用モジュールのテストをiOSシミュレータで実行します。AppKitの画面のテストはmacOSだけで実行します。失敗したときにシミュレータから診断情報（sysdiagnoseに相当）を集める処理は止めています。この処理はシミュレータの応答を待って600秒で時間切れになりやすく、失敗の報告を遅らせるためです。失敗したテストと理由はxcodebuildの出力と`build/ios/package/Logs/Test/`の`.xcresult`に残ります。 |
 | `make ios-uitest` | アプリをシミュレータで起動し、指の操作のテスト（`iOS/LCMPiOSUITests/`）を実行します。 |
 | `make ios-sim` | ビルドしてシミュレータに入れ、起動します。 |
 | `make ios-device` | 署名して実機向けにビルドし、接続したiPhoneに入れて起動します。 |

@@ -70,7 +70,8 @@ ios-build:
 	$(IOS_XCODEBUILD) -destination 'generic/platform=iOS Simulator' -derivedDataPath build/ios/app build
 
 ios-test:
-	xcodebuild test -scheme LCMP-Package -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' -derivedDataPath build/ios/package
+	xcodebuild test -scheme LCMP-Package -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' -derivedDataPath build/ios/package \
+	  -collect-test-diagnostics never
 
 ios-uitest:
 	$(IOS_XCODEBUILD) -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' -derivedDataPath build/ios/uitest test

@@ -49,9 +49,11 @@ private actor PlaylistWorker: AudioPreprocessing {
     }
     return doc
 }
-/// Waits for a condition. The limit only ends a failing wait; a slow, loaded simulator can need far longer than usual.
+/// Waits for a condition. The limit only ends a failing wait: the sweep runs the tracks away from the current one at
+/// background priority, which a loaded iOS simulator can hold back for minutes. Tests that do not look at the
+/// priority raise it to utility; the priority test and the controller's own sweeps keep it.
 @MainActor private func sweepWait(_ condition: () async -> Bool) async throws {
-    let deadline = ContinuousClock.now + .seconds(30)
+    let deadline = ContinuousClock.now + .seconds(300)
     while !(await condition()), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(2)) }
     #expect(await condition())
 }
@@ -84,6 +86,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         let broken = doc.tracks[1].reference.lastKnownURL
         await worker.fail(broken)
         let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: 48000, channels: 2) })
+        queue.farPriority = .utility
         queue.update(doc, playback: playback, after: nil)
         try await sweepWait { await worker.starts.count == 5 && queue.active == nil }
         await queue.retirement?.value
@@ -108,6 +111,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         playback.togglePlayPause(using: current.lease)
         await worker.block(doc.tracks[1].reference.lastKnownURL)
         let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: 48000, channels: 2) })
+        queue.farPriority = .utility
         queue.update(doc, playback: playback, after: nil)
         try await sweepWait { await worker.starts.count == 3 }
         #expect(queue.active?.trackID == doc.tracks[1].id && queue.active?.audio == nil)
@@ -152,6 +156,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         #expect(playback.select(current.url, using: current.lease))
         playback.togglePlayPause(using: current.lease)
         let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: 48000, channels: 2) })
+        queue.farPriority = .utility
         var constrained = true
         queue.isEnergyConstrained = { constrained }
         queue.update(doc, playback: playback, after: nil)
@@ -173,6 +178,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         let playback = PlaybackController(makeBackend: { _ in TestBackend() }), url = doc.tracks[0].reference.lastKnownURL
         await worker.block(url)
         let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: 48000, channels: 2) })
+        queue.farPriority = .utility
         queue.update(doc, playback: playback, after: nil)
         try await sweepWait { await worker.starts.count == 1 }
         let (request, work) = try #require(queue.take(doc.tracks[0]))
@@ -193,6 +199,7 @@ private actor PlaylistWorker: AudioPreprocessing {
         let refs = TestReferences(), worker = PlaylistWorker(), playback = PlaybackController(makeBackend: { _ in TestBackend() })
         let output = OutputProfileBox()
         let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: output.rate, channels: 2) })
+        queue.farPriority = .utility
         let first = doc.tracks[0].reference.lastKnownURL
         await worker.block(first)
         queue.update(doc, playback: playback, after: nil)
@@ -224,12 +231,14 @@ private actor PlaylistWorker: AudioPreprocessing {
         let profile = try MeasurementProfile(sampleRate: 48000, channels: 2)
         await worker.reconcileCacheOwners(Set(doc.tracks.map(\.id)))
         let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { profile })
+        queue.farPriority = .utility
         queue.update(doc, playback: playback, after: nil)
         try await sweepWait { await worker.starts.count == 3 && queue.active == nil }
         await queue.retirement?.value
         #expect(await worker.real.statistics().levelScans == 3)
         let second = PlaylistWorker(cache: config)
         let restored = PlaylistPreprocessing(references: refs, worker: second, profile: { profile })
+        restored.farPriority = .utility
         restored.update(doc, playback: playback, after: nil)
         try await sweepWait { await second.starts.count == 3 && restored.active == nil }
         #expect(await second.real.statistics().levelScans == 0)
@@ -248,6 +257,7 @@ private actor PlaylistWorker: AudioPreprocessing {
             if output.unsupported { throw AudioProcessingFailure.unsupportedProfile }
             return try MeasurementProfile(sampleRate: output.rate, channels: 2)
         })
+        queue.farPriority = .utility
         queue.update(doc, playback: playback, after: nil)
         try await sweepWait { await worker.starts.count == 1 }
         output.unsupported = true; queue.outputChanged()

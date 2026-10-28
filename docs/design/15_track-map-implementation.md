@@ -185,7 +185,7 @@ flowchart LR
 
 1. `BeatDetectionTests`・`BeatMapTests`・`VocalAnalysisTests`・`VocalMapTests`（AudioProcessingCoreTests）：解析器と地図。
 2. `TrackMapCacheTests`（PreprocessingCoreTests）：保存、版、合流、取消、壊れた記録。
-3. `TrackMapLibraryTests`（LibraryCoreTests）：再生中の曲の地図と事前測定。
+3. `TrackMapLibraryTests`（LibraryCoreTests）：再生中の曲の地図と事前測定。再生中の曲とその前後以外の事前測定は優先度 background で進み、負荷のかかった iOS シミュレータでは数分遅れることがある。そのため、真ん中の曲を再生して3曲すべてを utility で測り、地図を求める順序（再生中の曲・次・前）も確かめる。
 4. `PuppetShowDriverTests`・`PuppetShowVocalTests`（PlayerUITests）：地図の拍と再生中の推定の切り替え、配役、ボーカルへの反応、切り替えの保存。
 5. `LCMP_TEST_AUDIO_OUTPUT=1`で`AudioOutputTests/analysisFramesCarryTheTrackPosition`：実際の出力での曲の秒。
 6. `BeatEvaluationScoringTests`（PlayerUITests）：評価の採点が、倍・半分・裏拍・出だしの遅れを正しく分類すること。
