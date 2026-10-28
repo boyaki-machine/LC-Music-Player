@@ -22,6 +22,15 @@ import AudioProcessingCore
         #expect(OutputSignature.current() == OutputSignature.current())
     }
 
+    /// On iOS a route change pauses the track only when the outputs are other devices.
+    @Test func onlyOtherOutputDevicesCountAsAnOutputChange() {
+        #expect(AudioEngineBackend.outputsChanged(from: ["earphones"], to: ["speaker"]))
+        #expect(AudioEngineBackend.outputsChanged(from: ["speaker"], to: ["speaker", "car"]))
+        #expect(AudioEngineBackend.outputsChanged(from: ["speaker"], to: []))
+        #expect(!AudioEngineBackend.outputsChanged(from: ["left", "right"], to: ["right", "left"]))
+        #expect(!AudioEngineBackend.outputsChanged(from: nil, to: ["speaker"]))
+    }
+
     /// The graph renders at the output device's rate, so a source at that rate is never converted.
     @Test func theGraphRendersAtTheDevicesRate() throws {
         let engine = AVAudioEngine()

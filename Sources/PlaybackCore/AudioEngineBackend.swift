@@ -13,7 +13,10 @@ public final class AudioEngineBackend: PlaybackBackend {
         guard let run else { return pendingTime }
         if paused { return pausedTime }
         guard let nodeTime = run.player.lastRenderTime, nodeTime.isSampleTimeValid,
-              let playerTime = run.player.playerTime(forNodeTime: nodeTime) else { return run.startTime }
+              let playerTime = run.player.playerTime(forNodeTime: nodeTime) else {
+            // A stopped engine no longer knows the player's time: the feeder kept the last one.
+            return min(duration, run.startTime + (run.feeder.lastPlayedSeconds ?? 0))
+        }
         return min(duration, run.startTime + max(0, Double(playerTime.sampleTime) / playerTime.sampleRate))
     }
     public var onEvent: (@MainActor (PlaybackEvent) -> Void)?
@@ -73,7 +76,7 @@ public final class AudioEngineBackend: PlaybackBackend {
         let graph: PlaybackGraph
         let feeder: PCMFeeder
         let startTime: TimeInterval
-        let observer: NSObjectProtocol
+        let observers: [NSObjectProtocol]
     }
 
     private let url: URL
@@ -93,7 +96,7 @@ public final class AudioEngineBackend: PlaybackBackend {
     #if os(iOS)
     private static let routeChange: Notification.Name? = AVAudioSession.routeChangeNotification
     #else
-    // A change of the default device on macOS changes the engine's configuration and stops playback.
+    // A change of the default device on macOS changes the engine's configuration and pauses playback.
     private static let routeChange: Notification.Name? = nil
     #endif
 
@@ -281,8 +284,25 @@ public final class AudioEngineBackend: PlaybackBackend {
         }
     }
 
-    private func observeConfiguration(of engine: AVAudioEngine, send: @escaping @Sendable (PlaybackEvent) -> Void) -> NSObjectProtocol {
-        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in send(.outputChanged) }
+    /// A change of the output's format stops the engine and changes its configuration. On iOS, a change
+    /// to an output of the same format (earphones to the speaker) leaves the engine running, but it
+    /// is another output all the same.
+    private func observeOutput(of engine: AVAudioEngine, send: @escaping @Sendable (PlaybackEvent) -> Void) -> [NSObjectProtocol] {
+        var observers = [NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in
+            send(.outputChanged)
+        }]
+        #if os(iOS)
+        observers.append(NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: nil) { note in
+            let previous = note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription
+            let current = AVAudioSession.sharedInstance().currentRoute
+            if Self.outputsChanged(from: previous?.outputs.map(\.uid), to: current.outputs.map(\.uid)) { send(.outputChanged) }
+        })
+        #endif
+        return observers
+    }
+    /// Whether the outputs are other devices. A change that names no previous route is not one.
+    nonisolated static func outputsChanged(from previous: [String]?, to current: [String]) -> Bool {
+        previous.map { Set($0) != Set(current) } ?? false
     }
 
     private func reportRenderSchedule(_ engine: AVAudioEngine) {
@@ -331,9 +351,9 @@ public final class AudioEngineBackend: PlaybackBackend {
             let feeder = PCMFeeder(decoder: decoder, player: player,
                                    finished: { send(.finished) },
                                    failed: { send(.failed(.playbackFailed($0.localizedDescription))) })
-            let observer = observeConfiguration(of: engine, send: send)
+            let observers = observeOutput(of: engine, send: send)
             pendingTime = seconds
-            run = Run(id: id, engine: engine, player: player, graph: graph, feeder: feeder, startTime: seconds, observer: observer)
+            run = Run(id: id, engine: engine, player: player, graph: graph, feeder: feeder, startTime: seconds, observers: observers)
             processingChain = graph.chain
             analysisNode = graph.observation
             try feeder.prime()
@@ -360,7 +380,7 @@ public final class AudioEngineBackend: PlaybackBackend {
                 try? decoder.close(); return try start(at: seconds)
             }
             endAnalysis()
-            NotificationCenter.default.removeObserver(old.observer)
+            old.observers.forEach(NotificationCenter.default.removeObserver)
             // Cancelled first, so the callbacks of the buffers the stop releases do nothing.
             old.feeder.cancel()
             old.player.stop()
@@ -372,7 +392,7 @@ public final class AudioEngineBackend: PlaybackBackend {
                                    failed: { send(.failed(.playbackFailed($0.localizedDescription))) })
             pendingTime = seconds
             run = Run(id: id, engine: old.engine, player: old.player, graph: old.graph, feeder: feeder, startTime: seconds,
-                      observer: observeConfiguration(of: old.engine, send: send))
+                      observers: observeOutput(of: old.engine, send: send))
             try feeder.prime()
             old.player.play()
             reportRenderSchedule(old.engine)
@@ -435,6 +455,14 @@ public final class AudioEngineBackend: PlaybackBackend {
         Self.takeHandoff()?.stop()
     }
 
+    /// The output stopped by itself (another device, a lost connection): the run ends and its engine
+    /// stops, but the position stays, so resuming starts a new run there on the output of that time.
+    public func suspend() {
+        let position = currentTime
+        stop()
+        pendingTime = position; pausedTime = position; paused = true
+    }
+
     /// Another track takes over: the player falls silent at once, and the running engine is left
     /// for the next track's run, which then starts in about the time of a seek instead of stopping
     /// one engine and starting another (about 80ms). An engine nobody takes stops after a moment.
@@ -452,7 +480,7 @@ public final class AudioEngineBackend: PlaybackBackend {
         paused = false
         if let run {
             self.run = nil
-            NotificationCenter.default.removeObserver(run.observer)
+            run.observers.forEach(NotificationCenter.default.removeObserver)
             run.feeder.cancel()
             run.player.stop()
             run.feeder.close()
@@ -575,6 +603,8 @@ final class PCMFeeder: @unchecked Sendable {
     private let buffers: [AVAudioPCMBuffer]
     private var free: [Int]
     private var scheduled: AVAudioFramePosition = 0
+    private let playedLock = NSLock()
+    private var lastPlayed: TimeInterval?
     private var endOfAudio = false
     private var cancelled = false
 
@@ -596,6 +626,11 @@ final class PCMFeeder: @unchecked Sendable {
     }
 
     func cancel() { queue.sync { cancelled = true } }
+
+    /// The player's time when it last took a buffer, in seconds from its start: about every 0.2
+    /// seconds while it plays. The output can stop before the app hears of it, and a player whose
+    /// engine has stopped no longer reports its time.
+    var lastPlayedSeconds: TimeInterval? { playedLock.withLock { lastPlayed } }
 
     /// Frames handed to the player so far, for tests.
     var scheduledFrames: AVAudioFramePosition { queue.sync { scheduled } }
@@ -628,6 +663,10 @@ final class PCMFeeder: @unchecked Sendable {
 
     private func consumed(_ index: Int) {
         guard !cancelled else { return }
+        if let node = player.lastRenderTime, node.isSampleTimeValid, let time = player.playerTime(forNodeTime: node) {
+            let seconds = max(0, Double(time.sampleTime) / time.sampleRate)
+            playedLock.withLock { lastPlayed = seconds }
+        }
         free.append(index)
         do { try fill() } catch { cancelled = true; failed(error) }
     }

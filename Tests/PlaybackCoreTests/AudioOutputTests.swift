@@ -121,6 +121,44 @@ struct AudioOutputTests {
         #expect(sought.first.map { $0.track >= 2.45 && $0.track < 2.8 } == true, "\(sought.first.map { $0.track } ?? -1)")
     }
 
+    /// The output stops the engine before the app hears of it, and a stopped engine no longer knows
+    /// the player's time. The track still pauses where it was and resumes from there.
+    @Test func anOutputChangePausesWhereTheTrackWasAndResumesFromThere() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-route-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1))
+        let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44100 * 6))
+        buffer.frameLength = buffer.frameCapacity
+        let samples = try #require(buffer.floatChannelData)[0]
+        for frame in 0..<Int(buffer.frameLength) { samples[frame] = 0.05 * sin(Float(frame) * 2 * .pi * 440 / 44100) }
+        do { try AVAudioFile(forWriting: url, settings: format.settings).write(from: buffer) }
+        var backend: AudioEngineBackend?
+        let controller = PlaybackController(makeBackend: { url in
+            let made = try AudioEngineBackend(url: url); backend = made; return made
+        })
+        defer { controller.close() }
+        controller.setVolume(0.05)
+        controller.select(url)
+        controller.seek(to: 2)
+        controller.togglePlayPause()
+        try await Task.sleep(for: .seconds(1.2))
+        let heard = controller.currentTime
+        let engine = try #require(backend?.currentEngine)
+        engine.stop()
+        NotificationCenter.default.post(name: .AVAudioEngineConfigurationChange, object: engine)
+        try await waitUntil { controller.state != .playing }
+        let kept = controller.currentTime
+        #expect(controller.state == .paused && controller.activeFileLease != nil)
+        #expect(kept > heard - 0.3 && kept <= heard + 0.05, "heard \(heard) kept \(kept)")
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(controller.currentTime == kept && backend?.currentEngine == nil)
+        controller.togglePlayPause()
+        #expect(controller.state == .playing)
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(controller.currentTime > kept + 0.2 && controller.currentTime < kept + 0.8, "kept \(kept) now \(controller.currentTime)")
+        #expect(backend?.currentEngine?.isRunning == true)
+    }
+
     @Test func actualPauseResumeStopAndRestartPreserveSystemVolume() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-output-\(UUID()).wav")
         defer { try? FileManager.default.removeItem(at: url) }

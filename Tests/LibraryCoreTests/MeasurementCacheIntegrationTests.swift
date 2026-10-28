@@ -101,7 +101,7 @@ private actor AuditedPreprocessor: AudioPreprocessing {
         try await cacheWait { playback.state == .playing && model.currentTrackMetrics != nil }
         #expect(await secondProcessor.statistics().levelScans == 0)
         #expect(await secondProcessor.statistics().cacheHits >= 1)
-        model.setNormalizationTarget(-18); model.togglePlayPause()
+        model.setNormalizationTarget(-18)
         try await cacheWait { playback.state == .playing && playback.normalizationPlan?.settings.targetLUFS == -18 }
         #expect(model.currentTrackMetrics == first && playback.volume == 0)
         #expect(refs.scopes.maximum <= 2)

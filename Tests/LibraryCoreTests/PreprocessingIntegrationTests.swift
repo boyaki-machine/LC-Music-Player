@@ -61,11 +61,21 @@ import PlaybackCore
         playback.seek(to: 0.5)
         model.togglePlayPause()
         #expect(playback.state == .playing && model.currentTrackMetrics == originalMetrics)
+        // A changed setting never stops the track: it plays on and continues with the new level.
+        let beforeChange = playback.currentTime
         model.setNormalizationTarget(-18)
-        #expect(playback.state == .paused && playback.normalizationPlan == nil)
+        #expect(playback.state == .playing && model.isPreparing)
+        try await waitFor { playback.state == .playing && playback.normalizationPlan?.settings.targetLUFS == -18 && !model.isPreparing }
+        #expect(model.currentTrackMetrics == originalMetrics && playback.currentTime >= beforeChange)
+        // A pause while the new start is prepared cancels it; resuming prepares it then.
+        model.setNormalizationTarget(-20); model.togglePlayPause()
+        #expect(playback.state == .paused)
+        try await waitFor { !model.isPreparing }
+        let paused = playback.currentTime
+        #expect(playback.state == .paused && playback.normalizationPlan?.settings.targetLUFS != -20)
         model.togglePlayPause()
-        try await waitFor { playback.state == .playing && playback.normalizationPlan?.settings.targetLUFS == -18 }
-        #expect(model.currentTrackMetrics == originalMetrics)
+        try await waitFor { playback.state == .playing && playback.normalizationPlan?.settings.targetLUFS == -20 && !model.isPreparing }
+        #expect(playback.currentTime >= paused)
         playback.toggleMute()
         #expect(playback.isMuted && playback.state == .playing)
         playback.toggleMute()
@@ -76,10 +86,9 @@ import PlaybackCore
         #expect(model.currentEntry?.id == selected && playback.state == .playing && model.error != nil)
         store.fail = false
         model.setNormalizesVolume(false)
-        #expect(playback.state == .paused && playback.normalizationPlan == nil && playback.volume == 0)
-        model.togglePlayPause()
+        #expect(playback.state == .playing && playback.normalizationPlan == nil && playback.volume == 0)
         try await waitFor { playback.state == .playing && !model.isPreparing }
-        #expect(playback.normalizationPlan == nil)
+        #expect(playback.normalizationPlan == nil && model.currentEntry?.id == selected)
         for _ in 0..<8 {
             try await waitFor { model.preparedNextEntryID != nil }
             model.togglePlayPause(); model.togglePlayPause()
@@ -87,7 +96,7 @@ import PlaybackCore
         }
         for _ in 0..<4 {
             model.setNormalizesVolume(!model.normalizesVolume)
-            model.togglePlayPause()
+            #expect(playback.state == .playing)
             try await waitFor { playback.state == .playing && !model.isPreparing }
         }
         #expect(refs.scopes.maximum <= 2)
