@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import AudioProcessingCore
 @testable import PlaybackCore
 
 @MainActor
@@ -10,6 +11,7 @@ private final class FakeBackend: PlaybackBackend {
     var seekCount = 0
     var currentTime: TimeInterval = 0
     var volume: Float = 1
+    var bassEnhancement: BassEnhancement = .off
     var onEvent: (@MainActor (PlaybackEvent) -> Void)?
     var playCount = 0
     var pauseCount = 0
@@ -269,6 +271,22 @@ struct PlaybackControllerTests {
         controller.togglePlayPause()
         backend.onEvent?(.outputChanged)
         #expect(controller.state == .paused && backend.calls == ["suspend", "pause", "suspend"])
+    }
+
+    @Test func theBassEnhancementReachesTheNextAndThePlayingBackend() {
+        var backends: [FakeBackend] = []
+        let controller = PlaybackController(
+            fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in let b = FakeBackend(); backends.append(b); return b }
+        )
+        controller.setBassEnhancement(.strong)
+        controller.select(first)
+        #expect(backends.last?.bassEnhancement == .strong)
+        controller.togglePlayPause()
+        controller.setBassEnhancement(.light)
+        #expect(controller.bassEnhancement == .light && backends.last?.bassEnhancement == .light)
+        #expect(backends.last?.playCount == 1 && backends.last?.calls.isEmpty == true, "the track plays on")
+        controller.select(second)
+        #expect(backends.count == 2 && backends.last?.bassEnhancement == .light)
     }
 
     @Test func volumeIsClampedAndNonfiniteValuesAreIgnored() {

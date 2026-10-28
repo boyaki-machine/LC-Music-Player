@@ -98,12 +98,24 @@ public struct NormalizationPlan: Equatable, Sendable {
     }
 }
 
-/// Ordered processing location: observation → [future EQ] → level → [future delay] → manual mixer.
-/// Every disabled stage is identity. No fabricated EQ/delay implementation.
+/// Ordered processing location: observation → [future EQ] → level → bass → [future delay] → manual mixer.
+/// Every disabled stage is identity. No fabricated EQ/delay implementation. The bass stage comes
+/// after the level so that its limiter is the last word on the peaks.
 @MainActor public final class AudioProcessingChain {
     public let levelNode: AVAudioUnitEQ
-    public init(plan: NormalizationPlan?) {
+    public let bassNode: AVAudioUnitEffect
+    private let bass: BassPunchUnit
+    public init(plan: NormalizationPlan?, bass enhancement: BassEnhancement = .off) {
         levelNode = AVAudioUnitEQ(numberOfBands: 0)
         levelNode.globalGain = Float(plan?.gainDB ?? 0)
+        _ = BassPunchUnit.registered
+        bassNode = AVAudioUnitEffect(audioComponentDescription: BassPunchUnit.description)
+        bass = bassNode.auAudioUnit as! BassPunchUnit
+        bass.strength = enhancement
+    }
+    /// Changes while audio flows: the stage glides to the new strength over about 50ms.
+    public var bassEnhancement: BassEnhancement {
+        get { bass.strength }
+        set { bass.strength = newValue }
     }
 }

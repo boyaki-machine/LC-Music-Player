@@ -23,6 +23,8 @@ public final class PlaybackController {
     /// `volume`, so the volume remembered for each output device stays the listener's choice.
     public private(set) var fadeGain: Float = 1
     private var outputVolume: Float { volume * fadeGain }
+    /// Applies to the playing track at once: the stage glides to it instead of stepping.
+    public private(set) var bassEnhancement: BassEnhancement = .off
     public private(set) var normalizationRequired = false
     public var normalizationPlan: NormalizationPlan? { normalizationReady ? backend?.normalizationPlan : nil }
     @ObservationIgnored private var normalizationReady = false
@@ -80,6 +82,7 @@ public final class PlaybackController {
             defer { withExtendedLifetime(nextLease) {} }
             let next = try makeBackend(url)
             next.volume = outputVolume
+            next.bassEnhancement = bassEnhancement
             try committing()
             endRun(retiring: true)
             backend = next
@@ -106,6 +109,7 @@ public final class PlaybackController {
             endRun(retiring: true)
             backend = AudioEngineBackend(url: url, duration: duration, supportsSeeking: supportsSeeking)
             backend?.volume = outputVolume
+            backend?.bassEnhancement = bassEnhancement
             selectedURL = url; self.duration = duration; state = .ready
             error = nil; message = "再生できます。"; connectAnalysis()
             return true
@@ -128,6 +132,7 @@ public final class PlaybackController {
             selectedURL = prepared.source.url
             duration = next.duration
             next.volume = outputVolume
+            next.bassEnhancement = bassEnhancement
             state = .ready
             error = nil
             message = "再生できます。"
@@ -207,6 +212,11 @@ public final class PlaybackController {
         if volume > 0 { volumeBeforeMute = volume }
         backend?.volume = outputVolume
         onVolumeChange?()
+    }
+
+    public func setBassEnhancement(_ enhancement: BassEnhancement) {
+        bassEnhancement = enhancement
+        backend?.bassEnhancement = enhancement
     }
 
     public func setFadeGain(_ gain: Float) {
