@@ -68,6 +68,9 @@ public final class AudioEngineBackend: PlaybackBackend {
     public var volume: Float = 0.25 {
         didSet { run?.graph.setVolume(volume) }
     }
+    public var bassEnhancement: BassEnhancement = .off {
+        didSet { run?.graph.chain.bassEnhancement = bassEnhancement }
+    }
 
     private struct Run {
         let id: UUID
@@ -341,10 +344,11 @@ public final class AudioEngineBackend: PlaybackBackend {
             if let handoff {
                 // Only the player changes; the level gain is set while no audio flows.
                 graph = handoff.graph.taking(sourceFormat: decoder.processingFormat, plan: normalizationPlan)
+                graph.chain.bassEnhancement = bassEnhancement
                 analysisSource = handoff.source
             } else {
                 graph = PlaybackGraph(engine: engine, player: AVAudioPlayerNode(), sourceFormat: decoder.processingFormat,
-                                      observationFormat: observationFormat, plan: normalizationPlan)
+                                      observationFormat: observationFormat, plan: normalizationPlan, bass: bassEnhancement)
             }
             let player = graph.player
             graph.setVolume(volume)
@@ -537,7 +541,7 @@ extension AudioEngineBackend {
 }
 
 /// The nodes between the player and the output, built the same way for playback and for the
-/// offline tests: player → format mixer → observation → level gain → main mixer (app volume).
+/// offline tests: player → format mixer → observation → level gain → bass → main mixer (app volume).
 @MainActor struct PlaybackGraph {
     let engine: AVAudioEngine
     let player: AVAudioPlayerNode
@@ -551,16 +555,17 @@ extension AudioEngineBackend {
     let format: AVAudioFormat
 
     init(engine: AVAudioEngine, player: AVAudioPlayerNode, sourceFormat: AVAudioFormat,
-         observationFormat: AVAudioFormat, plan: NormalizationPlan?) {
+         observationFormat: AVAudioFormat, plan: NormalizationPlan?, bass: BassEnhancement = .off) {
         self.engine = engine; self.player = player; format = observationFormat
         observation = AVAudioUnitEQ(numberOfBands: 0)
-        chain = AudioProcessingChain(plan: plan)
+        chain = AudioProcessingChain(plan: plan, bass: bass)
         converter = AVAudioMixerNode()
-        for node in [player, converter, observation, chain.levelNode] as [AVAudioNode] { engine.attach(node) }
+        for node in [player, converter, observation, chain.levelNode, chain.bassNode] as [AVAudioNode] { engine.attach(node) }
         engine.connect(player, to: converter, format: sourceFormat)
         engine.connect(converter, to: observation, format: observationFormat)
         engine.connect(observation, to: chain.levelNode, format: observationFormat)
-        engine.connect(chain.levelNode, to: engine.mainMixerNode, format: observationFormat)
+        engine.connect(chain.levelNode, to: chain.bassNode, format: observationFormat)
+        engine.connect(chain.bassNode, to: engine.mainMixerNode, format: observationFormat)
     }
 
     /// The app volume and the sleep timer's fade change while audio flows, so they go to the main

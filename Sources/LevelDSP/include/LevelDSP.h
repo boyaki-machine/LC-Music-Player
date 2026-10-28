@@ -2,6 +2,7 @@
 #define LCMP_LEVEL_DSP_H
 #include <stddef.h>
 #include <stdint.h>
+#include "BassPunch.h"
 typedef struct LCMPLevelMeter LCMPLevelMeter;
 LCMPLevelMeter *lcmp_level_create(double sample_rate, unsigned channels);
 void lcmp_level_destroy(LCMPLevelMeter *meter);

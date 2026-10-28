@@ -110,6 +110,8 @@
 - 設定タブはScrollView内に、最大音量測定のToggle、説明、測定状態・dBFSまたは無音を表示し、`setMeasuresMaximumVolume(_:)`で変更する。最小の240ptでも説明を折り返し、残りはスクロールで読める構成にする。
 - 音量自動調整のToggleと目標LUFSのPickerも置き、`setNormalizesVolume`／`setNormalizationTarget`へ操作を渡す。`levelMeasurement`に基づくLUFS/true peak、`playback.normalizationPlan`の補正dBと制限の理由を表示し、`preparationStage`で全曲測定中を案内する。
 - 自動調整の設定変更による一時停止と、再生を続ける手動音量の操作を区別する。測定・補正の契約は[音量自動調整の実装設計](06_volume-normalization-implementation.md)に記載する。
+- 設定の各項目（曲ごとの音量をそろえる・重低音を強調・最大音量を測定）は、名前の右端に操作（スイッチまたはセグメント）を置き、説明・目標音量・測定値はその下に字下げして、どの項目に属するかを示す。字下げした中でも、目標音量のPickerのような操作は右端に寄せる。
+- 「重低音を強調」はセグメント形式のPicker（切／弱／強）と説明を置き、`setBassEnhancement`へ渡す。再生中に変えても再生を続ける。段の仕様は[重低音の強調の実装設計](16_bass-enhancement-implementation.md)に記載する。
 
 ### ライセンスウィンドウ
 

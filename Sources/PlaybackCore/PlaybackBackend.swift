@@ -15,6 +15,7 @@ public protocol PlaybackBackend: AnyObject {
     var supportsSeeking: Bool { get }
     var currentTime: TimeInterval { get }
     var volume: Float { get set }
+    var bassEnhancement: BassEnhancement { get set }
     var onEvent: (@MainActor (PlaybackEvent) -> Void)? { get set }
     var normalizationPlan: NormalizationPlan? { get }
     func clearNormalization()
@@ -33,6 +34,7 @@ public protocol PlaybackBackend: AnyObject {
 
 public extension PlaybackBackend {
     var normalizationPlan: NormalizationPlan? { nil }
+    var bassEnhancement: BassEnhancement { get { .off } set {} }
     func clearNormalization() {}
     func retire() { stop() }
     func suspend() { try? pause() }

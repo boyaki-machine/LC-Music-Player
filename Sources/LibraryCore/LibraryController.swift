@@ -107,6 +107,8 @@ import AudioProcessingCore
         measuresMaximumVolume = preferences.bool(forKey: "measureMaximumVolume")
         normalizesVolume = preferences.bool(forKey: "normalizeVolume")
         shufflesPlayback = preferences.bool(forKey: "shufflePlayback")
+        if let raw = preferences.object(forKey: "bassEnhancement") as? Int,
+           let bass = BassEnhancement(rawValue: raw) { playback.setBassEnhancement(bass) }
         if let count = preferences.object(forKey: Self.sleepTimerCountKey) as? Int, SleepTimer.choices.contains(count) { sleepTimerCount = count }
         if let target = preferences.object(forKey: "normalizationTargetLUFS") as? Double,
            let settings = try? NormalizationSettings(targetLUFS: target) { normalizationSettings = settings }
@@ -810,6 +812,14 @@ extension LibraryController {
         playback.requireNormalization(enabled); normalizationNeedsPreparation = true
         levelMeasurement = enabled ? .pending : .disabled
         playOnWithNewSettings()
+    }
+    /// The playing track takes the new strength at once; the level measurement is of the
+    /// unprocessed audio and stays valid.
+    public var bassEnhancement: BassEnhancement { playback.bassEnhancement }
+    public func setBassEnhancement(_ enhancement: BassEnhancement) {
+        guard !shuttingDown else { return }
+        playback.setBassEnhancement(enhancement)
+        preferences.set(enhancement.rawValue, forKey: "bassEnhancement")
     }
     public func setNormalizationTarget(_ target: Double) {
         guard !shuttingDown else { return }

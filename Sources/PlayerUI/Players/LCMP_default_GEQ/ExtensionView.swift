@@ -1,6 +1,7 @@
 import SwiftUI
 import PlaybackCore
 import LibraryCore
+import AudioProcessingCore
 
 @MainActor public struct LibraryActions {
     public var files: (UUID?) -> Void
@@ -120,49 +121,70 @@ public struct ExtensionView: View {
                         }.padding(.vertical, 2).padding(.horizontal, 1)
                     }.accessibilityIdentifier("visualizationDesign")
                 case .settings:
-                    ScrollView {
+                    scrolled {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("再生と表示")
-                            Toggle("曲ごとの音量をそろえる", isOn: Binding(get: { library.normalizesVolume },
-                                set: { library.setNormalizesVolume($0) }))
-                            Text("曲全体の音量とピークを測定して音量補正します。")
-                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            if library.normalizesVolume {
-                                Picker("目標音量", selection: Binding(get: { library.normalizationSettings.targetLUFS },
-                                    set: { library.setNormalizationTarget($0) })) {
-                                    Text("基準 −23 LUFS").tag(-23.0)
-                                    Text("−18 LUFS").tag(-18.0)
-                                    Text("−16 LUFS").tag(-16.0)
-                                }
-                                switch library.levelMeasurement {
-                                case .disabled: EmptyView()
-                                case .pending: Text("音量補正：未測定／準備待ち").foregroundStyle(.secondary)
-                                case .failed: Text("音量を測定できません。対象曲を選び直して再試行してください。").foregroundStyle(.orange)
-                                case .complete(let result):
-                                    Text(result.levels.loudness.value.map { String(format: "全曲音量：%.1f LUFS", $0) } ?? "全曲音量：無音／測定対象外")
-                                    Text(result.levels.truePeak == 0 ? "ピーク：無音" : String(format: "ピーク：%.1f dBTP", result.levels.truePeakDBTP))
-                                }
-                                if let plan = playback.normalizationPlan {
-                                    Text(String(format: "補正：%+.1f dB", plan.gainDB))
-                                    if plan.constraint == .peakLimited || plan.constraint == .boostLimited {
-                                        Text("ピークまたは増幅上限により、目標より小さく再生します。")
-                                            .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            SettingRow("曲ごとの音量をそろえる") {
+                                Toggle("曲ごとの音量をそろえる", isOn: Binding(get: { library.normalizesVolume },
+                                    set: { library.setNormalizesVolume($0) })).switchAtTheEdge()
+                            } details: {
+                                Text("曲全体の音量とピークを測定して音量補正します。")
+                                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                if library.normalizesVolume {
+                                    // Every control sits at the right edge, where the listener looks for it.
+                                    HStack(spacing: 8) {
+                                        Text("目標音量").foregroundStyle(.secondary)
+                                        Spacer(minLength: 0)
+                                        Picker("目標音量", selection: Binding(get: { library.normalizationSettings.targetLUFS },
+                                            set: { library.setNormalizationTarget($0) })) {
+                                            Text("基準 −23 LUFS").tag(-23.0)
+                                            Text("−18 LUFS").tag(-18.0)
+                                            Text("−16 LUFS").tag(-16.0)
+                                        }.labelsHidden().fixedSize()
+                                    }
+                                    switch library.levelMeasurement {
+                                    case .disabled: EmptyView()
+                                    case .pending: Text("音量補正：未測定／準備待ち").foregroundStyle(.secondary)
+                                    case .failed: Text("音量を測定できません。対象曲を選び直して再試行してください。").foregroundStyle(.orange)
+                                    case .complete(let result):
+                                        Text(result.levels.loudness.value.map { String(format: "全曲音量：%.1f LUFS", $0) } ?? "全曲音量：無音／測定対象外")
+                                        Text(result.levels.truePeak == 0 ? "ピーク：無音" : String(format: "ピーク：%.1f dBTP", result.levels.truePeakDBTP))
+                                    }
+                                    if let plan = playback.normalizationPlan {
+                                        Text(String(format: "補正：%+.1f dB", plan.gainDB))
+                                        if plan.constraint == .peakLimited || plan.constraint == .boostLimited {
+                                            Text("ピークまたは増幅上限により、目標より小さく再生します。")
+                                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                        }
                                     }
                                 }
                             }
-                            Toggle("最大音量を測定", isOn: Binding(get: { library.measuresMaximumVolume },
-                                set: { library.setMeasuresMaximumVolume($0) }))
-                            Text("最大サンプル音量を表示します。")
-                                .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            switch library.peakMeasurement {
-                            case .disabled: EmptyView()
-                            case .pending: Text("最大音量：未測定／測定待ち").foregroundStyle(.secondary)
-                            case .complete(let peak):
-                                Text(peak.samplePeak == 0 ? "最大音量：無音" : String(format: "最大音量：%.1f dBFS", peak.peakDBFS))
-                            case .failed: Text("最大音量を測定できませんでした。").foregroundStyle(.secondary)
+                            SettingRow("重低音を強調") {
+                                // Segments show every choice at once; a menu of single characters hid where to tap.
+                                Picker("重低音を強調", selection: Binding(get: { library.bassEnhancement },
+                                    set: { library.setBassEnhancement($0) })) {
+                                    Text("切").tag(BassEnhancement.off)
+                                    Text("弱").tag(BassEnhancement.light)
+                                    Text("強").tag(BassEnhancement.strong)
+                                }.pickerStyle(.segmented).labelsHidden().fixedSize().accessibilityIdentifier("bassEnhancement")
+                            } details: {
+                                Text("キックやタムなどの低音の立ち上がりを強めます。")
+                                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                             }
-                            Text("音量調整はアプリ内の再生音量で行います。")
-                                .fixedSize(horizontal: false, vertical: true)
+                            SettingRow("最大音量を測定") {
+                                Toggle("最大音量を測定", isOn: Binding(get: { library.measuresMaximumVolume },
+                                    set: { library.setMeasuresMaximumVolume($0) })).switchAtTheEdge()
+                            } details: {
+                                Text("最大サンプル音量を表示します。")
+                                    .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                                switch library.peakMeasurement {
+                                case .disabled: EmptyView()
+                                case .pending: Text("最大音量：未測定／測定待ち").foregroundStyle(.secondary)
+                                case .complete(let peak):
+                                    Text(peak.samplePeak == 0 ? "最大音量：無音" : String(format: "最大音量：%.1f dBFS", peak.peakDBFS))
+                                case .failed: Text("最大音量を測定できませんでした。").foregroundStyle(.secondary)
+                                }
+                            }
                             #if os(macOS)
                             Text("⌘O 音源登録 · Space 再生／一時停止\n⌘M 最小化 · ⌘W 閉じる · ⌘Q 終了")
                                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -176,7 +198,11 @@ public struct ExtensionView: View {
                             AcknowledgementsButton(action: showAcknowledgements)
                                 .frame(height: 24)
 
-                        }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        #if os(macOS)
+                        // The switches stay clear of the scroller, which takes clicks across its width.
+                        .padding(.trailing, SourceFolderList.scrollerClearance)
+                        #endif
                     }
 
                 }
@@ -515,6 +541,35 @@ public struct ExtensionView: View {
             // away, keeping the words and the matches.
             .scrollDismissesKeyboard(.immediately)
             .simultaneousGesture(TapGesture().onEnded { searchFocused = false })
+        }
+    }
+}
+
+private extension Toggle {
+    /// The iOS switch draws about 2pt past its frame, which the scroll view clipped at the edge;
+    /// the inset lines its end up with the segments'.
+    func switchAtTheEdge() -> some View {
+        toggleStyle(.switch).labelsHidden().fixedSize().padding(.trailing, 3)
+    }
+}
+
+/// One setting: its name with the control at the right edge, and what belongs to it indented below,
+/// so that each explanation and measurement reads as part of its own setting.
+private struct SettingRow<Control: View, Details: View>: View {
+    let title: String
+    @ViewBuilder let control: Control
+    @ViewBuilder let details: Details
+    init(_ title: String, @ViewBuilder control: () -> Control, @ViewBuilder details: () -> Details) {
+        self.title = title; self.control = control(); self.details = details()
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Text(title).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                control
+            }
+            VStack(alignment: .leading, spacing: 4) { details }.padding(.leading, 14)
         }
     }
 }
