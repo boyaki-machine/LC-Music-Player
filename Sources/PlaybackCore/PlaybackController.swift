@@ -27,11 +27,12 @@ public final class PlaybackController {
     public var normalizationPlan: NormalizationPlan? { normalizationReady ? backend?.normalizationPlan : nil }
     @ObservationIgnored private var normalizationReady = false
 
+    /// A playing track plays on with the level it has until the library replaces its run, because
+    /// the level gain steps at once and must not change while audio flows.
     public func requireNormalization(_ enabled: Bool) {
-        if state == .playing { togglePlayPause() }
         normalizationRequired = enabled
         normalizationReady = false
-        if !enabled { backend?.clearNormalization() }
+        if !enabled, state != .playing { backend?.clearNormalization() }
     }
     public private(set) var analysisFrame: AnalysisFrame?
     /// Invalidates cached display state even when analysisFrame was already nil.
@@ -271,6 +272,7 @@ public final class PlaybackController {
     }
 
     private func handle(_ event: PlaybackEvent) {
+        if case .outputChanged = event { return outputChanged() }
         // A finished track is usually followed by the next, which takes over the running output.
         if case .finished = event { endRun(retiring: true) } else { endRun() }
         switch event {
@@ -283,11 +285,19 @@ public final class PlaybackController {
             state = .failed
             error = failure
             message = "再生が停止しました。"
-        case .outputChanged:
-            state = .stopped
-            error = nil
-            message = "音声出力の設定が変わりました。再生ボタンで先頭から再開できます。"
+        case .outputChanged: break
         }
+        onActivityChange?()
+    }
+
+    /// The output changed under the track (a lost connection, another device): it pauses where it
+    /// was, keeping its file access, so nothing plays on the new output until the listener resumes.
+    private func outputChanged() {
+        backend?.suspend()
+        analysisFrame = nil
+        state = .paused
+        error = nil
+        message = "音声出力が変わったため一時停止しました。"
         onActivityChange?()
     }
 

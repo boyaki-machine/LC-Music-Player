@@ -122,7 +122,8 @@ import AudioProcessingCore
         playback.onNaturalFinish = { [weak self] in
             guard let self else { return }
             if self.sleepTimerEndsWithThisSong() { return }
-            if self.isPreparing { return }
+            // A new start for changed settings is no longer needed once the track has ended.
+            if self.isPreparing, self.selectionIntent?.followsPlayback != true { return }
             if self.isBusy { self.pendingAdvance = true } else { self.move(1, autoPlay: true) }
         }
     }
@@ -411,7 +412,7 @@ import AudioProcessingCore
         playback.seek(to: seconds)
     }
     public func togglePlayPause() {
-        if playback.state == .playing || (playback.state == .paused && !normalizationNeedsPreparation) {
+        if playback.state == .playing || (playback.state == .paused && !normalizationNeedsPreparation && levelsFitOutput) {
             playback.togglePlayPause(); return
         }
         guard let current = currentTrack, let list = document.currentPlaylistID, let entry = document.currentEntryID else { return }
@@ -430,6 +431,12 @@ import AudioProcessingCore
             unavailable[current.id] = LibraryFailure.unavailable.localizedDescription
             self.error = error.localizedDescription
         }
+    }
+    /// Whether the levels of the paused track still fit the output. Another output, which pauses the
+    /// track, may render another rate; the track is then measured for it before it resumes.
+    private var levelsFitOutput: Bool {
+        guard normalizesVolume else { return true }
+        return measuredLevels.map { $0.profile == (try? AudioEngineBackend.measurementProfile()) } == true
     }
     public func previous() { move(-1, autoPlay: playback.state == .playing) }
     public func next() { move(1, autoPlay: playback.state == .playing) }
@@ -798,22 +805,33 @@ extension LibraryController {
     }
     public func setNormalizesVolume(_ enabled: Bool) {
         guard !shuttingDown, normalizesVolume != enabled else { return }
-        if playback.state == .playing { playback.togglePlayPause() }
         cancelPreparation()
         normalizesVolume = enabled; preferences.set(enabled, forKey: "normalizeVolume")
         playback.requireNormalization(enabled); normalizationNeedsPreparation = true
         levelMeasurement = enabled ? .pending : .disabled
+        playOnWithNewSettings()
     }
     public func setNormalizationTarget(_ target: Double) {
         guard !shuttingDown else { return }
         guard let settings = try? NormalizationSettings(targetLUFS: target), settings != normalizationSettings else { return }
-        if playback.state == .playing { playback.togglePlayPause() }
         let previous = measuredLevels
         cancelPreparation(); measuredLevels = previous
         normalizationSettings = settings
         preferences.set(target, forKey: "normalizationTargetLUFS")
         playback.requireNormalization(normalizesVolume); normalizationNeedsPreparation = true
         levelMeasurement = normalizesVolume ? previous.map { .complete($0) } ?? .pending : .disabled
+        playOnWithNewSettings()
+    }
+    /// A playing track plays on as before while its start for the new settings is prepared (and
+    /// measured if needed), then continues with them from where it is by then. A pause, a stop,
+    /// another track or its end cancels that start; a paused track is prepared when it resumes.
+    private func playOnWithNewSettings() {
+        guard playback.state == .playing else { return }
+        guard preprocessingEnabled, let list = document.currentPlaylistID, let entry = document.currentEntryID else {
+            // Without a prepared start, the track pauses so that its level can change.
+            playback.togglePlayPause(); playback.requireNormalization(normalizesVolume); return
+        }
+        beginPreparedSelection(entry, playlistID: list, autoPlay: true, position: nil)
     }
     public var currentTrackPeak: TrackPeak? {
         guard measuresMaximumVolume, case .complete(let peak) = peakMeasurement,
@@ -896,11 +914,13 @@ extension LibraryController {
     /// Selects an entry through the worker: reuses a matching speculative result when its
     /// source is unchanged, otherwise resolves, prepares a prefix and (for normalized
     /// playback) measures. Only the latest preparationID may commit the selection.
-    private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double = 0, shuffle: ShuffleStep = .keep) {
+    /// A nil `position` follows the playing track: it starts from where that track is at the commit.
+    private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double? = 0, shuffle: ShuffleStep = .keep) {
         guard !shuttingDown else { return }
         playlistPreprocessingMayStart = true
         let requestedReference = currentReference(entryID, in: playlistID)
-        let intent = SelectionIntent(entry: entryID, playlist: playlistID, reference: requestedReference, autoPlay: autoPlay)
+        let intent = SelectionIntent(entry: entryID, playlist: playlistID, reference: requestedReference, autoPlay: autoPlay,
+                                     followsPlayback: position == nil)
         selectionIntent = intent
         let handoff = takeOverPreparation(entryID, playlistID: playlistID, reference: requestedReference, autoPlay: autoPlay)
         let id = UUID(); preparationID = id
@@ -1022,10 +1042,13 @@ extension LibraryController {
     /// Saves the selection and hands it to the player. A newer selection, read-only storage or a
     /// changed entry leaves everything as it was.
     private func commitSelection(_ id: UUID, intent: SelectionIntent, track: LibraryTrack, resolved: ResolvedTrack, prepared: PreparedAudio,
-                                 levels: TrackAudioMetrics?, earlierPeak: TrackPeak?, position: Double, shuffle: ShuffleStep) throws {
+                                 levels: TrackAudioMetrics?, earlierPeak: TrackPeak?, position: Double?, shuffle: ShuffleStep) throws {
         guard preparationID == id, editsEnabled,
               let latest = playlist(intent.playlist)?.entries.first(where: { $0.id == intent.entry }),
               latest.trackID == track.id, self.track(track.id)?.reference == track.reference else { return }
+        // Read before the old run ends. A track that no longer plays needs no new start.
+        if position == nil, playback.state != .playing { throw CancellationError() }
+        let position = position ?? playback.currentTime
         var next = document
         recordShuffle(&next, entry: intent.entry, playlist: intent.playlist, step: shuffle)
         next.currentPlaylistID = intent.playlist; next.currentEntryID = intent.entry
@@ -1242,7 +1265,10 @@ enum ShuffleStep { case keep, add, restart }
     let playlist: UUID
     let reference: TrackReference?
     var autoPlay: Bool
-    init(entry: UUID, playlist: UUID, reference: TrackReference?, autoPlay: Bool) {
+    /// A new start of the playing track, which plays on until it is ready.
+    let followsPlayback: Bool
+    init(entry: UUID, playlist: UUID, reference: TrackReference?, autoPlay: Bool, followsPlayback: Bool = false) {
         self.entry = entry; self.playlist = playlist; self.reference = reference; self.autoPlay = autoPlay
+        self.followsPlayback = followsPlayback
     }
 }

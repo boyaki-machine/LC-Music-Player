@@ -32,6 +32,8 @@ private final class FakeBackend: PlaybackBackend {
         seekCount += 1; currentTime = seconds
     }
     func stop() { stopCount += 1; currentTime = 0 }
+    /// Keeps `currentTime`, as the engine backend keeps the position.
+    func suspend() { calls.append("suspend") }
 }
 
 private final class ReleaseCounter: @unchecked Sendable {
@@ -84,20 +86,24 @@ struct PlaybackControllerTests {
         controller.togglePlayPause(); controller.stop()
         #expect(controller.state == .stopped && releases.activeCount == 0)
         controller.togglePlayPause(); backend.onEvent?(.outputChanged)
-        #expect(releases.activeCount == 0)
-        controller.togglePlayPause(); backend.onEvent?(.failed(.playbackFailed("test")))
+        #expect(controller.state == .paused && releases.activeCount == 1)
+        controller.stop(); controller.togglePlayPause(); backend.onEvent?(.failed(.playbackFailed("test")))
         #expect(releases.activeCount == 0)
         controller.close()
         #expect(releases.activeCount == 0)
     }
 
-    /// The level gain steps at once, so turning the volume adjustment off never changes it while audio flows.
-    @Test func turningOffTheVolumeAdjustmentPausesBeforeTheGainChanges() {
+    /// The level gain steps at once, so turning the volume adjustment off never changes it while
+    /// audio flows: a playing track keeps its level until the library replaces its run.
+    @Test func turningOffTheVolumeAdjustmentNeverChangesTheGainWhileAudioFlows() {
         let backend = FakeBackend()
         let controller = PlaybackController(fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend })
         controller.select(first)
         controller.togglePlayPause()
         #expect(controller.state == .playing)
+        controller.requireNormalization(false)
+        #expect(controller.state == .playing && backend.calls.isEmpty)
+        controller.togglePlayPause()
         controller.requireNormalization(false)
         #expect(controller.state == .paused && backend.calls == ["pause", "clearNormalization"])
     }
@@ -244,19 +250,25 @@ struct PlaybackControllerTests {
         #expect(controller.state == .playing)
     }
 
-    @Test func outputChangeStopsUntilUserRestarts() {
+    /// A lost connection or another device pauses where the track was, and only the listener resumes it.
+    @Test func outputChangePausesAtThePositionUntilUserResumes() {
         let backend = FakeBackend()
         let controller = PlaybackController(
             fileAccess: FakeAccess(releases: ReleaseCounter()), makeBackend: { _ in backend }
         )
         controller.select(first)
         controller.togglePlayPause()
+        backend.currentTime = 7
         backend.onEvent?(.outputChanged)
-        #expect(controller.state == .stopped)
-        #expect(!controller.canStop)
-        #expect(controller.message.contains("音声出力"))
+        #expect(controller.state == .paused && controller.currentTime == 7)
+        #expect(controller.canStop && backend.calls == ["suspend"] && backend.stopCount == 0)
+        #expect(controller.message.contains("音声出力") && controller.analysisFrame == nil)
         controller.togglePlayPause()
-        #expect(controller.state == .playing)
+        #expect(controller.state == .playing && backend.resumeCount == 1 && controller.currentTime == 7)
+        // While paused, it stays paused.
+        controller.togglePlayPause()
+        backend.onEvent?(.outputChanged)
+        #expect(controller.state == .paused && backend.calls == ["suspend", "pause", "suspend"])
     }
 
     @Test func volumeIsClampedAndNonfiniteValuesAreIgnored() {

@@ -23,6 +23,8 @@ public protocol PlaybackBackend: AnyObject {
     func resume() throws
     func seek(to seconds: TimeInterval) throws
     func stop()
+    /// The output stopped by itself. Ends the run but keeps the position, as a pause does.
+    func suspend()
     /// Stops because another track takes over. It may finish releasing the output elsewhere.
     func retire()
     func configureAnalysis(_ configuration: AnalysisConfiguration?,
@@ -33,6 +35,7 @@ public extension PlaybackBackend {
     var normalizationPlan: NormalizationPlan? { nil }
     func clearNormalization() {}
     func retire() { stop() }
+    func suspend() { try? pause() }
     func configureAnalysis(_ configuration: AnalysisConfiguration?,
                            receive: (@MainActor (AnalysisFrame) -> Void)?) {}
 }

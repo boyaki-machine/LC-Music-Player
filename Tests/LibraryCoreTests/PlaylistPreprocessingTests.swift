@@ -386,7 +386,8 @@ private actor PlaylistWorker: AudioPreprocessing {
         } else {
             #expect(model.currentIndex == 0)
             if action == "saveFailure" { #expect(model.error != nil && playback.state == .playing) }
-            if action == "settings" || action == "pause" { #expect(playback.state == .paused) }
+            if action == "pause" { #expect(playback.state == .paused) }
+            if action == "settings" { #expect(playback.state == .playing) }
         }
         if action == "play" || action == "natural" { #expect((await worker.starts).filter { $0 == targetURL }.count == 1) }
         model.stop(); try await sweepWait { refs.scopes.active == 0 }

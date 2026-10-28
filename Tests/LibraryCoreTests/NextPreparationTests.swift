@@ -91,9 +91,13 @@ private actor HeldPreprocessor: AudioPreprocessing {
         }
         if action == "off" { try await wait { model.currentIndex == 1 && playback.state == .playing } }
         await worker.release()
-        if ["stop", "settings"].contains(action) {
+        if action == "stop" {
             try await wait { !model.isPreparing }
             #expect(model.currentIndex == 0 && playback.state != .playing)
+        } else if action == "settings" {
+            // The changed setting replaces the pending move: the current track plays on with it.
+            try await wait { !model.isPreparing }
+            #expect(model.currentIndex == 0 && playback.state == .playing)
         } else if ["saveFailure", "measurementFailure"].contains(action) {
             try await wait { !model.isPreparing }
             #expect(model.currentIndex == 0 && model.error != nil)
@@ -158,6 +162,53 @@ private actor HeldPreprocessor: AudioPreprocessing {
             if action == "saveFailure" { #expect(model.error != nil) }
         }
         model.stop(); try await wait { refs.scopes.active == 0 }
+        #expect(refs.scopes.maximum <= 2)
+    }
+
+    /// Turning the volume adjustment on while a track plays never stops it: it plays on while it is
+    /// measured, then continues with the new level. A pause or the track's end cancels that start.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_TEST_AUDIO_OUTPUT"] == "1"),
+          arguments: ["measured", "pause", "end"])
+    func aChangedSettingPlaysOnUntilTheNewStartIsReady(_ action: String) async throws {
+        let fixture = try Fixture(); defer { fixture.cleanup() }
+        let a = try audioFile(fixture.root, name: "a.wav", duration: 5), b = try audioFile(fixture.root, name: "b.wav", duration: 5)
+        let worker = HeldPreprocessor(a, prefix: false)
+        let playback = PlaybackController(); playback.setVolume(0)
+        let refs = TestReferences()
+        let model = LibraryController(playback: playback, store: MemoryStore(), references: refs, preprocessingEnabled: true,
+                                      preferences: MemoryPreferences(), preprocessor: worker)
+        defer { model.shutdown() }
+        let list = try #require(model.document.currentPlaylistID)
+        await model.importFiles([a, b], into: list)
+        model.playPlaylist(list)
+        try await wait { playback.state == .playing && model.currentIndex == 0 && !model.isPreparing }
+        model.setNormalizesVolume(true)
+        try await waitAsync { await worker.waiting }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(playback.state == .playing && model.isPreparing && playback.normalizationPlan == nil)
+        let measuring = playback.currentTime
+        #expect(measuring > 0.2)
+        switch action {
+        case "pause":
+            model.togglePlayPause()
+            try await wait { !model.isPreparing }
+            await worker.release()
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(playback.state == .paused && model.currentIndex == 0 && playback.normalizationPlan == nil)
+            // Resuming prepares the new start where the track was paused.
+            let paused = playback.currentTime
+            model.togglePlayPause()
+            try await wait { playback.state == .playing && playback.normalizationPlan != nil }
+            #expect(playback.currentTime >= paused)
+        case "end":
+            model.seek(to: playback.duration - 0.04)
+            try await wait { model.currentIndex == 1 && playback.state == .playing && !model.isPreparing }
+            #expect(playback.normalizationPlan != nil)
+        default:
+            await worker.release()
+            try await wait { playback.normalizationPlan != nil && !model.isPreparing }
+            #expect(playback.state == .playing && model.currentIndex == 0 && playback.currentTime >= measuring)
+        }
         #expect(refs.scopes.maximum <= 2)
     }
 
