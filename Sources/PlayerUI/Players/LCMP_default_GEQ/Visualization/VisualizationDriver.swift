@@ -16,7 +16,10 @@ public final class VisualizationDriver {
     @ObservationIgnored public private(set) var isVisible = false
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var tickerID = UUID()
+    /// When the lamp test started; it runs while visible, whether or not anything plays.
+    @ObservationIgnored private var lampTestStart: Double?
     public var isRunning: Bool { ticker != nil }
+    var isTestingLamps: Bool { lampTestStart != nil }
 
     public init() {}
     deinit { ticker?.cancel() }
@@ -25,6 +28,7 @@ public final class VisualizationDriver {
         let old = activity
         let wasVisible = isVisible
         activity = next; isVisible = visible
+        if !visible { lampTestStart = nil }
         guard visible, next != .inactive else { reset(); return }
         if next == .playing && (old != .playing || !wasVisible) { presentation.begin(now: VisualizationClock.now()) }
         if next == .paused && old != .paused { presentation.pause() }
@@ -37,6 +41,21 @@ public final class VisualizationDriver {
         presentation.reset(); snapshot = presentation.snapshot; drawTime = VisualizationClock.now()
         updateWaiting()
         if isVisible, activity == .playing { presentation.begin(now: drawTime); updateTicker() }
+        else if isTestingLamps { publish(); updateTicker() }
+    }
+
+    func startLampTest(at start: Double = VisualizationClock.now()) {
+        guard isVisible else { return }
+        lampTestStart = start
+        publish()
+        updateTicker()
+    }
+
+    func endLampTest() {
+        guard isTestingLamps else { return }
+        lampTestStart = nil
+        publish()
+        updateTicker()
     }
 
     public func receive(_ frame: AnalysisFrame) {
@@ -50,9 +69,14 @@ public final class VisualizationDriver {
         let now = VisualizationClock.now()
         let previousCount = presentation.adoptionCount
         presentation.tick(now: now, playing: activity == .playing)
-        if previousCount != presentation.adoptionCount || snapshot != presentation.snapshot || presentation.hasAfterglow(at: now) {
+        var next = presentation.snapshot
+        if let start = lampTestStart {
+            next.pattern = LCMPDefaultGEQLampTest.pattern(at: now - start)
+            if next.pattern == nil { lampTestStart = nil } else { next.waitingForData = false }
+        }
+        if previousCount != presentation.adoptionCount || snapshot != next || presentation.hasAfterglow(at: now) {
             drawTime = now
-            snapshot = presentation.snapshot
+            snapshot = next
         }
         updateWaiting()
     }
@@ -62,7 +86,7 @@ public final class VisualizationDriver {
     }
 
     private func updateTicker() {
-        let needed = isVisible && (activity == .playing || presentation.hasAfterglow(at: VisualizationClock.now()))
+        let needed = isVisible && (activity == .playing || isTestingLamps || presentation.hasAfterglow(at: VisualizationClock.now()))
         guard needed else { tickerID = UUID(); ticker?.cancel(); ticker = nil; return }
         guard ticker == nil else { return }
         let id = UUID(); tickerID = id
@@ -77,7 +101,7 @@ public final class VisualizationDriver {
     private func step(id: UUID) -> Bool {
         guard tickerID == id else { return false }
         publish()
-        let needed = isVisible && (activity == .playing || presentation.hasAfterglow(at: drawTime))
+        let needed = isVisible && (activity == .playing || isTestingLamps || presentation.hasAfterglow(at: drawTime))
         if !needed { ticker = nil }
         return needed
     }

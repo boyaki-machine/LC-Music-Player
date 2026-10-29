@@ -8,11 +8,17 @@ public struct SpectrumSnapshot: Equatable, Sendable {
     public var counts = Array(repeating: 0, count: columns)
     public var extinguishedAt = Array<Double?>(repeating: nil, count: columns * rows)
     public var waitingForData = false
+    /// Lit rows per column (bit 0 at the bottom) in place of `counts`, for the lamp test.
+    var pattern: [UInt32]?
 
     public init() {}
-    public func isOn(column: Int, row: Int) -> Bool { row < counts[column] }
+    public func isOn(column: Int, row: Int) -> Bool {
+        if let pattern { return pattern[column] >> UInt32(row) & 1 == 1 }
+        return row < counts[column]
+    }
     public func residual(column: Int, row: Int, now: Double) -> Double {
-        guard !isOn(column: column, row: row), let off = extinguishedAt[column * Self.rows + row] else { return 0 }
+        // The bars keep moving under a pattern, but their afterglow is not shown.
+        guard pattern == nil, !isOn(column: column, row: row), let off = extinguishedAt[column * Self.rows + row] else { return 0 }
         let age = max(0, now - off)
         return age < Self.afterglowDuration ? 0.25 * pow(1 - age / Self.afterglowDuration, 2) : 0
     }

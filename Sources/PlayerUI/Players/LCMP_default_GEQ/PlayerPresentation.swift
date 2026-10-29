@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import LibraryCore
 import PlaybackCore
+import VisualizationKit
 
 public enum ExtensionSection: String, CaseIterable {
     case playlist = "リスト", source = "音源", visualization = "表示", settings = "設定"
@@ -29,6 +30,7 @@ public final class PlayerPresentation {
     @ObservationIgnored public let visualizationDriver = VisualizationDriver()
     @ObservationIgnored public let ermineChorusDriver = ErmineChorusDriver()
     @ObservationIgnored public let puppetShowDriver = PuppetShowDriver()
+    @ObservationIgnored private var serviceSequence = LCMPDefaultGEQServiceSequence()
     public private(set) var visualizationDesign: VisualizationDesign
     @ObservationIgnored private let preferences: any PreferenceStoring
     /// Hides the songs already in the playlist on the add screen. Off by default; the choice is kept.
@@ -109,9 +111,17 @@ public final class PlayerPresentation {
             self?.seekVisible = false
         }
     }
+    /// Also closes the volume popup: on a touch screen nothing else closes it, and it would cover the visualization.
     public func toggleExtension() {
+        volumeVisible = false
         extensionVisible.toggle()
         if extensionVisible { section = .playlist }
     }
     public func closeOverlays() { volumeVisible = false; seekVisible = false }
+    /// A press of an LED button, after its action. Any press ends a running lamp test.
+    func pressed(_ control: LCMPDefaultGEQControl, now: Double = VisualizationClock.now()) {
+        visualizationDriver.endLampTest()
+        guard visualizationDesign == .fluorescentLED else { serviceSequence.reset(); return }
+        if serviceSequence.press(control, now: now) { visualizationDriver.startLampTest() }
+    }
 }

@@ -1,3 +1,6 @@
+#if os(macOS)
+import AppKit
+#endif
 import SwiftUI
 import PlaybackCore
 import LibraryCore
@@ -27,6 +30,13 @@ struct LCMPDefaultGEQPlayerView: View {
         playback.state == .playing ? .green : playback.state == .paused ? .orange : nil
     }
     private var status: String { playback.state == .playing ? "PLAY" : playback.state == .paused ? "PAUSE" : "STOP" }
+    /// Only presses with the pointer or a finger count, not the button's keyboard shortcut.
+    private func pressed(_ control: LCMPDefaultGEQControl) {
+        #if os(macOS)
+        if NSApp.currentEvent?.type == .keyDown { return }
+        #endif
+        presentation.pressed(control)
+    }
 
     @Environment(\.playerFrame) private var frameStyle
 
@@ -121,19 +131,25 @@ struct LCMPDefaultGEQPlayerView: View {
             .frame(height: metrics.visualizationHeight.map { $0 + metrics.insets.top })
             .frame(maxHeight: metrics.visualizationHeight == nil ? .infinity : nil)
             HStack(spacing: metrics.spacing) {
-                LEDButton(symbol: "backward.end.fill", label: "前の曲", enabled: library?.canPrevious == true) { library?.previous() }
+                LEDButton(symbol: "backward.end.fill", label: "前の曲", enabled: library?.canPrevious == true) { library?.previous(); pressed(.previous) }
                 LEDButton(symbol: "play.fill", label: playLabel, enabled: playback.canPlay,
-                          activeColor: playColor, status: status) { if let library { library.togglePlayPause() } else { playback.togglePlayPause() } }
+                          activeColor: playColor, status: status) {
+                    if let library { library.togglePlayPause() } else { playback.togglePlayPause() }
+                    pressed(.playPause)
+                }
                     .keyboardShortcut(.space, modifiers: [])
-                LEDButton(symbol: "forward.end.fill", label: "次の曲", enabled: library?.canNext == true) { library?.next() }
+                LEDButton(symbol: "forward.end.fill", label: "次の曲", enabled: library?.canNext == true) { library?.next(); pressed(.next) }
                 LEDButton(symbol: "stop.fill", label: "停止", enabled: playback.canStop || library?.isPreparing == true, pulseColor: .orange) {
                     if let library { library.stop() } else { playback.stop() }
+                    pressed(.stop)
                 }
 
                 LEDButton(symbol: playback.isMuted || playback.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                          label: "音量", activeColor: presentation.volumeVisible ? .green : nil) { presentation.volumeVisible.toggle() }
+                          label: "音量", activeColor: presentation.volumeVisible ? .green : nil) { presentation.volumeVisible.toggle(); pressed(.volume) }
                     .background(VolumeClickRegion(handler: volumeOutsideClick))
-                LEDButton(symbol: "line.3.horizontal", label: "メニュー", activeColor: presentation.extensionVisible ? .green : nil, action: toggleExtension)
+                LEDButton(symbol: "line.3.horizontal", label: "メニュー", activeColor: presentation.extensionVisible ? .green : nil) {
+                    toggleExtension(); pressed(.menu)
+                }
             }.environment(\.ledButtonSize, LEDButtonSize(frame: metrics.buttonSize, symbol: metrics.symbolSize))
                 .frame(maxWidth: .infinity).frame(height: metrics.controlsHeight)
                 .padding(.bottom, metrics.insets.bottom)

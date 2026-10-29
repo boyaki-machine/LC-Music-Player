@@ -90,4 +90,13 @@ struct WindowLayoutTests {
         #expect(!model.seekVisible && !model.volumeVisible)
         #expect(model.extensionVisible)
     }
+    @Test @MainActor func menuClosesTheVolumePopup() {
+        let model = PlayerPresentation()
+        for _ in 0..<2 {
+            model.volumeVisible = true
+            model.toggleExtension()
+            #expect(!model.volumeVisible)
+        }
+        #expect(!model.extensionVisible)
+    }
 }
