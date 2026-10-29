@@ -58,6 +58,9 @@ final class LCMPDefaultGEQMetal {
         self.device = device; self.queue = queue; self.solid = solid; self.sprite = sprite; self.sampler = sampler
     }
 
+    /// The single-cell light around a lit cell of a pattern, scaled up toward the light of the bars.
+    static let patternGlow = 2.0
+
     static let clearColor = MTLClearColor(red: LCMPDefaultGEQRenderer.backgroundComponents.x / 255,
                                           green: LCMPDefaultGEQRenderer.backgroundComponents.y / 255,
                                           blue: LCMPDefaultGEQRenderer.backgroundComponents.z / 255, alpha: 1)
@@ -74,8 +77,10 @@ final class LCMPDefaultGEQMetal {
         var off: [LCMPDefaultGEQQuad] = [], faces: [LCMPDefaultGEQQuad] = []
         var near: [LCMPDefaultGEQQuad] = [], far: [LCMPDefaultGEQQuad] = [], afterglow: [LCMPDefaultGEQQuad] = []
         off.reserveCapacity(384); faces.reserveCapacity(384)
+        let pattern = frame.snapshot.pattern
         for col in 0..<16 {
-            let count = min(24, max(0, frame.snapshot.counts[col]))
+            // The glow images hold bottom-filled columns; a pattern lights each cell with the single-cell light.
+            let count = pattern == nil ? min(24, max(0, frame.snapshot.counts[col])) : 0
             if count > 0 {
                 near.append(glow.litQuad(column: col, count: count, image: 0, scale: s))
                 far.append(glow.litQuad(column: col, count: count, image: 1, scale: s))
@@ -84,7 +89,10 @@ final class LCMPDefaultGEQMetal {
                 let cell = layout.cell(column: col, row: row)
                 let color = LCMPDefaultGEQLayout.colorIndex(row: row)
                 off.append(LCMPDefaultGEQQuad(rect: rect(cell), color: premultiplied(LCMPDefaultGEQRenderer.darkComponents[color], 1)))
-                if row < count {
+                if let pattern, pattern[col] >> UInt32(row) & 1 == 1 {
+                    faces.append(LCMPDefaultGEQQuad(rect: rect(cell), color: premultiplied(LCMPDefaultGEQRenderer.onComponents[color], 1)))
+                    afterglow.append(glow.afterglowQuad(column: col, row: row, color: color, opacity: Self.patternGlow, scale: s))
+                } else if row < count {
                     faces.append(LCMPDefaultGEQQuad(rect: rect(cell), color: premultiplied(LCMPDefaultGEQRenderer.onComponents[color], 1)))
                 } else if !frame.reduceMotion {
                     let value = frame.snapshot.residual(column: col, row: row, now: frame.now)
