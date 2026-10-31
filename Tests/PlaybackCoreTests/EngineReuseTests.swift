@@ -76,6 +76,17 @@ import PreprocessingCore
         #expect(!AudioEngineBackend.outputsChanged(from: nil, to: ["speaker"]))
     }
 
+    /// The library prepares a track again only for a changed output, so that case must survive the
+    /// wrapping of any error; every other error keeps its message as a playback failure.
+    @Test func errorsKeepTheOutputChangeApart() {
+        struct Other: LocalizedError { var errorDescription: String? { "other" } }
+        #expect(PlaybackError(AudioProcessingFailure.outputChanged) == .outputChanged)
+        #expect(PlaybackError(PlaybackError.outputChanged) == .outputChanged)
+        #expect(PlaybackError(PlaybackError.inaccessibleFile) == .inaccessibleFile)
+        #expect(PlaybackError(Other()) == .playbackFailed("other"))
+        #expect(PlaybackError(AudioProcessingFailure.invalidMeasurement) != .outputChanged)
+    }
+
     /// The graph renders at the output device's rate, so a source at that rate is never converted.
     @Test func theGraphRendersAtTheDevicesRate() throws {
         let engine = AVAudioEngine()

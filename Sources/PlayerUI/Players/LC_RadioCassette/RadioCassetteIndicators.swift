@@ -77,8 +77,14 @@ struct RadioCassetteFormat: Equatable, Sendable {
         return "\(codec) \(Int((bitRate! / 1000).rounded()))kbps"
     }
 
+    /// The rate and bit rate come from the file's header: values outside these ranges (infinite, NaN,
+    /// absurdly large) are taken as unknown, so a damaged or crafted file shows only its codec.
+    static let sampleRates = 1.0...10_000_000, bitRates = 1.0...100_000_000
+
     init(codec: String, lossless: Bool, sampleRate: Double, bitRate: Double?) {
-        self.codec = codec; self.lossless = lossless; self.sampleRate = sampleRate; self.bitRate = bitRate
+        self.codec = codec; self.lossless = lossless
+        self.sampleRate = Self.sampleRates.contains(sampleRate) ? sampleRate : 0
+        self.bitRate = bitRate.flatMap { Self.bitRates.contains($0) ? $0 : nil }
     }
 
     /// Names the coding from the stream's format ID; PCM is named by its container.

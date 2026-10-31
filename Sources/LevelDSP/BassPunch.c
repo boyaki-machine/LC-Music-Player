@@ -85,9 +85,12 @@ void lcmp_bass_punch_process(LCMPBassPunch *p, const float *const *input, float 
     const int active = !(target.fixed == 0 && p->current.fixed == 0 && p->current.punch == 0
                          && p->current.level == 1 && p->reduction == 1);
     for (unsigned i = 0; i < frames; ++i) {
-        double band[2] = {0, 0}, envelope = 0;
+        double band[2] = {0, 0}, envelope = 0, x[2] = {0, 0};
         for (unsigned ch = 0; ch < p->channels; ++ch) {
-            band[ch] = filter(&p->lowpass, &p->low[ch], filter(&p->highpass, &p->high[ch], input[ch][i]));
+            /* A NaN or infinity (a damaged float file) would stay in the filters and envelopes for
+               good: they take silence in its place, and the processed output stays finite. */
+            x[ch] = isfinite(input[ch][i]) ? input[ch][i] : 0;
+            band[ch] = filter(&p->lowpass, &p->low[ch], filter(&p->highpass, &p->high[ch], x[ch]));
             envelope = fmax(envelope, fabs(band[ch]));
         }
         p->fast = follow(p->fast, envelope, p->fastAttack, p->fastRelease);
@@ -103,7 +106,7 @@ void lcmp_bass_punch_process(LCMPBassPunch *p, const float *const *input, float 
         p->current.level = glide(p->current.level, target.level, p->glide);
         double gain = p->current.fixed + p->current.punch*p->punch, y[2] = {0, 0}, peak = 0;
         for (unsigned ch = 0; ch < p->channels; ++ch) {
-            y[ch] = p->current.level*(input[ch][i] + gain*band[ch]);
+            y[ch] = p->current.level*(x[ch] + gain*band[ch]);
             peak = fmax(peak, fabs(y[ch]));
         }
         const int off = target.fixed == 0;

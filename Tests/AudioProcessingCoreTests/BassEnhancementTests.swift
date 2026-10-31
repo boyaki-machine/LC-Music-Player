@@ -102,6 +102,36 @@ private func noise(_ count: Int, seed: UInt64) -> [Float] {
         }
     }
 
+    /// A damaged float file may hold NaN or infinity. The stage outputs finite samples throughout,
+    /// and the samples after it are processed as if it had been silence.
+    @Test func nonFiniteSamplesDoNotStayInTheStage() throws {
+        let clean = sine(60, amplitude: 0.3, seconds: 1)
+        for bad in [Float.nan, .infinity, -.infinity] {
+            var damaged = clean
+            for i in stride(from: 4800, to: 4900, by: 7) { damaged[i] = bad }
+            for strength in [BassEnhancement.light, .strong] {
+                let output = try process([damaged, damaged], strength)
+                #expect(output.allSatisfy { $0.allSatisfy(\.isFinite) }, "\(bad) \(strength)")
+                var silenced = clean
+                for i in stride(from: 4800, to: 4900, by: 7) { silenced[i] = 0 }
+                #expect(output[0] == (try process([silenced], strength)[0]), "\(bad) \(strength)")
+            }
+            // Off still hands the input on untouched, as the graph without the stage would.
+            let off = try process([damaged], .off)[0]
+            #expect(zip(off, damaged).allSatisfy { $0.bitPattern == $1.bitPattern })
+        }
+    }
+
+    @Test func invalidSettingsAreRejectedOrClamped() throws {
+        for (rate, channels) in [(Double.nan, 2), (.infinity, 2), (7999, 2), (768_001, 2), (48000, 0), (48000, 3)] as [(Double, UInt32)] {
+            #expect(lcmp_bass_punch_create(rate, channels) == nil, "\(rate) \(channels)")
+        }
+        let punch = try #require(lcmp_bass_punch_create(48000, 2))
+        defer { lcmp_bass_punch_destroy(punch) }
+        lcmp_bass_punch_set_strength(punch, -5); #expect(lcmp_bass_punch_strength(punch) == 0)
+        lcmp_bass_punch_set_strength(punch, 99); #expect(lcmp_bass_punch_strength(punch) == 2)
+    }
+
     @Test func changingTheStrengthGlidesWithoutAStep() throws {
         let input = sine(60, amplitude: 0.5, seconds: 1)
         func largestStep(_ samples: ArraySlice<Float>) -> Float {
