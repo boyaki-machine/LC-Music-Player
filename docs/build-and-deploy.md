@@ -8,7 +8,7 @@
 | --- | --- |
 | macOS 14以降 | — |
 | Swift 6.2以降を扱えるXcodeまたはCommand Line Tools | `xcode-select -p`、`swift --version` |
-| Python 3.9以降 | `python3 --version` |
+| Python 3.12以降（HomebrewまたはPython.orgの版） | `python3 --version` |
 | make | `make --version` |
 
 `codesign`、`otool`、`install_name_tool`、`strip`、`ditto`、`hdiutil`、`osascript`、公証の`notarytool`・`stapler`・`spctl`はmacOSの開発ツール・標準のコマンドを使用します。iPhone版には、iOS 26以降のSDKとiOSシミュレータの実行環境を含むXcodeが要ります（[iPhone版](#iphone版)）。
@@ -90,7 +90,8 @@ python3 scripts/build-app.py --configuration debug --output build/debug/LCMP.app
 
 ### 注意
 
-- `PYTHON`でPythonの実行コマンドを変更できます。
+- `PYTHON`でPythonの実行コマンドを変更できます（例：`make release PYTHON=/opt/homebrew/bin/python3`）。macOSに標準で入っている`/usr/bin/python3`（3.9）はサポートが終わっているので、使いません。3.12より古いPythonでは、`make release`・`make debug`・`make dmg`・`make test`と`scripts/build-app.py`・`scripts/build-dmg.py`は、ビルドの前に必要な版を示して止まります（`scripts/python_requirement.py`）。
+- iPhone版のビルドの段（`scripts/ios_resources.py`）は、XcodeのPATHにある`python3`で動きます。XcodeのPATHには標準の`/usr/bin/python3`しかないことがあるため、この段とそれが読み込むスクリプトは3.9でも動くように保ちます（`make test`で確かめます）。
 - 1回の`make -j release debug archive test`でも、共有のSwiftPM成果物を同時に変更しないよう直列に実行します。別のターミナルからのmakeやSwiftのビルド・テストは同時に実行せず、完了を待ってください。
 
 ## 起動・更新・配置
@@ -153,7 +154,7 @@ make dmg DMG_OUTPUT=build/package/LCMP.dmg
 既存のDMGだけを検証することもできます。署名されたDMGには、公証の検証も行います。
 
 ```sh
-python3 scripts/build-dmg.py --verify build/dmg/LCMP-0.22.57.dmg
+python3 scripts/build-dmg.py --verify build/dmg/LCMP-<バージョン>.dmg
 ```
 
 ### 手元で確かめるだけのDMG

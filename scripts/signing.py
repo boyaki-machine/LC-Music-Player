@@ -6,6 +6,10 @@ import plistlib
 import re
 import subprocess
 import tempfile
+import python_requirement
+
+# Before the annotations below, which an old Python cannot read.
+python_requirement.require()
 
 ROOT = Path(__file__).resolve().parent.parent
 # Not tracked in Git, like iOS/Local.xcconfig: the identity names the developer and the team.
