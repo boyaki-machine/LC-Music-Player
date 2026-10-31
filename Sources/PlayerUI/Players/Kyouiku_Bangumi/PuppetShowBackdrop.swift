@@ -69,6 +69,19 @@ enum PuppetBackdrop {
         (PuppetMath.lerp(-6, width + 6, u), 118 - sin(.pi * u) * 106)
     }
 
+    /// How far along its arc the sun is at `tod` (0 rising, 1 set), or nil while it is down.
+    static func sunArc(_ tod: Double) -> Double? {
+        let u = (tod + 0.16).truncatingRemainder(dividingBy: 1) / 0.82
+        return u >= 0 && u <= 1 ? u : nil
+    }
+    /// The same for the moon.
+    static func moonArc(_ tod: Double) -> Double? {
+        let u = (tod - 0.5 + 1).truncatingRemainder(dividingBy: 1) / 0.62
+        return u >= 0 && u <= 1 ? u : nil
+    }
+    /// The moon is not seen around the new moon.
+    static func moonShows(age: Double) -> Bool { cos(2 * .pi * age / synodicMonth) <= 0.97 }
+
     enum Layer: Equatable {
         /// Colors at the top and horizon (left, center, right), 0…255.
         case sky(top: [SIMD3<Double>], horizon: [SIMD3<Double>])
@@ -81,6 +94,9 @@ enum PuppetBackdrop {
         /// A soft round glow of a color (normal blending).
         case halo(x: Double, y: Double, radius: Double, color: SIMD3<Double>, alpha: Double)
         case moon(x: Double, y: Double, radius: Double, age: Double, alpha: Double)
+        /// A rainbow's arc around (x, y) with its outer edge at `radius`, drawn from the left up to the angle `reveal`
+        /// (radians, 0 at the left, π at the right).
+        case rainbow(x: Double, y: Double, radius: Double, width: Double, reveal: Double, alpha: Double)
         /// A cloud tinted for the time of day, with its paper shadow.
         case cloud(shape: Int, frame: CGRectValue, tint: SIMD3<Double>, shadowAlpha: Double)
         /// One of the four land pictures at an opacity; tiles start at `offset` and repeat every `landTileWidth`.
@@ -91,7 +107,7 @@ enum PuppetBackdrop {
     struct CGRectValue: Equatable { var x, y, width, height: Double }
 
     /// Everything drawn behind the puppets at time of day `tod` (0…1) after `time` seconds of playback.
-    static func layers(tod: Double, time: Double, moonAge: Double, reduceMotion: Bool = false) -> [Layer] {
+    static func layers(tod: Double, time: Double, moonAge: Double, reduceMotion: Bool = false, event: PuppetSkyEvent? = nil) -> [Layer] {
         let w = weights(tod)
         var out: [Layer] = [.sky(top: (0..<3).map { c in mix(sky.map { $0[0][c] }, w) },
                                  horizon: (0..<3).map { c in mix(sky.map { $0[1][c] }, w) })]
@@ -123,22 +139,21 @@ enum PuppetBackdrop {
             }
         }
         // The sun is redder and darker the lower it is, and tints the sky around it near the horizon.
-        let sunU = (tod + 0.16).truncatingRemainder(dividingBy: 1) / 0.82
-        if sunU >= 0 && sunU <= 1 {
+        if let sunU = sunArc(tod) {
             let (x, y) = arc(sunU), low = PuppetMath.smoothstep(40, 100, y), size = 24 + 6 * low
             if low > 0.01 { out.append(.halo(x: x, y: y, radius: 70, color: SIMD3(255, 120, 60), alpha: 0.35 * low)) }
             let tint = SIMD3(255, PuppetMath.lerp(255, 120, low), PuppetMath.lerp(255, 80, low)) * (1 - 0.3 * low)
             out.append(.picture(name: "sun", frame: CGRectValue(x: x - size / 2, y: y - size / 2, width: size, height: size * 218 / 234),
                                 alpha: 1, multiply: tint, flip: false))
         }
-        let moonU = (tod - 0.5 + 1).truncatingRemainder(dividingBy: 1) / 0.62
-        if moonU >= 0 && moonU <= 1 {
+        if let moonU = moonArc(tod) {
             let (x, y) = arc(moonU)
             let alpha = PuppetMath.clamp(w[3] + w[2] * 0.6 + w[0] * 0.3)
-            if cos(2 * .pi * moonAge / synodicMonth) <= 0.97 {   // invisible around the new moon
+            if moonShows(age: moonAge) {
                 out.append(.moon(x: x, y: y, radius: 8, age: moonAge, alpha: alpha))
             }
         }
+        if let event { out += event.layers(reduceMotion: reduceMotion) }
         // Clouds keep one shape each and take the time of day's color, casting a paper shadow.
         let tint = mix(cloudTint, w)
         for c in clouds {

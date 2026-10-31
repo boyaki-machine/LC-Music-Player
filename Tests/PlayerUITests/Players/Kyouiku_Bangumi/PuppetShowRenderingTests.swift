@@ -117,5 +117,27 @@ import Testing
             Self.save(image, "puppet-stage-\(name)")
         }
     }
+
+    /// The rainbow colors the noon sky and the meteors light the night sky; neither covers the puppets.
+    @Test func drawsTheSightsInTheSky() throws {
+        let renderer = try #require(PuppetShowLoader.shared.loadNow(), "Metal and the bundled art are available")
+        for (name, tod, kind, least) in [("rainbow", 0.25, PuppetSkyEvent.Kind.rainbow, 2500), ("meteors", 0.81, .meteorShower, 400)] {
+            var scene = PuppetShowScene(); scene.timeOfDay = tod; scene.moonAge = 10
+            let plain = Self.rgba(try #require(renderer.image(scene, width: 900, height: 360)))
+            scene.event = PuppetSkyEvent(kind: kind, elapsed: 4)
+            let image = try #require(renderer.image(scene, width: 900, height: 360))
+            Self.save(image, "puppet-sky-\(name)")
+            let lit = Self.rgba(image)
+            func changed(rows: Range<Int>) -> Int {
+                rows.reduce(0) { sum, y in
+                    sum + (0..<900).filter { x in (0..<3).contains { abs(Int(lit[(y * 900 + x) * 4 + $0]) - Int(plain[(y * 900 + x) * 4 + $0])) > 12 } }.count
+                }
+            }
+            let sky = changed(rows: 0..<120), puppets = changed(rows: 250..<300)
+            #expect(sky > least, "\(name) shows in the sky: \(sky) pixels")
+            // The puppets' faces (the middle of the lower stage) stay as they are.
+            #expect(puppets < 200, "\(name) stays behind the puppets: \(puppets) pixels")
+        }
+    }
 }
 #endif

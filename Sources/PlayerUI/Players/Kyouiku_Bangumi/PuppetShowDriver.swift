@@ -53,13 +53,20 @@ public final class PuppetShowDriver: PlayerVisualizationDriver {
     @ObservationIgnored private var lastProduced: Double?
     @ObservationIgnored private var lastData = 0.0
     @ObservationIgnored private var lastStep: Double?
-    @ObservationIgnored private var pausedAt: Double?
+    /// Since when the puppets settle without playing: after a pause, or after a sight while stopped.
+    @ObservationIgnored private var settlingSince: Double?
     @ObservationIgnored private var beatCount = 0
     @ObservationIgnored private var lastBeatIndex: Int?
     @ObservationIgnored private(set) var beat: PuppetBeat?
     /// Seconds of playback so far and the time of day; both survive stopping.
     @ObservationIgnored private(set) var showTime = 0.0
     @ObservationIgnored private(set) var timeOfDay = 0.05
+    /// Seconds the puppets have moved: playback, and a sight in the sky shown while stopped.
+    @ObservationIgnored private(set) var stageTime = 0.0
+    /// A sight in the sky under way, and whether the coming day or night brings one.
+    @ObservationIgnored private(set) var event: PuppetSkyEvent?
+    @ObservationIgnored private(set) var calendar = PuppetSkyCalendar()
+    @ObservationIgnored var draw: () -> Double = { Double.random(in: 0..<1) }
     @ObservationIgnored var date: () -> Date = Date.init
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var tickerID = UUID()
@@ -72,12 +79,22 @@ public final class PuppetShowDriver: PlayerVisualizationDriver {
     private static func makeDirectors() -> [PuppetDirector] { PuppetMember.all.map { PuppetDirector(member: $0) } }
 
     public func synchronize(activity next: VisualizationActivity, visible: Bool) {
-        let old = activity
+        let old = activity, wasVisible = isVisible
         activity = next; isVisible = visible
-        guard visible, next != .inactive else { stop(); return }
+        guard visible else { event = nil; stop(rest: true); return }
+        // Stopped: a sight under way plays out; the puppets go to rest when the playback stops.
+        guard next != .inactive else { stop(rest: old != .inactive || !wasVisible || event == nil); updateTicker(); return }
         let now = VisualizationClock.now()
-        if next == .paused && old != .paused { pausedAt = now; pending.removeAll() }
-        if next == .playing && old != .playing { pausedAt = nil; lastData = now; lastStep = now }
+        if next == .paused && old != .paused { settlingSince = now; pending.removeAll() }
+        if next == .playing && old != .playing { settlingSince = nil; lastData = now; lastStep = now }
+        updateTicker()
+    }
+
+    /// Checks the stage's effects without waiting for them: the effect of the present sky, whether or not anything plays.
+    func startServiceTest() {
+        guard isVisible else { return }
+        event = PuppetSkyEvent(kind: PuppetSkyEvent.kind(at: timeOfDay, moonAge: scene.moonAge))
+        settlingSince = nil
         updateTicker()
     }
 
@@ -154,9 +171,17 @@ public final class PuppetShowDriver: PlayerVisualizationDriver {
         if waiting || !playing { levels = Array(repeating: 0, count: levels.count) }
         if waitingForData != waiting { waitingForData = waiting }
         let dt = min(0.1, max(0, now - (lastStep ?? now))); lastStep = now
+        if playing || event != nil { stageTime += dt }
         if playing {
             showTime += dt
+            let before = timeOfDay
             timeOfDay = (timeOfDay + dt / PuppetBackdrop.daySeconds).truncatingRemainder(dividingBy: 1)
+            if let kind = calendar.advance(from: before, to: timeOfDay, draw: draw), event == nil { event = PuppetSkyEvent(kind: kind) }
+        }
+        if var current = event {
+            current.elapsed += dt
+            event = current.isOver ? nil : current
+            if current.isOver && !playing { settlingSince = now }
         }
         follow(playing && !waiting ? trackedBeat(at: due) : nil)
         // The vocal at the same moment, when the map has one.
@@ -164,40 +189,52 @@ public final class PuppetShowDriver: PlayerVisualizationDriver {
         vocal = nil
         if let casting, let position, let vocals = trackMap?.vocals { vocal = vocals.puppetVocal(at: position) }
         for i in directors.indices {
+            // Everyone shouts together through a sight in the sky.
+            if let left = event?.shoutLeft {
+                directors[i].actions.shout = max(directors[i].actions.shout, left)
+                directors[i].actions.headbang = 0; directors[i].actions.shy = 0
+            }
             if vocal != nil, let casting, let position {
                 let part = casting.part(of: i, at: position)
-                directors[i].update(dt: dt, now: showTime, levels: levels, beat: beat, playing: playing,
+                directors[i].update(dt: dt, now: stageTime, levels: levels, beat: beat, playing: playing,
                                     vocal: vocal, part: part, register: casting.register(for: part))
             } else {
-                directors[i].update(dt: dt, now: showTime, levels: levels, beat: beat, playing: playing)
+                directors[i].update(dt: dt, now: stageTime, levels: levels, beat: beat, playing: playing)
             }
         }
-        if playing { ensemble.update(&directors, now: showTime) }
+        if playing { ensemble.update(&directors, now: stageTime) }
         var next = scene
-        next.timeOfDay = timeOfDay; next.time = showTime; next.reduceMotion = reduceMotion
-        next.poses = directors.map { $0.pose(now: showTime, reduceMotion: reduceMotion) }
+        next.timeOfDay = timeOfDay; next.time = showTime; next.reduceMotion = reduceMotion; next.event = event
+        next.poses = directors.map { $0.pose(now: stageTime, reduceMotion: reduceMotion) }
         // The moon's age changes slowly; read the date about once a minute of playback.
         if Int(showTime / 60) != Int((showTime - dt) / 60) || dt == 0 { next.moonAge = PuppetBackdrop.moonAge(at: date()) }
         scene = next
     }
 
-    private func stop() {
+    /// Stops the clock and drops the playback's data. With `rest`, the puppets also return to rest.
+    private func stop(rest: Bool) {
         tickerID = UUID(); ticker?.cancel(); ticker = nil
-        pending.removeAll(); registers.reset(); generation = nil; lastSequence = nil; lastProduced = nil; pausedAt = nil
+        pending.removeAll(); registers.reset(); generation = nil; lastSequence = nil; lastProduced = nil; settlingSince = nil
         levels = Array(repeating: 0, count: levels.count)
-        directors = Self.makeDirectors(); ensemble = PuppetEnsemble(); beats.reset(); trackClock = nil
+        beats.reset(); trackClock = nil
         beat = nil; beatCount = 0; lastBeatIndex = nil
-        var idle = scene
-        idle.poses = directors.map { $0.pose(now: showTime, reduceMotion: reduceMotion) }
-        scene = idle
+        if rest { self.rest() }
         waitingForData = false; lastStep = nil
+    }
+
+    private func rest() {
+        directors = Self.makeDirectors(); ensemble = PuppetEnsemble()
+        var idle = scene
+        idle.poses = directors.map { $0.pose(now: stageTime, reduceMotion: reduceMotion) }
+        idle.event = event; idle.timeOfDay = timeOfDay
+        scene = idle
     }
 
     private var needsClock: Bool {
         guard isVisible else { return false }
-        if activity == .playing { return true }
-        if activity == .paused, let pausedAt {
-            return VisualizationClock.now() - pausedAt < Self.settleSeconds && !directors.allSatisfy(\.isSettled)
+        if activity == .playing || event != nil { return true }
+        if let settlingSince {
+            return VisualizationClock.now() - settlingSince < Self.settleSeconds && !directors.allSatisfy(\.isSettled)
         }
         return false
     }
@@ -217,7 +254,12 @@ public final class PuppetShowDriver: PlayerVisualizationDriver {
     private func tick(id: UUID) -> Bool {
         guard tickerID == id else { return false }
         step(now: VisualizationClock.now())
-        if !needsClock { ticker = nil; return false }
+        if !needsClock {
+            ticker = nil
+            // After a sight while stopped, the puppets have settled; leave them at rest.
+            if activity == .inactive { settlingSince = nil; rest() }
+            return false
+        }
         return true
     }
 }

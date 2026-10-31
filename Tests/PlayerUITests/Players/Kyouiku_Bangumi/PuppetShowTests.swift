@@ -132,6 +132,60 @@ import AudioProcessingCore
     }
 }
 
+@Suite struct PuppetShowSwayTests {
+    /// Runs on a steady beat from `start` and returns (beat count, sway) per frame.
+    static func run(_ d: inout PuppetDirector, bpm: Double, seconds: Double, start: Double = 0, beat: Bool = true,
+                    playing: Bool = true) -> [(count: Double, sway: Double)] {
+        var out: [(Double, Double)] = []
+        var t = start
+        while t < start + seconds {
+            t += 1 / 30
+            let count = t * bpm / 60
+            d.update(dt: 1 / 30, now: t, levels: Array(repeating: playing ? 0.6 : 0, count: 4),
+                     beat: beat && playing ? PuppetBeat(count: count, bpm: bpm) : nil, playing: playing)
+            out.append((count, d.sway))
+        }
+        return out
+    }
+
+    /// The body reaches a side on every beat, alternating, at slow and fast tempos alike and as wide.
+    @Test(arguments: [70.0, 120.0, 170.0])
+    func theSwayReachesASideOnEveryBeat(bpm: Double) {
+        var d = PuppetDirector(member: PuppetMember.all[1])
+        let samples = Self.run(&d, bpm: bpm, seconds: 8).filter { $0.count > 4 * bpm / 60 }
+        let widest = samples.map { abs($0.sway) }.max()!
+        #expect(widest > 0.02 && widest < 0.04, "about the same width at \(bpm) BPM: \(widest)")
+        for s in samples {
+            let n = s.count.rounded(), off = abs(s.count - n)
+            // Near a beat the body is at the side of that beat's parity; halfway between beats it is in the middle.
+            if off < 0.04 { #expect(s.sway * (Int(n) % 2 == 0 ? -1 : 1) > 0.97 * widest, "beat \(n) at \(bpm) BPM: \(s.sway)") }
+            if abs(off - 0.5) < 0.04 { #expect(abs(s.sway) < 0.15 * widest) }
+        }
+    }
+
+    /// A lost beat keeps its tempo for a while, then a slow sway of its own takes over without a jump; a pause stills it.
+    @Test func aLostBeatKeepsItsTempoThenEasesIntoAFreeSway() {
+        var d = PuppetDirector(member: PuppetMember.all[0])
+        let onBeat = Self.run(&d, bpm: 120, seconds: 6)
+        let lost = Self.run(&d, bpm: 120, seconds: 10, start: 6, beat: false)
+        let widest = onBeat.map { abs($0.sway) }.max()!
+        // Within the hold the sides still land on the old beats.
+        for s in lost where s.count < 6 * 2 + PuppetDirector.swayHoldSeconds * 2 - 1 {
+            let n = s.count.rounded()
+            if abs(s.count - n) < 0.04 { #expect(s.sway * (Int(n) % 2 == 0 ? -1 : 1) > 0.9 * widest) }
+        }
+        let all = onBeat + lost
+        let steepest = zip(all, all.dropFirst()).map { abs($1.sway - $0.sway) }.max()!
+        #expect(steepest < widest * 0.25, "no jump: \(steepest) per frame")
+        // Later the slow sway is still moving, smaller.
+        let late = lost.suffix(60).map(\.sway)
+        #expect(late.max()! - late.min()! > 0.005 && late.map(abs).max()! < widest)
+        // Not playing: the sway dies down.
+        let paused = Self.run(&d, bpm: 120, seconds: 4, start: 16, playing: false)
+        #expect(abs(paused.last!.sway) < 0.001)
+    }
+}
+
 @Suite struct PuppetShowEnsembleTests {
     @Test func thePuppetsLookAtEachOtherAndTheGirlsBlush() {
         var d = PuppetMember.all.map { PuppetDirector(member: $0) }
@@ -420,6 +474,68 @@ func vocalMap(register: VocalMap.Register, median: UInt8, note: UInt8? = nil, ph
     }
 }
 
+@Suite struct PuppetShowSkyTests {
+    @Test func passingAMarkWrapsAroundTheDay() {
+        #expect(PuppetSkyCalendar.passed(0.5, from: 0.49, to: 0.5) && !PuppetSkyCalendar.passed(0.5, from: 0.5, to: 0.51))
+        #expect(PuppetSkyCalendar.passed(0.0, from: 0.99, to: 0.01) && PuppetSkyCalendar.passed(0.995, from: 0.99, to: 0.01))
+        #expect(!PuppetSkyCalendar.passed(0.3, from: 0.2, to: 0.2) && !PuppetSkyCalendar.passed(0.3, from: 0.99, to: 0.01))
+    }
+
+    /// One draw as the day and as the night begin; a winning draw brings the sight around the highest point.
+    @Test func eachDayAndNightDrawsOnceAndTheSightComesAtTheHighestPoint() {
+        var draws = 0, starts: [(Double, PuppetSkyEvent.Kind)] = []
+        var calendar = PuppetSkyCalendar()
+        var tod = 0.0
+        for _ in 0..<(2 * 36_000) {   // two days in steps of a hundredth of a second
+            let next = (tod + 0.01 / PuppetBackdrop.daySeconds).truncatingRemainder(dividingBy: 1)
+            if let kind = calendar.advance(from: tod, to: next, draw: { draws += 1; return 0 }) { starts.append((next, kind)) }
+            tod = next
+        }
+        #expect(draws == 4)
+        #expect(starts.map(\.1) == [.meteorShower, .rainbow, .meteorShower])   // the last day's rainbow falls on the third day
+        let half = PuppetSkyEvent.duration / 2 / PuppetBackdrop.daySeconds
+        #expect(starts.allSatisfy { abs($0.0 + half - PuppetSkyEvent.highest($0.1)) < 1e-4 })
+        // The sun and the moon are highest there.
+        #expect(abs(PuppetBackdrop.arc((PuppetSkyEvent.highest(.rainbow) + 0.16) / 0.82).y - 12) < 1e-9)
+        #expect(abs(PuppetBackdrop.arc((PuppetSkyEvent.highest(.meteorShower) - 0.5) / 0.62).y - 12) < 1e-9)
+        // A losing draw brings nothing; the chance is one in eighty.
+        var losing = PuppetSkyCalendar()
+        #expect(losing.advance(from: 0.62, to: 0.63, draw: { PuppetSkyCalendar.chance }) == nil && losing.coming == nil)
+        #expect(PuppetSkyCalendar.chance == 1.0 / 80)
+    }
+
+    @Test func theSightFitsTheTimeOfDayAndShoutsWithBreaths() {
+        // The moon out makes a meteor shower, even as it rises in the evening sun; the sun alone a rainbow.
+        #expect(PuppetSkyEvent.kind(at: 0.25, moonAge: 10) == .rainbow && PuppetSkyEvent.kind(at: 0.45, moonAge: 10) == .rainbow)
+        #expect(PuppetSkyEvent.kind(at: 0.52, moonAge: 10) == .meteorShower && PuppetSkyEvent.kind(at: 0.81, moonAge: 10) == .meteorShower)
+        // In the morning the sun climbs while the moon sets: a rainbow.
+        #expect(PuppetSkyEvent.kind(at: 0.05, moonAge: 10) == .rainbow && PuppetSkyEvent.kind(at: 0.95, moonAge: 10) == .rainbow)
+        #expect(PuppetSkyEvent.kind(at: 0.83, moonAge: 10) == .meteorShower)
+        // Around the new moon the moon is not out: the sun decides, and at night it is still a meteor shower.
+        #expect(PuppetSkyEvent.kind(at: 0.52, moonAge: 0) == .rainbow && PuppetSkyEvent.kind(at: 0.75, moonAge: 0) == .meteorShower)
+        var event = PuppetSkyEvent(kind: .rainbow)
+        var shouting = 0.0, breaths = 0, was = false
+        while !event.isOver {
+            event.elapsed += 0.01
+            let now = event.shoutLeft != nil
+            if now { shouting += 0.01 } else if was { breaths += 1 }
+            was = now
+        }
+        #expect(shouting > 6.5 && breaths >= 3, "shouting \(shouting)s with \(breaths) breaths")
+        #expect(PuppetSkyEvent(kind: .rainbow, elapsed: 0).opacity == 0 && PuppetSkyEvent(kind: .rainbow, elapsed: 5).opacity == 1)
+        // Meteors fall through the whole time, several at once; reduced motion leaves them out.
+        let counts = stride(from: 1.0, to: 9.0, by: 0.5).map { PuppetSkyEvent(kind: .meteorShower, elapsed: $0).layers(reduceMotion: false).count / 2 }
+        #expect(counts.min()! >= 3, "\(counts)")
+        #expect(PuppetSkyEvent(kind: .meteorShower, elapsed: 4).layers(reduceMotion: true).isEmpty)
+        #expect(PuppetSkyEvent(kind: .rainbow, elapsed: 4).layers(reduceMotion: true).count == 1)
+        // The backdrop draws it in front of the sky and behind the clouds and the land.
+        let layers = PuppetBackdrop.layers(tod: 0.25, time: 0, moonAge: 10, event: PuppetSkyEvent(kind: .rainbow, elapsed: 4))
+        let rainbow = layers.firstIndex { if case .rainbow = $0 { true } else { false } }!
+        let cloud = layers.firstIndex { if case .cloud = $0 { true } else { false } }!
+        #expect(rainbow > 0 && rainbow < cloud)
+    }
+}
+
 @Suite(.serialized) @MainActor struct PuppetShowDriverTests {
     @Test func adoptsDueFramesAdvancesTheDayOnlyWhilePlayingAndReportsMissingData() {
         let driver = PuppetShowDriver()
@@ -446,7 +562,7 @@ func vocalMap(register: VocalMap.Register, median: UInt8, note: UInt8? = nil, ph
         #expect(driver.timeOfDay == paused)
         // Stopping returns the puppets to rest but keeps the time of day.
         driver.synchronize(activity: .inactive, visible: true)
-        #expect(driver.timeOfDay == paused && driver.scene.poses == PuppetMember.all.map { PuppetDirector(member: $0).pose(now: driver.showTime) })
+        #expect(driver.timeOfDay == paused && driver.scene.poses == PuppetMember.all.map { PuppetDirector(member: $0).pose(now: driver.stageTime) })
     }
 
     @Test func stopsWhenHiddenOrStoppedAndSettlesAfterAPause() async throws {
@@ -576,6 +692,52 @@ func vocalMap(register: VocalMap.Register, median: UInt8, note: UInt8? = nil, ph
         late[0].actions.shout = 0.5
         ensemble.update(&late, now: 2)
         #expect(late[1...].allSatisfy { $0.actions.shout == 0 })
+    }
+
+    /// A winning draw while playing brings the sight, and the four shout through it.
+    @Test func aRareSightComesWhilePlayingAndEveryoneShouts() {
+        let driver = PuppetShowDriver()
+        driver.draw = { 0 }
+        driver.synchronize(activity: .playing, visible: true)
+        defer { driver.synchronize(activity: .inactive, visible: false) }
+        var now = VisualizationClock.now(), shouted = Set<Int>(), seen: PuppetSkyEvent.Kind?
+        // From noon to past the moon's highest point: the night's draw wins.
+        while driver.timeOfDay < 0.84 && now < VisualizationClock.now() + 400 {
+            now += 0.1
+            driver.step(now: now)
+            if let event = driver.scene.event {
+                seen = event.kind
+                for (i, d) in driver.directors.enumerated() where d.actions.shout > 0 { shouted.insert(i) }
+            }
+        }
+        #expect(seen == .meteorShower && shouted.count == 4)
+        #expect(driver.event == nil)
+    }
+
+    /// The service test shows the sight even while stopped, then the puppets go back to rest.
+    @Test func theServiceTestShowsTheSightWhileStopped() {
+        let driver = PuppetShowDriver()
+        driver.synchronize(activity: .inactive, visible: true)
+        defer { driver.synchronize(activity: .inactive, visible: false) }
+        driver.startServiceTest()
+        #expect(driver.isRunning && driver.event?.kind == PuppetSkyEvent.kind(at: driver.timeOfDay, moonAge: driver.scene.moonAge))
+        var now = VisualizationClock.now()
+        driver.step(now: now)
+        let day = driver.timeOfDay, stage = driver.stageTime
+        for _ in 0..<20 { now += 0.1; driver.step(now: now) }
+        #expect(driver.directors.allSatisfy { $0.actions.shout > 0 } && driver.scene.event?.elapsed ?? 0 > 1.9)
+        #expect(driver.stageTime > stage && driver.timeOfDay == day && driver.showTime == 0)
+        // Another stop report does not cut it short.
+        driver.synchronize(activity: .inactive, visible: true)
+        #expect(driver.event != nil && driver.isRunning && driver.directors.allSatisfy { $0.actions.shout > 0 })
+        for _ in 0..<90 { now += 0.1; driver.step(now: now) }
+        #expect(driver.event == nil && driver.scene.event == nil)
+        // Hiding ends a sight at once.
+        driver.startServiceTest()
+        driver.synchronize(activity: .inactive, visible: false)
+        #expect(driver.event == nil && !driver.isRunning)
+        driver.startServiceTest()
+        #expect(driver.event == nil)
     }
 
     @Test func theDesignIsListedAndOwnsItsDriver() {

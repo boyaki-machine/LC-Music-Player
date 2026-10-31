@@ -118,10 +118,11 @@ public final class PlayerPresentation {
         if extensionVisible { section = .playlist }
     }
     public func closeOverlays() { volumeVisible = false; seekVisible = false }
-    /// A press of an LED button, after its action. Any press ends a running lamp test.
+    /// A press of an LED button, after its action. Any press ends a running lamp test; the service sequence
+    /// starts the shown design's service test, where it has one.
     func pressed(_ control: LCMPDefaultGEQControl, now: Double = VisualizationClock.now()) {
         visualizationDriver.endLampTest()
-        guard visualizationDesign == .fluorescentLED else { serviceSequence.reset(); return }
-        if serviceSequence.press(control, now: now) { visualizationDriver.startLampTest() }
+        guard let tested = activeVisualizationDriver as? LCMPServiceTesting else { serviceSequence.reset(); return }
+        if serviceSequence.press(control, now: now) { tested.startServiceTest() }
     }
 }
