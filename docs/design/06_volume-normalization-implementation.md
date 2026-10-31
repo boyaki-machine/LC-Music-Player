@@ -33,7 +33,7 @@
 - 利用者向けの主設定は「曲ごとの音量をそろえる」とし、既定OFFで永続化する。最大音量の表示設定（`measureMaximumVolume`）とは独立させ、その設定がONでも自動調整をONにしない。
 - 自動調整ONはLUFS・ピークの測定を必須とし、最大音量の表示がOFFでも測定する。両方OFFでもプレイリストの事前測定は行うが、未測定であることをOFFの再生開始の条件にしない。
 - 目標音量は−23／−18／−16LUFSから選べる。true-peak上限・余裕・増幅上限は設定型で検証し、UIには個別の調整欄を並べない。
-- 拡張画面には、測定中、適用中の補正dB、ピーク・増幅上限による制限、補正の対象外、失敗と再試行を表示する。設定の変更で一時停止することを操作前に説明する。
+- 拡張画面には、測定中、適用中の補正dB、ピーク・増幅上限による制限、補正の対象外、失敗と再試行を表示する。設定を変更しても再生は止めず、新しい補正の準備ができた位置から続ける（[再生準備と操作](#再生準備と操作)）。
 - LUFS/dBTP/dBFSを混同した「最大音量」の1値にまとめず、詳細で単位を示す。
 - メイン画面に曲名や測定値を常設せず、240ptの拡張画面でも折り返し・スクロールで読める構成にする。
 
@@ -118,7 +118,7 @@ EQと同期用ディレイを含む順序は次で固定する。利用者によ
 | `NormalizationSettings` | 目標LUFS、true-peak上限、測定誤差用の余裕、増幅上限。有効状態はLibraryControllerが管理する |
 | `NormalizationPlan` | 測定profile、設定のsnapshot、適用するgainのdB・線形倍率、制約の理由。音源の照合情報はAudioEngineBackendがTrackAudioMetricsとして保持する |
 
-- `integratedLUFS`は、有限の測定値と、無音・gatingの対象なし・短すぎる音源を区別する。JSONやUIへNaN/Infinityを数値として保存・表示しない。ピークの線形0は無音として扱う。非有限の入力サンプルは無音へ置換せず、測定失敗とする。
+- `AudioLevelMetrics.loudness`（`IntegratedLoudness`）は、有限の測定値と、無音・gatingの対象なし・短すぎる音源を区別する。JSONやUIへNaN/Infinityを数値として保存・表示しない。ピークの線形0は無音として扱う。非有限の入力サンプルは無音へ置換せず、測定失敗とする。
 - `TrackPeak`・`measure`・`currentTrackPeak`はsample peak専用のAPIであり、LUFS/true peak付きの結果と見なさない。全曲のAPIは`measureLevels`、公開状態は`levelMeasurement`、有効な完了値を返す入口は`currentTrackMetrics`とする。
 - 測定値は設定の目標LUFSに依存させない。目標や増幅上限だけが変わった場合は、同じ測定結果から計画を再計算する。
 - 音源の識別情報・サイズ・更新日時、レート、チャンネル変換、測定版、前段EQが変わった場合は再測定する。URLだけ、曲IDだけ、古いsample peakだけで再利用しない。属性の照合は制御側で行い、render callbackでファイルを調べない。

@@ -125,6 +125,20 @@ import Testing
         #expect(read.label.hasPrefix("AAC ") && read.label.hasSuffix("kbps"))
     }
 
+    /// The header's numbers are the file's word: a crafted one must not crash the label.
+    @Test func ratesOutsideTheirRangeAreUnknown() {
+        for rate in [Double.infinity, -.infinity, .nan, 1e300, 0, -44100] {
+            let lossless = RadioCassetteFormat(formatID: kAudioFormatLinearPCM, sampleRate: rate, bitRate: nil, pathExtension: "aiff")
+            #expect(lossless.label == "AIFF", "\(rate)")
+        }
+        for bits in [Double.infinity, .nan, 1e300, 0, -1] {
+            let lossy = RadioCassetteFormat(formatID: kAudioFormatMPEGLayer3, sampleRate: .infinity, bitRate: bits, pathExtension: "mp3")
+            #expect(lossy.bitRate == nil && lossy.label == "MP3", "\(bits)")
+        }
+        #expect(RadioCassetteFormat(formatID: kAudioFormatMPEGLayer3, sampleRate: 44100, bitRate: 1e300, pathExtension: "mp3").label
+                == "MP3 44.1kHz")
+    }
+
     @Test func longTextIsSqueezedThenCut() {
         let font = NSFont.systemFont(ofSize: 7, weight: .semibold) as CTFont
         let short = RadioCassetteLayers.fit("AAC 256kbps", font: font, width: 58)

@@ -30,7 +30,7 @@ LC Music Player（LCMP）は、落ち着いた音楽鑑賞体験を目指すmacO
 
 ## ビルドして起動する
 
-macOS 14以降、Swift 6.2以降に対応するXcode／Command Line Tools、Python 3.9以降を使用します。
+macOS 14以降、Swift 6.2以降に対応するXcode／Command Line Tools、Python 3.12以降を使用します。macOSに標準で入っている`/usr/bin/python3`（3.9）はサポートが終わっていて古いため、HomebrewかPython.orgのPythonを入れてください。
 
 ```sh
 make release
@@ -75,7 +75,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 make ios-test
 ```
 
-- 1つ目は通常のテストで、音声を出力しません。scriptsのPythonのテスト（ライセンス索引・バージョン・アイコン・DMG）も実行し、テストが`~/Library/Preferences`に設定ファイルを残していないことも確かめます。
+- 1つ目は通常のテストで、音声を出力しません。scriptsのPythonのテスト（Pythonの版・ライセンス索引・バージョン・アイコン・DMG・署名・iPhone版のリソース）も実行し、テストが`~/Library/Preferences`に設定ファイルを残していないことも確かめます。
 - 2つ目は、既定の出力先へ小さいテスト音を送る実再生のテストです。`--no-parallel`を外して並列に実行しても成功します。
 - 3つ目は、共用モジュールのテストをiOSシミュレータで実行します。iPhoneのアプリの指の操作のテストは`make ios-uitest`です。
 - 詳しくは[ビルド・配置手順のテスト](docs/build-and-deploy.md#テスト)を参照してください。

@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 # SwiftPM products are shared by these targets, even with make -j.
 .NOTPARALLEL:
-.PHONY: help release debug archive dmg test ios-build ios-test ios-uitest ios-sim ios-device
+.PHONY: help python-check release debug archive dmg test ios-build ios-test ios-uitest ios-sim ios-device
 
 PYTHON ?= python3
 RELEASE_OUTPUT ?= build/release/LCMP.app
@@ -31,10 +31,14 @@ help:
 	  'Overrides: PYTHON, RELEASE_OUTPUT, DEBUG_OUTPUT, ARCHIVE, DMG_OUTPUT, DMG_APP,' \
 	  '           IOS_CONFIGURATION, IOS_SIMULATOR, IOS_DEVICE'
 
-release:
+# The macOS build and test scripts need a supported Python; macOS's /usr/bin/python3 is too old.
+python-check:
+	@$(PYTHON) scripts/python_requirement.py
+
+release: python-check
 	$(PYTHON) scripts/build-app.py --configuration release --output "$(RELEASE_OUTPUT)"
 
-debug:
+debug: python-check
 	$(PYTHON) scripts/build-app.py --configuration debug --output "$(DEBUG_OUTPUT)"
 
 archive: release
@@ -46,10 +50,11 @@ archive: release
 	  mv -f "$$temporary" "$(ARCHIVE)"; \
 	  printf '%s\n' "$(ARCHIVE)"
 
-dmg:
+dmg: python-check
 	$(PYTHON) scripts/build-dmg.py $(if $(DMG_OUTPUT),--output "$(DMG_OUTPUT)",) $(if $(DMG_APP),--app "$(DMG_APP)",)
 
-test:
+test: python-check
+	$(PYTHON) scripts/test_python_requirement.py
 	$(PYTHON) scripts/test_acknowledgements.py
 	$(PYTHON) scripts/test_app_version.py
 	$(PYTHON) scripts/test_app_icon.py

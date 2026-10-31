@@ -188,7 +188,7 @@ class BuildDMGTests(unittest.TestCase):
 
     def test_make_target_builds_the_dmg(self):
         makefile = (ROOT / 'Makefile').read_text()
-        self.assertRegex(makefile, r'(?m)^dmg:\n\t\$\(PYTHON\) scripts/build-dmg\.py')
+        self.assertRegex(makefile, r'(?m)^dmg: python-check\n\t\$\(PYTHON\) scripts/build-dmg\.py')
 
 
 if __name__ == '__main__':
