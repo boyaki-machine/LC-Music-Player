@@ -235,6 +235,8 @@ import AudioProcessingCore
             } catch {
                 request.failure = error
                 guard let self, self.active === request else { return }
+                // Measured for an output that changed meanwhile: the sweep starts over for the output it has now.
+                if (error as? AudioProcessingFailure) == .outputChanged { self.outputChanged(); return }
                 if !(error is CancellationError) {
                     self.attempts[candidate.track.id] = Attempt(reference: request.reference, profile: profile, source: nil)
                 }

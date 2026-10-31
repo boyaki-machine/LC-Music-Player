@@ -14,12 +14,6 @@ public struct PuppetShowView: View {
                 Color(red: 124 / 255, green: 192 / 255, blue: 250 / 255)
             }
         }
-        .overlay(alignment: .topLeading) {
-            if driver.waitingForData {
-                Text("解析データを待っています").font(.system(size: 10)).foregroundStyle(Color(white: 0.2))
-                    .padding(.leading, 18).padding(.top, 2)
-            }
-        }
         .onAppear { PuppetShowLoader.shared.request(); driver.reduceMotion = reduceMotion }
         .onChange(of: reduceMotion) { _, value in driver.reduceMotion = value }
         .accessibilityElement(children: .ignore)

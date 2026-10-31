@@ -27,12 +27,6 @@ public struct RadioCassetteView: View {
 
     public var body: some View {
         RadioCassetteStage(driver: driver)
-            .overlay(alignment: .topLeading) {
-                if driver.waitingForData {
-                    Text("解析データを待っています").font(.system(size: 10)).foregroundStyle(Color(white: 0.2))
-                        .padding(.leading, 18).padding(.top, 2)
-                }
-            }
             // The player holds the file's access while it plays, so a reading that failed is tried again then.
             .task(id: FormatKey(url: playback.selectedURL, playing: playback.state == .playing)) { await readFormat() }
             .onAppear { driver.reduceMotion = reduceMotion; watch(visible); deliver() }

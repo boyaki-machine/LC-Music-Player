@@ -1,4 +1,5 @@
 import Foundation
+import AudioProcessingCore
 
 public enum PlaybackState: Equatable, Sendable {
     case empty, ready, playing, paused, stopped, finished, failed
@@ -9,6 +10,9 @@ public enum PlaybackError: LocalizedError, Equatable, Sendable {
     case inaccessibleFile
     case loadingFailed(String)
     case playbackFailed(String)
+    /// The output's format differs from the one the track's levels were measured for: the output is
+    /// another device, or is still changing to one. Preparing the track again measures it for the new output.
+    case outputChanged
 
     public var errorDescription: String? {
         switch self {
@@ -20,7 +24,16 @@ public enum PlaybackError: LocalizedError, Equatable, Sendable {
             "音楽ファイルを読み込めませんでした。\(reason)"
         case .playbackFailed(let reason):
             "再生できませんでした。\(reason)"
+        case .outputChanged:
+            "再生できませんでした。出力形式が変わりました。再生を準備し直してください。"
         }
+    }
+
+    /// A playback error for any error: a change of the output keeps its own case.
+    public init(_ error: any Error) {
+        if let error = error as? PlaybackError { self = error }
+        else if (error as? AudioProcessingFailure) == .outputChanged { self = .outputChanged }
+        else { self = .playbackFailed(error.localizedDescription) }
     }
 }
 

@@ -2,6 +2,7 @@ import AVFAudio
 import Foundation
 import AnalysisCore
 import AudioProcessingCore
+import OSLog
 
 @MainActor
 public final class AudioEngineBackend: PlaybackBackend {
@@ -36,19 +37,34 @@ public final class AudioEngineBackend: PlaybackBackend {
     /// engine (a few milliseconds), so the result is kept until the output's device, rate or
     /// channels change, which `OutputSignature` reads in microseconds.
     public static func measurementProfile() throws -> MeasurementProfile {
-        try cachedProfile(for: OutputSignature.current()) {
-            let format = outputGraphFormat(of: AVAudioEngine())
-            return try MeasurementProfile(sampleRate: format.sampleRate, channels: format.channelCount)
-        }
+        try cachedProfile(for: OutputSignature.current()) { try reportedProfile(outputGraphFormat(of: AVAudioEngine())) }
     }
+    /// The profile of the format an engine reports for the output.
+    static func reportedProfile(_ format: AVAudioFormat) throws -> MeasurementProfile {
+        #if DEBUG
+        if let engineProfileOverride { return engineProfileOverride }
+        #endif
+        return try MeasurementProfile(sampleRate: format.sampleRate, channels: format.channelCount)
+    }
+    #if DEBUG
+    /// What new engines report in place of the output's format, for tests of an output that changes.
+    static var engineProfileOverride: MeasurementProfile?
+    #endif
     private static var profileCache: (signature: OutputSignature, profile: MeasurementProfile)?
     /// The kept profile while the signature stays the same; an unknown signature always reads again.
+    /// Just after the default output changes, the system already names the new device while a new
+    /// engine still reports the old one's format for a few milliseconds. A profile read then does not
+    /// match the signature's rate, and is not kept: kept, it would stay wrong as long as the device
+    /// plays, and every normalized start would fail on it.
     static func cachedProfile(for signature: OutputSignature?, read: () throws -> MeasurementProfile) throws -> MeasurementProfile {
         if let cached = profileCache, let signature, cached.signature == signature { return cached.profile }
         let profile = try read()
-        profileCache = signature.map { ($0, profile) }
+        profileCache = signature.flatMap { $0.sampleRate == profile.sampleRate ? ($0, profile) : nil }
+        Logger.output.notice("Output profile read: engine \(Int(profile.sampleRate), privacy: .public)Hz \(profile.channels, privacy: .public)ch, output \(Int(signature?.sampleRate ?? 0), privacy: .public)Hz, kept \(profileCache != nil, privacy: .public)")
         return profile
     }
+    /// Forgets the kept profile, which an engine of the output has just contradicted.
+    static func forgetProfile() { profileCache = nil }
     /// The format the graph renders in, from the converter to the main mixer: the output device's
     /// rate, in at most two channels. It connects the main mixer to the output in the device's own
     /// format. A new engine otherwise reports a default format (44.1kHz on a 48kHz Mac) until it
@@ -326,7 +342,10 @@ public final class AudioEngineBackend: PlaybackBackend {
             if let metrics = normalizationMetrics {
                 do {
                     try metrics.source.validate()
-                    guard try MeasurementProfile(sampleRate: outputFormat.sampleRate, channels: outputFormat.channelCount) == metrics.profile else {
+                    let reported = try Self.reportedProfile(outputFormat)
+                    guard reported == metrics.profile else {
+                        Logger.output.notice("Start on another format: engine \(Int(reported.sampleRate), privacy: .public)Hz \(reported.channels, privacy: .public)ch, measured \(Int(metrics.profile.sampleRate), privacy: .public)Hz \(metrics.profile.channels, privacy: .public)ch, taken engine \(handoff != nil, privacy: .public)")
+                        Self.forgetProfile()
                         throw AudioProcessingFailure.outputChanged
                     }
                 } catch { try? decoder.close(); handoff?.stop(); throw error }
@@ -370,7 +389,7 @@ public final class AudioEngineBackend: PlaybackBackend {
             startAnalysis()
         } catch {
             stop()
-            throw PlaybackError.playbackFailed(error.localizedDescription)
+            throw PlaybackError(error)
         }
     }
 
@@ -403,7 +422,7 @@ public final class AudioEngineBackend: PlaybackBackend {
             startAnalysis()
         } catch {
             stop()
-            throw PlaybackError.playbackFailed(error.localizedDescription)
+            throw PlaybackError(error)
         }
     }
 
@@ -438,7 +457,11 @@ public final class AudioEngineBackend: PlaybackBackend {
     public func resume() throws {
         if let metrics = normalizationMetrics {
             try metrics.source.validate()
-            guard try Self.measurementProfile() == metrics.profile else { throw AudioProcessingFailure.outputChanged }
+            let profile = try Self.measurementProfile()
+            guard profile == metrics.profile else {
+                Logger.output.notice("Resume on another format: output \(Int(profile.sampleRate), privacy: .public)Hz \(profile.channels, privacy: .public)ch, measured \(Int(metrics.profile.sampleRate), privacy: .public)Hz \(metrics.profile.channels, privacy: .public)ch")
+                throw PlaybackError.outputChanged
+            }
         }
         if run == nil && paused { try start(at: pendingTime); return }
         guard let run, paused else {

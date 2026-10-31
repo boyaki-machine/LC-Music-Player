@@ -9,12 +9,6 @@ public struct ErmineChorusView: View {
         Canvas { context, size in
             ErmineChorusRenderer.draw(context: context, size: size, drawings: drawings, stage: stage, dust: dust, reduceMotion: reduceMotion)
         }
-        .overlay(alignment: .topLeading) {
-            if driver.waitingForData {
-                Text("解析データを待っています").font(.system(size: 10)).foregroundStyle(Color(white: 0.65))
-                    .padding(.leading, 18).padding(.top, 2)
-            }
-        }
         .onAppear { driver.reduceMotion = reduceMotion }
         .onChange(of: reduceMotion) { _, value in driver.reduceMotion = value }
         .accessibilityElement(children: .ignore)
