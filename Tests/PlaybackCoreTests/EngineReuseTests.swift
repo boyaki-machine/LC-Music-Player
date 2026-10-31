@@ -2,6 +2,7 @@ import AVFAudio
 import Foundation
 import Testing
 import AudioProcessingCore
+import PreprocessingCore
 @testable import PlaybackCore
 
 @Suite(.serialized) @MainActor struct EngineReuseTests {
@@ -9,7 +10,8 @@ import AudioProcessingCore
     @Test func outputProfileIsReadAgainOnlyWhenTheOutputChanges() throws {
         var reads = 0
         func read() throws -> MeasurementProfile { reads += 1; return try MeasurementProfile(sampleRate: 48000, channels: 2) }
-        let speaker = OutputSignature(values: ["speaker", "48000"]), headphones = OutputSignature(values: ["headphones", "48000"])
+        let speaker = OutputSignature(values: ["speaker", "48000"], sampleRate: 48000)
+        let headphones = OutputSignature(values: ["headphones", "48000"], sampleRate: 48000)
         _ = try AudioEngineBackend.cachedProfile(for: speaker, read: read)
         _ = try AudioEngineBackend.cachedProfile(for: speaker, read: read)
         #expect(reads == 1)
@@ -20,6 +22,49 @@ import AudioProcessingCore
         _ = try AudioEngineBackend.cachedProfile(for: nil, read: read)
         #expect(reads == 4)
         #expect(OutputSignature.current() == OutputSignature.current())
+    }
+
+    /// Just after the default output changes, a new engine still reports the old device's format for a
+    /// few milliseconds. A profile read then is used once but not kept, or it would stay wrong for the device.
+    @Test func aProfileThatDisagreesWithTheOutputIsNotKept() throws {
+        AudioEngineBackend.forgetProfile(); defer { AudioEngineBackend.forgetProfile() }
+        var reads = 0, rate = 48000.0
+        func read() throws -> MeasurementProfile { reads += 1; return try MeasurementProfile(sampleRate: rate, channels: 2) }
+        let headphones = OutputSignature(values: ["headphones", "44100"], sampleRate: 44100)
+        #expect(try AudioEngineBackend.cachedProfile(for: headphones, read: read).sampleRate == 48000)
+        rate = 44100
+        #expect(try AudioEngineBackend.cachedProfile(for: headphones, read: read).sampleRate == 44100)
+        _ = try AudioEngineBackend.cachedProfile(for: headphones, read: read)
+        #expect(reads == 2)
+    }
+
+    /// A kept profile that the output's engine contradicts at the start is forgotten, so the next
+    /// preparation measures for the output's real format and plays.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["LCMP_TEST_AUDIO_OUTPUT"] == "1"))
+    func aStartOnAnotherFormatForgetsTheKeptProfile() async throws {
+        AudioEngineBackend.forgetProfile(); defer { AudioEngineBackend.forgetProfile() }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lcmp-profile-\(UUID()).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = try #require(AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2))
+        let second = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 44100)); second.frameLength = 44100
+        do { let file = try AVAudioFile(forWriting: url, settings: format.settings); for _ in 0..<3 { try file.write(from: second) } }
+        let actual = try AudioEngineBackend.measurementProfile()
+        let other = try MeasurementProfile(sampleRate: actual.sampleRate == 48000 ? 44100 : 48000, channels: actual.channels)
+        // What a read in the moment of the change would have kept before: the device's signature with the old format.
+        let current = try #require(OutputSignature.current())
+        AudioEngineBackend.forgetProfile()
+        _ = try AudioEngineBackend.cachedProfile(for: OutputSignature(values: current.values, sampleRate: other.sampleRate)) { other }
+        #expect(try AudioEngineBackend.measurementProfile() == other)
+        let processor = AudioPreprocessor()
+        let backend = try AudioEngineBackend(prepared: try await processor.prepare(url),
+                                             metrics: try await processor.measureLevels(url, profile: other))
+        backend.volume = 0; defer { backend.stop() }
+        #expect(throws: PlaybackError.outputChanged) { try backend.play() }
+        #expect(try AudioEngineBackend.measurementProfile() == actual)
+        let measured = try AudioEngineBackend(prepared: try await processor.prepare(url),
+                                              metrics: try await processor.measureLevels(url, profile: actual))
+        measured.volume = 0; defer { measured.stop() }
+        try measured.play()
     }
 
     /// On iOS a route change pauses the track only when the outputs are other devices.

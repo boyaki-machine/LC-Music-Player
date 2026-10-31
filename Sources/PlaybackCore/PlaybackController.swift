@@ -7,6 +7,8 @@ import AudioProcessingCore
 /// The shutdown steps and their timings, never song names or paths. Console: subsystem `io.github.boyaki-machine.LC-Music-Player`.
 extension Logger {
     public static let shutdown = Logger(subsystem: "io.github.boyaki-machine.LC-Music-Player", category: "shutdown")
+    /// The output's format as playback reads and checks it: rates, channels and device numbers only.
+    public static let output = Logger(subsystem: "io.github.boyaki-machine.LC-Music-Player", category: "output")
 }
 
 @Observable
@@ -46,7 +48,7 @@ public final class PlaybackController {
     /// Called after the app volume or mute changes, including changes made by code.
     @ObservationIgnored public var onVolumeChange: (@MainActor () -> Void)?
 
-    @ObservationIgnored private var backend: (any PlaybackBackend)?
+    @ObservationIgnored private(set) var backend: (any PlaybackBackend)?
     @ObservationIgnored private var lease: FileLease?
     @ObservationIgnored private var selectionID = UUID()
     @ObservationIgnored private let fileAccess: any FileAccess
@@ -177,7 +179,7 @@ public final class PlaybackController {
             error = nil
             onActivityChange?()
         } catch {
-            handle(.failed((error as? PlaybackError) ?? .playbackFailed(error.localizedDescription)))
+            handle(.failed(PlaybackError(error)))
         }
     }
 
@@ -262,7 +264,7 @@ public final class PlaybackController {
             error = nil
             onActivityChange?()
         } catch {
-            handle(.failed((error as? PlaybackError) ?? .playbackFailed(error.localizedDescription)))
+            handle(.failed(PlaybackError(error)))
         }
     }
 

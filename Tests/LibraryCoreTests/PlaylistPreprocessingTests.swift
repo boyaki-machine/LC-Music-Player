@@ -271,6 +271,29 @@ private actor PlaylistWorker: AudioPreprocessing {
         #expect(queue.active == nil && refs.scopes.active == 0 && refs.scopes.maximum == 1)
     }
 
+    /// A format read in the moment the output changes may still be the old device's. A measurement that
+    /// finishes on another format than it started with makes the sweep start over for the format it has now.
+    @Test func aMeasurementThatEndsOnAnotherFormatStartsTheSweepOver() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        let doc = try playlistFixture(f.root, count: 2), refs = TestReferences(), worker = PlaylistWorker()
+        let playback = PlaybackController(makeBackend: { _ in TestBackend() }), output = OutputProfileBox()
+        let first = doc.tracks[0].reference.lastKnownURL
+        await worker.block(first)
+        let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: output.rate, channels: 2) })
+        queue.farPriority = .utility
+        var measured: [UUID: Double] = [:]
+        queue.onMeasured = { measured[$0] = $1.profile.sampleRate }
+        queue.update(doc, playback: playback, after: nil)
+        try await sweepWait { await worker.starts.count == 1 }
+        output.rate = 44100
+        await worker.release(first)
+        try await sweepWait { measured.count == 2 && queue.active == nil }
+        #expect(measured == Dictionary(uniqueKeysWithValues: doc.tracks.map { ($0.id, 44100.0) }))
+        #expect(await worker.starts == [first, first, doc.tracks[1].reference.lastKnownURL])
+        queue.suspend(); await queue.retirement?.value
+        #expect(refs.scopes.active == 0)
+    }
+
     @Test func controllerStartsOnSuccessfulAddWithProcessingOffAndStopPreventsRestart() async throws {
         let f = try Fixture(); defer { f.cleanup() }
         let doc = try playlistFixture(f.root, count: 2), refs = TestReferences(), store = MemoryStore(), worker = PlaylistWorker()

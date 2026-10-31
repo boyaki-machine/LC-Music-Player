@@ -17,12 +17,6 @@ public struct LCMPDefaultGEQView: View {
                 LCMPDefaultGEQCanvasView(driver: driver, reduceMotion: reduceMotion, axisLabelSize: axisLabelSize)
             }
         }
-        .overlay(alignment: .topLeading) {
-            if waiting {
-                Text("解析データを待っています").font(.system(size: 10)).foregroundStyle(Color(white: 0.65))
-                    .padding(.leading, 18).padding(.top, 2)
-            }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("LCMP_default_GEQ、蛍光管LED、16帯域の周波数レベル")
         .accessibilityValue(waiting ? "解析データ待ち" : "")

@@ -57,7 +57,7 @@ import AudioProcessingCore
     @ObservationIgnored private let preferences: any PreferenceStoring
     @ObservationIgnored private let preprocessor: any AudioPreprocessing
     @ObservationIgnored private var playlistPreprocessingMayStart = true
-    @ObservationIgnored private var playlistPreprocessing: PlaylistPreprocessing?
+    @ObservationIgnored private(set) var playlistPreprocessing: PlaylistPreprocessing?
     @ObservationIgnored private var cacheAuditTask: Task<Void, Never>?
     @ObservationIgnored private var selectionIntent: SelectionIntent?
     @ObservationIgnored private var selectionTask: Task<Void, Never>?
@@ -420,7 +420,15 @@ import AudioProcessingCore
     }
     public func togglePlayPause() {
         if playback.state == .playing || (playback.state == .paused && !normalizationNeedsPreparation && levelsFitOutput) {
-            playback.togglePlayPause(); return
+            let position = playback.currentTime
+            playback.togglePlayPause()
+            // The levels fit the kept profile, but the output's engine renders another format (the
+            // output changed while it paused): the track is measured for that output and resumes there.
+            if playback.error == .outputChanged, preprocessingEnabled, let list = document.currentPlaylistID, let entry = document.currentEntryID {
+                Logger.output.notice("Resume failed on the output's format: preparing the track again")
+                beginPreparedSelection(entry, playlistID: list, autoPlay: true, position: position)
+            }
+            return
         }
         guard let current = currentTrack, let list = document.currentPlaylistID, let entry = document.currentEntryID else { return }
         if preprocessingEnabled {
@@ -439,11 +447,13 @@ import AudioProcessingCore
             self.error = error.localizedDescription
         }
     }
-    /// Whether the levels of the paused track still fit the output. Another output, which pauses the
-    /// track, may render another rate; the track is then measured for it before it resumes.
+    /// Whether the levels the paused track plays with still fit the output. Another output, which pauses the
+    /// track, may render another rate; the track is then measured for it before it resumes. The playlist's
+    /// sweep may already have measured the current track for the new output, so the levels shown are not
+    /// necessarily the ones playing.
     private var levelsFitOutput: Bool {
         guard normalizesVolume else { return true }
-        return measuredLevels.map { $0.profile == (try? AudioEngineBackend.measurementProfile()) } == true
+        return playback.normalizationPlan.map { $0.profile == (try? AudioEngineBackend.measurementProfile()) } == true
     }
     public func previous() { move(-1, autoPlay: playback.state == .playing) }
     public func next() { move(1, autoPlay: playback.state == .playing) }
@@ -931,7 +941,7 @@ extension LibraryController {
     /// playback) measures. Only the latest preparationID may commit the selection.
     /// A nil `position` follows the playing track: it starts from where that track is at the commit.
     private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double? = 0, shuffle: ShuffleStep = .keep,
-                                        startsTrack: Bool = false) {
+                                        startsTrack: Bool = false, outputRetries: Int = 0) {
         guard !shuttingDown else { return }
         playlistPreprocessingMayStart = true
         let requestedReference = currentReference(entryID, in: playlistID)
@@ -965,14 +975,48 @@ extension LibraryController {
                 try self.commitSelection(id, intent: intent, track: track, resolved: resolved, prepared: prepared, levels: levels,
                                          earlierPeak: handoff.candidate?.peak, position: position, shuffle: shuffle)
             } catch {
-                guard let self, self.preparationID == id else { return }
+                // The failed start has already ended this preparation, with the playback's failure.
+                let failedStart = error is StartOnChangedOutput
+                guard let self, self.preparationID == id || failedStart else { return }
                 self.endSelection()
+                if failedStart || PlaybackError(error) == .outputChanged, autoPlay, outputRetries < Self.outputChangeRetries {
+                    // The output was still changing (a new device settles its format in a moment):
+                    // the track is measured again for the output it has then, and plays on.
+                    self.retryAfterOutputChange(entryID, playlistID: playlistID, position: position,
+                                                shuffle: self.document.currentEntryID == entryID ? .keep : shuffle,
+                                                startsTrack: startsTrack, retries: outputRetries + 1)
+                    return
+                }
                 if !(error is CancellationError) {
                     self.error = "再生を準備できませんでした。\(error.localizedDescription)"
                     if self.normalizesVolume { self.levelMeasurement = .failed(error.localizedDescription) }
                 }
                 self.updatePreprocessing()
             }
+        }
+    }
+
+    /// A committed selection whose start failed: its levels were measured for an output that has changed since.
+    private struct StartOnChangedOutput: LocalizedError {
+        var errorDescription: String? { PlaybackError.outputChanged.localizedDescription }
+    }
+    /// How many times a selection that failed on a changing output is prepared again, and how long it waits first.
+    static let outputChangeRetries = 3
+    static let outputChangeRetryDelay = Duration.milliseconds(300)
+
+    /// Prepares the selection again after a moment. Any other selection, stopping or a changed
+    /// setting cancels the wait like a preparation.
+    private func retryAfterOutputChange(_ entryID: UUID, playlistID: UUID, position: Double?, shuffle: ShuffleStep,
+                                        startsTrack: Bool, retries: Int) {
+        Logger.output.notice("Preparation failed on the output's format: retry \(retries, privacy: .public)")
+        let id = UUID(); preparationID = id
+        isPreparing = true
+        preparationStage = "音声出力の切り替えを待っています…"
+        selectionTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.outputChangeRetryDelay)
+            guard !Task.isCancelled, let self, self.preparationID == id else { return }
+            self.beginPreparedSelection(entryID, playlistID: playlistID, autoPlay: true, position: position, shuffle: shuffle,
+                                        startsTrack: startsTrack, outputRetries: retries)
         }
     }
 
@@ -1099,8 +1143,11 @@ extension LibraryController {
         if measuresMaximumVolume, let peak = levels?.sourcePeak ?? earlierPeak, peak.source == prepared.source {
             measuredTrack = track.id; peakMeasurement = .complete(peak)
         }
-        if intent.autoPlay { playback.togglePlayPause(using: resolved.lease) }
-        else if playlistPreprocessing != nil { resumePlaylistPreprocessing() }
+        if intent.autoPlay {
+            playback.togglePlayPause(using: resolved.lease)
+            // Measured for an output that changed before the start: the selection prepares it again.
+            if playback.error == .outputChanged { throw StartOnChangedOutput() }
+        } else if playlistPreprocessing != nil { resumePlaylistPreprocessing() }
     }
 
     /// Read before the selection takes over the player.
