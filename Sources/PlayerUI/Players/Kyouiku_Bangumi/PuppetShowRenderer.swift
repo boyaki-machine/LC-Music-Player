@@ -12,6 +12,7 @@ struct PuppetShowScene: Sendable, Equatable {
     var moonAge = 7.0
     var poses = Array(repeating: PuppetPose(), count: PuppetMember.all.count)
     var reduceMotion = false
+    var event: PuppetSkyEvent?
 }
 
 /// Draws the stage with Metal: the scenery as 2D layers in stage points, then the puppets in 3D through the
@@ -179,7 +180,8 @@ final class PuppetShowRenderer {
         func uniforms(_ mode: PuppetShaderMode, color: SIMD4<Float> = SIMD4(1, 1, 1, 1)) -> PuppetShowUniforms {
             var u = PuppetShowUniforms(); u.mvp = projection; u.mode = mode.rawValue; u.color = color; return u
         }
-        let layers = PuppetBackdrop.layers(tod: scene.timeOfDay, time: scene.time, moonAge: scene.moonAge, reduceMotion: scene.reduceMotion)
+        let layers = PuppetBackdrop.layers(tod: scene.timeOfDay, time: scene.time, moonAge: scene.moonAge, reduceMotion: scene.reduceMotion,
+                                             event: scene.event)
         for layer in layers {
             switch layer {
             case let .sky(top, horizon):
@@ -219,6 +221,11 @@ final class PuppetShowRenderer {
                 u.p1 = SIMD4(Float(side), Float(alpha), 0.35, pixelsPerPoint)
                 let m = radius + 4
                 draw(encoder, quad: Self.rect(x - m, y - m, 2 * m, 2 * m), uv: Self.fullUV, texture: white, u, pipeline: premultiplied)
+            case let .rainbow(x, y, radius, width, reveal, alpha):
+                var u = uniforms(.rainbow)
+                u.p0 = SIMD4(Float(x), Float(y), Float(radius), Float(width))
+                u.p1 = SIMD4(Float(alpha), Float(reveal), pixelsPerPoint, 0)
+                draw(encoder, quad: Self.rect(x - radius, y - radius, 2 * radius, radius), uv: Self.fullUV, texture: white, u, pipeline: premultiplied)
             case let .cloud(shape, f, tint, shadowAlpha):
                 let name = PuppetBackdrop.cloudPictures[shape]
                 guard let texture = pictures[name] else { continue }

@@ -48,6 +48,17 @@ enum LCMPDefaultGEQLampTest {
     }
 }
 
+/// A display with a test of its own for the service sequence.
+@MainActor protocol LCMPServiceTesting: AnyObject {
+    func startServiceTest()
+}
+
+extension VisualizationDriver: LCMPServiceTesting {
+    func startServiceTest() { startLampTest() }
+}
+
+extension PuppetShowDriver: LCMPServiceTesting {}
+
 /// Which LED button of the player was pressed.
 enum LCMPDefaultGEQControl: Int, CaseIterable {
     case previous, playPause, next, stop, volume, menu

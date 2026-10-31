@@ -72,10 +72,16 @@ struct PuppetDirector: Sendable {
     private(set) var mouth = 0.0
     private(set) var beatCount = 0.0
     private(set) var pulse = 0.0
+    /// The side-to-side sway (radians). It reaches a side on every beat, alternating.
+    private(set) var sway = 0.0
+    /// The last beat seen, so the sway keeps its tempo for a while when the beat is lost.
+    private var heldBeat: (count: Double, bpm: Double, at: Double)?
 
     private var armL = PuppetSpring(omega: 7), armR = PuppetSpring(omega: 7), turnSpring = PuppetSpring(omega: 5)
     private var slump = PuppetSpring(omega: 4), cry = PuppetSpring(omega: 5), sparkle = PuppetSpring(omega: 9)
-    private var shout = PuppetSpring(omega: 9), bob = PuppetSpring(omega: 22), roll = PuppetSpring(omega: 8)
+    private var shout = PuppetSpring(omega: 9), bob = PuppetSpring(omega: 22)
+    /// How wide the sway is on the beat and, without a beat, in a slow sway of its own.
+    private var beatSway = PuppetSpring(omega: 4), freeSway = PuppetSpring(omega: 2)
     private var headbang = PuppetSpring(omega: 6), shy = PuppetSpring(omega: 9), blush = PuppetSpring(omega: 4)
     private var dreamy = PuppetSpring(omega: 3), lift = PuppetSpring(omega: 6), smile = PuppetSpring(omega: 6)
 
@@ -86,7 +92,7 @@ struct PuppetDirector: Sendable {
     var lookingUntil: Double { look?.until ?? -.infinity }
     /// Settled enough to stop the clock after a pause.
     var isSettled: Bool {
-        let springs = [armL, armR, turnSpring, slump, cry, sparkle, shout, bob, roll, headbang, shy, blush, dreamy, lift, smile]
+        let springs = [armL, armR, turnSpring, slump, cry, sparkle, shout, bob, beatSway, freeSway, headbang, shy, blush, dreamy, lift, smile]
         return springs.allSatisfy { abs($0.value - $0.target) < 0.002 && abs($0.velocity) < 0.01 } && mouth < 0.002
     }
 
@@ -120,7 +126,8 @@ struct PuppetDirector: Sendable {
             if playing { phraseClock += dt }
             phrase = Int((phraseClock / 4).rounded(.down))
         }
-        if phrase != lastPhrase {
+        // New choices only while playing, so a pause or a stop keeps what is shown.
+        if phrase != lastPhrase && playing {
             lastPhrase = phrase
             let e = average
             armPose = e > 0.62 ? pick([(.up, 0.4), (.spread, 0.3), (.neutral, 0.3)])
@@ -190,24 +197,36 @@ struct PuppetDirector: Sendable {
         // The lead lifts its head on high notes and lowers it a little on low ones.
         lift.target = part == .lead ? PuppetMath.clamp((vocal?.pitch ?? 0) * 2.5, -0.4, 1) : 0
 
-        // Sink on the beat and sway every two beats; the mouth opens from just before the beat to after it.
-        let swing: Double, chomp: Double
+        // Sink on the beat; the mouth opens from just before the beat to after it.
+        let chomp: Double
         if let beat {
             let ph = beat.count - beat.count.rounded(.down), d = ph < 0.5 ? ph : ph - 1
             pulse = exp(-(d * d) / (2 * 0.1 * 0.1))
             let dm = d - 0.04
             chomp = exp(-(dm * dm) / (2 * 0.13 * 0.13))
-            swing = sin(.pi * beat.count)
         } else {
-            pulse = PuppetMath.clamp((fastEnvelope - slowEnvelope) * 3); swing = sin(now * 1.6)
+            pulse = PuppetMath.clamp((fastEnvelope - slowEnvelope) * 3)
             chomp = PuppetMath.clamp((fastEnvelope - slowEnvelope) * 4)
         }
         let energy = 0.35 + 0.65 * PuppetMath.clamp(average * 1.3)
         bob.target = pulse * energy * (slumping ? 0.2 : 1)
-        roll.target = swing * 0.045 * energy * (slumping ? 0.3 : 1)
-        for keyPath in [\Self.armL, \.armR, \.turnSpring, \.slump, \.cry, \.sparkle, \.shout, \.bob, \.roll, \.headbang, \.shy, \.blush, \.dreamy, \.lift, \.smile] {
+        // Sway to a side on every beat. The side follows the beat itself, not a spring after it, so it lands on
+        // the beat at any tempo; only the width eases. A lost beat keeps its tempo for a while, then a slow sway
+        // of its own takes over. Nothing sways while not playing.
+        if let beat { heldBeat = (beat.count, beat.bpm, now) } else if !playing { heldBeat = nil }
+        let holding = heldBeat.map { beat != nil || now - $0.at < Self.swayHoldSeconds } ?? false
+        let width = playing ? energy * (slumping ? 0.3 : 1) : 0
+        beatSway.target = holding ? width : 0
+        freeSway.target = holding ? 0 : width * Self.freeSwayShare
+        for keyPath in [\Self.armL, \.armR, \.turnSpring, \.slump, \.cry, \.sparkle, \.shout, \.bob, \.beatSway, \.freeSway, \.headbang, \.shy, \.blush, \.dreamy, \.lift, \.smile] {
             self[keyPath: keyPath].step(dt)
         }
+        var side = 0.0
+        if let held = heldBeat {
+            side = -cos(.pi * (held.count + (now - held.at) * held.bpm / 60))
+            if !holding && beatSway.value < 0.001 { heldBeat = nil }
+        }
+        sway = Self.swayAngle * (beatSway.value * side + freeSway.value * sin(now * 1.6))
         // How wide: the register's strength, plus quick rises. When: the beat. Smaller in shyness.
         let strength = PuppetMath.clamp(slowEnvelope)
         let detail = PuppetMath.clamp((fastEnvelope - slowEnvelope) * 2.5)
@@ -228,6 +247,8 @@ struct PuppetDirector: Sendable {
 
     /// The chance of a smile at the start of a phrase, for a puppet not singing the lead.
     static let smileChance = 0.6
+    /// The sway's angle at full energy, how long a lost beat's tempo is kept, and the share of the slow sway without a beat.
+    static let swayAngle = 0.03, swayHoldSeconds = 4.0, freeSwayShare = 0.6
     /// Seconds of sounding music before a swell can make a shout or sparkling eyes.
     static let settleSeconds = 5.0
     /// How much of the vocal's mouth the sub sings outside harmonies, and of the beat's mouth the hum keeps.
@@ -237,7 +258,7 @@ struct PuppetDirector: Sendable {
     func pose(now: Double, reduceMotion: Bool = false) -> PuppetPose {
         let clamp = { (v: Double) in PuppetMath.clamp(v) }
         let still = reduceMotion ? 0.0 : 1.0
-        let slump = slump.value, bobV = bob.value * still, rollV = roll.value * still
+        let slump = slump.value, bobV = bob.value * still, rollV = sway * still
         var p = PuppetPose()
         p.rootY = 3 - slump * 5
         // Headbanging: down on the beat, up between beats.

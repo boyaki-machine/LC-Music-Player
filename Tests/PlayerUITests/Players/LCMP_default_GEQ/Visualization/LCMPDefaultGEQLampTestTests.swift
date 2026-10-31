@@ -175,9 +175,26 @@ import VisualizationKit
         let presentation = PlayerPresentation(preferences: MemoryPreferences())
         presentation.setVisualizationDesign(.ermineChorus)
         presentation.visualizationDriver.synchronize(activity: .inactive, visible: true)
+        presentation.puppetShowDriver.synchronize(activity: .inactive, visible: true)
         press(Self.sequence, on: presentation)
-        #expect(!presentation.visualizationDriver.isTestingLamps)
+        #expect(!presentation.visualizationDriver.isTestingLamps && presentation.puppetShowDriver.event == nil)
         presentation.visualizationDriver.synchronize(activity: .inactive, visible: false)
+        presentation.puppetShowDriver.synchronize(activity: .inactive, visible: false)
+    }
+
+    /// The puppet show has a service test of its own, and other presses do not end it.
+    @Test func thePuppetShowHasItsOwnServiceTest() {
+        let presentation = PlayerPresentation(preferences: MemoryPreferences())
+        presentation.setVisualizationDesign(.puppetShow)
+        let driver = presentation.puppetShowDriver
+        driver.synchronize(activity: .inactive, visible: true)
+        defer { driver.synchronize(activity: .inactive, visible: false) }
+        press(Array(Self.sequence.dropLast()), on: presentation)
+        #expect(driver.event == nil)
+        press([Self.sequence.last!], on: presentation)
+        #expect(driver.event != nil && !presentation.visualizationDriver.isTestingLamps)
+        presentation.pressed(.playPause)
+        #expect(driver.event != nil)
     }
 
     /// Presses as the player view does: the menu button toggles the extension before it is reported.

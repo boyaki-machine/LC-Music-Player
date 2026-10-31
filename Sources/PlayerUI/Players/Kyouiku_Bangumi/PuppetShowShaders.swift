@@ -26,6 +26,8 @@ enum PuppetShaderMode: Int32 {
     case moon = 5
     /// The tint color with the picture's alpha (paper shadows).
     case shadow = 6
+    /// A rainbow's arc (premultiplied).
+    case rainbow = 7
 }
 
 enum PuppetShowShaders {
@@ -120,6 +122,19 @@ enum PuppetShowShaders {
             float3 moon = mix(float3(241, 234, 211) / 255.0, g.rgb, g.a);
             float a = cover + shade * (1 - cover);
             return float4(moon * cover, a) * alpha;
+        }
+        case 7: {
+            // Red outside to violet inside, soft at both edges and at the end still being drawn.
+            float2 d = in.stage - u.p0.xy; float r = u.p0.z, w = u.p0.w, alpha = u.p1.x, reveal = u.p1.y;
+            float t = (r - length(d)) / w;
+            if (t <= 0 || t >= 1) return float4(0);
+            const float3 bands[7] = { float3(1.0, 0.25, 0.3), float3(1.0, 0.6, 0.25), float3(1.0, 0.92, 0.35),
+                                      float3(0.4, 0.85, 0.4), float3(0.35, 0.65, 1.0), float3(0.35, 0.4, 0.9), float3(0.6, 0.4, 0.85) };
+            float f = t * 6; int i = min(int(f), 5);
+            float3 c = mix(bands[i], bands[i + 1], f - float(i));
+            float angle = atan2(-d.y, -d.x);
+            float a = alpha * 0.5 * smoothstep(0.0, 0.18, t) * smoothstep(1.0, 0.82, t) * smoothstep(reveal, reveal - 0.25, angle);
+            return float4(c * a, a);
         }
         default: {
             float4 t = tex.sample(smp, in.uv);
