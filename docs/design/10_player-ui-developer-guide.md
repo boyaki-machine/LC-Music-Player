@@ -4,7 +4,7 @@
 
 ## 1. 概要
 
-Player UIは再生操作と画面構成を扱い、可視化は解析結果から表示を作る。現在の実装名・組込IDは`LCMP_default_GEQ`で、コンパクトな操作画面と、拡張画面で切り替える3つの可視化デザイン（16列の蛍光管LED、オコジョ合唱団、教育番組）を組み合わせる。本書は、ソースの配置、他のモジュールとのI/F、可視化の開発・追加の手順をまとめる。
+Player UIは再生操作と画面構成を扱い、可視化は解析結果から表示を作る。現在の実装名・組込IDは`LCMP_default_GEQ`で、コンパクトな操作画面と、拡張画面で切り替える4つの可視化デザイン（16列の蛍光管LED、オコジョ合唱団、教育番組、Last Century ラジカセ）を組み合わせる。本書は、ソースの配置、他のモジュールとのI/F、可視化の開発・追加の手順をまとめる。
 
 製品の仕様は[基本設計](00_basic-design.md)と[UI・UX設計](01_ui-ux-design.md)、具体的な画面の動作は[コンパクト画面](09_compact-ui-implementation.md)、提示待ち・残光・描画の詳細は[可視化の実装設計](08_visualization-implementation.md)に記載する。
 
@@ -46,8 +46,9 @@ Sources/
 │       │       ├── SpectrumPresentation.swift     提示待ち・16×24セル・残光
 │       │       └── VisualizationDriver.swift      蛍光管LEDのMainActorの受信・時計
 │       ├── Micrigaike_Kojoes/         MICRIGAIKE コジョーズ（オコジョ合唱団）の一式：原画・キャラクタ・演出・指揮役・描画・サムネイル・driver・View
-│       └── Kyouiku_Bangumi/           教育番組（パペット）の一式：キャラクタ・演出・指揮役・背景・組み立て・Metalの描画・driver・View
-│           └── Art/                   同梱の絵（パッケージのリソース）：背景の絵、パペットの部品と数値
+│       ├── Kyouiku_Bangumi/           教育番組（パペット）の一式：キャラクタ・演出・指揮役・背景・組み立て・Metalの描画・driver・View
+│       │   └── Art/                   同梱の絵（パッケージのリソース）：背景の絵、パペットの部品と数値
+│       └── LC_RadioCassette/          Last Century ラジカセの一式：テープ・インディケータ・メーター・図形・Core Animationの描画・監視・driver・View・サムネイル
 ├── VisualizationKit/
 │   └── Shared/
 │       ├── SpectrumSample.swift       UIに依存しない表示用レベル・時刻の値型
@@ -79,6 +80,8 @@ Tests/PlayerUITests/
     │       └── VisualizationPerformanceTests.swift
     ├── Micrigaike_Kojoes/
     │   └── ErmineChorusTests.swift
+    ├── LC_RadioCassette/
+    │   └── RadioCassetteTests.swift
     └── Kyouiku_Bangumi/
         ├── PuppetShowTests.swift
         ├── PuppetShowRenderingTests.swift
@@ -130,8 +133,9 @@ flowchart LR
 | 再生 → 画面 | `analysisFrame`、`analysisResetID`、`state` | 最新のフレームを渡し、状態・取消IDの変更を可視化へ反映する |
 | 画面 → デザインの選択 | `PlayerPresentation.setVisualizationDesign(_:)` | 表示タブから呼ぶ。旧デザインのdriverを止め、選択を`UserDefaults`へ保存する |
 | ライブラリ → 画面 | `currentTrackMap` | 再生中の曲の地図（拍とボーカル）。前処理で求めたもので、わかるまではnil |
+| ライブラリ → 画面 | `trackChangeID` | 別の曲（または最後まで再生した同じ曲）を始めたときに変わる。設定の変更のための始め直し・再開・シークでは変わらない |
 | 画面 → 可視化の状態 | `PlayerVisualizationDriver`の`synchronize(activity:visible:)`、`receive(_:)`、`receive(trackMap:)`、`reset()` | MainActorで、表示中のデザインのdriverへ、再生状態・表示可否・解析結果・曲の地図・シーク等のリセットを渡す。地図を使わないデザインは`receive(trackMap:)`を実装しない（既定で無視する） |
-| 状態 → 描画 | `LCMPDefaultGEQView(driver:)`、`ErmineChorusView(driver:)`、`PuppetShowView(driver:)` | driverが公開する状態を描く。描画内から再生や解析を開始しない |
+| 状態 → 描画 | `LCMPDefaultGEQView(driver:)`、`ErmineChorusView(driver:)`、`PuppetShowView(driver:)`、`RadioCassetteView(driver:playback:library:visible:)` | driverが公開する状態を描く。描画内から再生や解析を開始しない |
 
 - 曲の選択は背景で非同期に確定する。前処理のバッファや全曲測定をUIへ持ち込まない。
 - sample peak専用の表示には検証済みの`currentTrackPeak`を使い、自動調整用の結果として流用しない。LUFS/true peakには`currentTrackMetrics`を使う。
@@ -246,7 +250,7 @@ PlayerUI/Players/
 
 ### 1つのPlayer UIに可視化デザインを追加する場合
 
-操作部を共通にしたまま、アニメーション領域の表示だけを切り替える場合の手順である。オコジョ合唱団と教育番組はこの手順で追加した。
+操作部を共通にしたまま、アニメーション領域の表示だけを切り替える場合の手順である。オコジョ合唱団・教育番組・Last Century ラジカセはこの手順で追加した。
 
 1. `PlayerUI/Players/<デザインID>/`を作り、描画・状態・driver・View・サムネイルの描画を置く。型名にはデザイン固有の接頭辞を付ける。
 2. driverは`PlayerVisualizationDriver`（`synchronize(activity:visible:)`、`receive(_:)`、`reset()`）に準拠させ、「寿命の管理と画面への組み込み」の表と同じく、表示中かつ再生中だけ時計を動かす。

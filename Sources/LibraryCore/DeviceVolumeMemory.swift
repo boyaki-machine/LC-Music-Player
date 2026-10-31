@@ -3,12 +3,20 @@ import Observation
 import PlaybackCore
 
 /// The output device that plays the app's audio: its kind (built-in speaker, wired, Bluetooth…)
-/// and an identifier of the individual device.
+/// and an identifier of the individual device. The name and the speaker flag are for display;
+/// a device is the same device whatever they say (a Mac's headphone jack keeps its identifier).
 public struct OutputDevice: Equatable, Sendable {
     public var kind: String
     public var identifier: String
-    public init(kind: String, identifier: String) { self.kind = kind; self.identifier = identifier }
+    /// The name the system shows, e.g. the Bluetooth headphones' name; nil when unknown.
+    public var name: String?
+    /// The device's own loudspeaker (not headphones on its jack).
+    public var isBuiltInSpeaker: Bool
+    public init(kind: String, identifier: String, name: String? = nil, isBuiltInSpeaker: Bool = false) {
+        self.kind = kind; self.identifier = identifier; self.name = name; self.isBuiltInSpeaker = isBuiltInSpeaker
+    }
     var key: String { "\(kind)|\(identifier)" }
+    public static func == (a: OutputDevice, b: OutputDevice) -> Bool { a.key == b.key }
 }
 
 /// The platform's output device and system (OS) volume.

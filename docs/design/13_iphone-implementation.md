@@ -157,7 +157,7 @@
 ### 常時表示
 
 - `AlwaysOnDisplay`（PlayerUI）が、利用者の切替と電池の状態から自動ロックを止めるかを決める。止めるのは、オンで、かつ充電中（満充電を含む）か電池残量が30%を超えるときである。電池残量が分からないとき（シミュレータ）は止める。
-- `AlwaysOnDisplay.device()`は、オンの間だけ`UIDevice.isBatteryMonitoringEnabled`を有効にし、電池残量と充電状態の通知を受ける。判定が変わったときだけ`UIApplication.isIdleTimerDisabled`を設定する。
+- `AlwaysOnDisplay.device()`は、オンの間だけ電池の監視を要求し（`BatteryMonitoring`。`UIDevice.isBatteryMonitoringEnabled`はアプリ全体で1つなので、要求が1つでもあれば有効にする）、電池残量と充電状態の通知を受ける。判定が変わったときだけ`UIApplication.isIdleTimerDisabled`を設定する。
 - `AppModel`が`PlayerPresentation(alwaysOnDisplay:)`へ渡す。macOS版は渡さないので、表示タブに切替が出ない。
 
 ### 画面の回転

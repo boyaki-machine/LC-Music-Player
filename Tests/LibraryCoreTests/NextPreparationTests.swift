@@ -182,6 +182,7 @@ private actor HeldPreprocessor: AudioPreprocessing {
         await model.importFiles([a, b], into: list)
         model.playPlaylist(list)
         try await wait { playback.state == .playing && model.currentIndex == 0 && !model.isPreparing }
+        let started = model.trackChangeID
         model.setNormalizesVolume(true)
         try await waitAsync { await worker.waiting }
         try await Task.sleep(for: .milliseconds(300))
@@ -204,11 +205,14 @@ private actor HeldPreprocessor: AudioPreprocessing {
             model.seek(to: playback.duration - 0.04)
             try await wait { model.currentIndex == 1 && playback.state == .playing && !model.isPreparing }
             #expect(playback.normalizationPlan != nil)
+            #expect(model.trackChangeID != started)
         default:
             await worker.release()
             try await wait { playback.normalizationPlan != nil && !model.isPreparing }
             #expect(playback.state == .playing && model.currentIndex == 0 && playback.currentTime >= measuring)
         }
+        // A new start of the same track for the new setting is not a new track.
+        if action != "end" { #expect(model.trackChangeID == started) }
         #expect(refs.scopes.maximum <= 2)
     }
 

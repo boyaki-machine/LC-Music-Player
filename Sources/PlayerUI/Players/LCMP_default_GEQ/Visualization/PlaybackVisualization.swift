@@ -23,6 +23,8 @@ struct PlaybackVisualization: View {
             case .fluorescentLED: LCMPDefaultGEQView(driver: presentation.visualizationDriver)
             case .ermineChorus: ErmineChorusView(driver: presentation.ermineChorusDriver)
             case .puppetShow: PuppetShowView(driver: presentation.puppetShowDriver)
+            case .radioCassette:
+                RadioCassetteView(driver: presentation.radioCassetteDriver, playback: playback, library: library, visible: visible)
             }
         }
         .onAppear { presentation.visualizationHostAppeared(); synchronize(); receiveTrackMap(); receive() }

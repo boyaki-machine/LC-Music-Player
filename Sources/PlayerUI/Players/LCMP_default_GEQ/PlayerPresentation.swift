@@ -30,6 +30,7 @@ public final class PlayerPresentation {
     @ObservationIgnored public let visualizationDriver = VisualizationDriver()
     @ObservationIgnored public let ermineChorusDriver = ErmineChorusDriver()
     @ObservationIgnored public let puppetShowDriver = PuppetShowDriver()
+    @ObservationIgnored public let radioCassetteDriver = RadioCassetteDriver()
     @ObservationIgnored private var serviceSequence = LCMPDefaultGEQServiceSequence()
     public private(set) var visualizationDesign: VisualizationDesign
     @ObservationIgnored private let preferences: any PreferenceStoring
@@ -72,6 +73,7 @@ public final class PlayerPresentation {
         case .fluorescentLED: visualizationDriver
         case .ermineChorus: ermineChorusDriver
         case .puppetShow: puppetShowDriver
+        case .radioCassette: radioCassetteDriver
         }
     }
     /// Changes only the drawing. The previous design's clock stops at once; the view starts the new one.

@@ -72,12 +72,21 @@ extension AlwaysOnDisplay {
     }
 }
 
+/// Battery monitoring is one switch for the whole app; it stays on while anyone asks for it.
+@MainActor enum BatteryMonitoring {
+    private static var requesters: Set<ObjectIdentifier> = []
+    static func request(_ on: Bool, by requester: ObjectIdentifier) {
+        if on { requesters.insert(requester) } else { requesters.remove(requester) }
+        UIDevice.current.isBatteryMonitoringEnabled = !requesters.isEmpty
+    }
+}
+
 @MainActor private final class DeviceBattery {
     weak var display: AlwaysOnDisplay?
     private var observers: [NSObjectProtocol] = []
 
     func monitor(_ on: Bool) {
-        UIDevice.current.isBatteryMonitoringEnabled = on
+        BatteryMonitoring.request(on, by: ObjectIdentifier(self))
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         guard on else { return }

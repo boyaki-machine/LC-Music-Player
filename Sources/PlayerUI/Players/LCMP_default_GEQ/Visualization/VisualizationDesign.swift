@@ -8,6 +8,7 @@ public enum VisualizationDesign: String, CaseIterable, Sendable {
     case fluorescentLED
     case ermineChorus
     case puppetShow
+    case radioCassette
 
     static let preferenceKey = "visualizationDesign"
 
@@ -16,6 +17,7 @@ public enum VisualizationDesign: String, CaseIterable, Sendable {
         case .fluorescentLED: "Last Century イコライザー"
         case .ermineChorus: "MICRIGAIKE コジョーズ"
         case .puppetShow: "教育番組"
+        case .radioCassette: "Last Century ラジカセ"
         }
     }
 
@@ -26,6 +28,7 @@ public enum VisualizationDesign: String, CaseIterable, Sendable {
         // Break after the comma rather than in the middle of a word.
         case .ermineChorus: "山上の素敵な秘湯では、\n毎晩オコジョ達がステージを開くらしい..."
         case .puppetShow: "思ってたのと違うけど、これはこれで味がある。絵心が欲しい..."
+        case .radioCassette: "カセットテープで聞いた、あの頃のワクワクを再び。"
         }
     }
 

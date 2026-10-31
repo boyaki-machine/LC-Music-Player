@@ -13,7 +13,10 @@ import CoreAudio
     public var onChange: (@MainActor () -> Void)?
     public var canSetSystemVolume: Bool { false }
     private var registrations: [Registration] = []
-    public init() { install() }
+    private let watchesDataSource: Bool
+    /// `watchesDataSource` also reports headphones plugged into the built-in jack, for showing the device;
+    /// the volume memory does not need it, since the device stays the same.
+    public init(watchesDataSource: Bool = false) { self.watchesDataSource = watchesDataSource; install() }
     isolated deinit { remove() }
 
     private static func address(_ selector: AudioObjectPropertySelector, _ scope: AudioObjectPropertyScope = kAudioObjectPropertyScopeGlobal,
@@ -35,8 +38,19 @@ import CoreAudio
         var transport: UInt32 = 0, transportSize = UInt32(MemoryLayout<UInt32>.size)
         address = Self.address(kAudioDevicePropertyTransportType)
         _ = AudioObjectGetPropertyData(device, &address, 0, nil, &transportSize, &transport)
-        return OutputDevice(kind: Self.fourCC(transport), identifier: uid.takeRetainedValue() as String)
+        var name: Unmanaged<CFString>?, nameSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        address = Self.address(kAudioObjectPropertyName)
+        let named = AudioObjectGetPropertyData(device, &address, 0, nil, &nameSize, &name) == noErr
+        // A built-in device plays through the speaker unless headphones take its data source.
+        var source: UInt32 = 0, sourceSize = UInt32(MemoryLayout<UInt32>.size)
+        address = Self.address(kAudioDevicePropertyDataSource, kAudioDevicePropertyScopeOutput)
+        let hasSource = AudioObjectGetPropertyData(device, &address, 0, nil, &sourceSize, &source) == noErr
+        let speaker = transport == kAudioDeviceTransportTypeBuiltIn && (!hasSource || source == Self.internalSpeaker)
+        return OutputDevice(kind: Self.fourCC(transport), identifier: uid.takeRetainedValue() as String,
+                            name: named ? name?.takeRetainedValue() as String? : nil, isBuiltInSpeaker: speaker)
     }
+    /// The built-in output's data source code for the internal speaker ('ispk').
+    private static let internalSpeaker: UInt32 = 0x6973_706B
     private static func fourCC(_ value: UInt32) -> String {
         let bytes = [24, 16, 8, 0].map { UInt8((value >> UInt32($0)) & 0xFF) }
         return String(decoding: bytes, as: UTF8.self).trimmingCharacters(in: .whitespaces)
@@ -82,6 +96,7 @@ import CoreAudio
         for element in [kAudioObjectPropertyElementMain, 1, 2] {
             watch(device, Self.address(kAudioDevicePropertyVolumeScalar, kAudioDevicePropertyScopeOutput, element), reinstall: false)
         }
+        if watchesDataSource { watch(device, Self.address(kAudioDevicePropertyDataSource, kAudioDevicePropertyScopeOutput), reinstall: false) }
     }
 }
 #else
@@ -108,7 +123,9 @@ import AVFAudio
     }
     isolated deinit { if let token { NotificationCenter.default.removeObserver(token) } }
     public var currentDevice: OutputDevice? {
-        AVAudioSession.sharedInstance().currentRoute.outputs.first.map { OutputDevice(kind: $0.portType.rawValue, identifier: $0.uid) }
+        AVAudioSession.sharedInstance().currentRoute.outputs.first.map {
+            OutputDevice(kind: $0.portType.rawValue, identifier: $0.uid, name: $0.portName, isBuiltInSpeaker: $0.portType == .builtInSpeaker)
+        }
     }
     public var systemVolume: Float? { AVAudioSession.sharedInstance().outputVolume }
     public var canSetSystemVolume: Bool { setter != nil }
