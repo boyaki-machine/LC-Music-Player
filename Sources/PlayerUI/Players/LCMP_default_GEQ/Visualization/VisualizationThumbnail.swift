@@ -11,6 +11,7 @@ struct VisualizationThumbnail: View {
             case .fluorescentLED: Self.drawLED(context, size: size)
             case .ermineChorus: ErmineChorusRenderer.drawThumbnail(context, size: size)
             case .puppetShow: PuppetShowThumbnail.draw(context, size: size, image: puppet)
+            case .radioCassette: RadioCassetteThumbnail.draw(context, size: size)
             }
         }
         .accessibilityHidden(true)

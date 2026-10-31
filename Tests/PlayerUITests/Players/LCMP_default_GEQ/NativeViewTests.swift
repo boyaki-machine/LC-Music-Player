@@ -622,6 +622,10 @@ extension LibraryNativeViewTests {
             }
         }
         #expect(skin > 50, "skin pixels in the puppet card: \(skin)")
+        // The cards scroll with the same fine scroller as the other tabs.
+        func scrollViews(_ view: NSView) -> [NSScrollView] { ((view as? NSScrollView).map { [$0] } ?? []) + view.subviews.flatMap(scrollViews) }
+        let scroll = try #require(scrollViews(host).first)
+        #expect(scroll.verticalScroller is RefinedScrollStyle.FineScroller)
     }
 
     @Test func alwaysOnIconSitsAboveTheCardsAndLightsGreenOrAmber() async throws {

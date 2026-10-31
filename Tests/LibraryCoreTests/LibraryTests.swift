@@ -267,6 +267,32 @@ struct Fixture {
         #expect(playback.state == .finished && model.currentIndex == 1)
         model.previous(); #expect(playback.state == .ready && model.currentIndex == 0)
     }
+    @Test func trackChangeIDFollowsNewTracksNotRestartsOfTheSameOne() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        let a = try f.file("a.wav"), b = try f.file("b.wav")
+        var backends: [TestBackend] = []
+        let playback = PlaybackController(makeBackend: { _ in let b = TestBackend(); backends.append(b); return b })
+        let model = LibraryController(playback: playback, store: MemoryStore(), references: TestReferences())
+        let list = try #require(model.document.currentPlaylistID)
+        await model.importFiles([a, b], into: list)
+        let entries = try #require(model.playlist(list)).entries
+        let initial = model.trackChangeID
+        model.selectEntry(entries[0].id, in: list)
+        let first = model.trackChangeID
+        #expect(first != initial)
+        // Choosing the same entry again, playing and pausing are not a new track.
+        model.selectEntry(entries[0].id, in: list, autoPlay: true)
+        model.togglePlayPause(); model.togglePlayPause()
+        #expect(model.trackChangeID == first)
+        // The next track is; so is the same track again after it played to its end.
+        backends.last?.onEvent?(.finished)
+        let second = model.trackChangeID
+        #expect(model.currentIndex == 1 && second != first)
+        backends.last?.onEvent?(.finished)
+        #expect(playback.state == .finished)
+        model.selectEntry(entries[1].id, in: list, autoPlay: true)
+        #expect(model.trackChangeID != second)
+    }
     @Test func missingNextStopsAndSourceRepairKeepsEntryIDs() async throws {
         let f = try Fixture(); defer { f.cleanup() }
         let a = try f.file("a.wav"), b = try f.file("b.wav")

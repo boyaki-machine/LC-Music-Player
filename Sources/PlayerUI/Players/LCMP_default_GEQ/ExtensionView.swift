@@ -115,7 +115,8 @@ public struct ExtensionView: View {
                     if let display = presentation.alwaysOnDisplay {
                         HStack { Spacer(); AlwaysOnToggle(display: display) }
                     }
-                    ScrollView {
+                    // Four cards no longer fit; scroll like the other tabs, with the same fine scroller.
+                    scrolled {
                         VStack(spacing: 8) {
                             ForEach(VisualizationDesign.allCases, id: \.self) { designCard($0) }
                         }.padding(.vertical, 2).padding(.horizontal, 1)

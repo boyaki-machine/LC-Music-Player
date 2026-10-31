@@ -29,6 +29,12 @@ import PlaybackCore
     /// A clock the test moves by hand, so the settle time after a device change is exact.
     private final class Clock { var now = ContinuousClock.now }
 
+    @Test func aDeviceIsTheSameWhateverItsDisplayNameSays() {
+        let named = OutputDevice(kind: "Speaker", identifier: "Speaker", name: "iPhone", isBuiltInSpeaker: true)
+        #expect(named == speaker)
+        #expect(OutputDevice(kind: "Speaker", identifier: "other") != speaker)
+    }
+
     @Test func eachDeviceKeepsItsOwnAppVolume() throws {
         let playback = PlaybackController(makeBackend: { _ in TestBackend() })
         let output = FakeOutput(speaker, volume: 0.5), preferences = MemoryPreferences(), clock = Clock()
