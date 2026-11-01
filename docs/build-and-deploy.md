@@ -343,6 +343,7 @@ iPhone版は、個人のApple Developer Programのチームで、無料のアプ
   - アプリとウィジェットには、プライバシーマニフェスト`PrivacyInfo.xcprivacy`を入れます。トラッキングはなく、集めるデータもありません。
   - 理由の申告が必要なAPI（UserDefaults・ファイルの日付・起動からの時刻など）を新しく使ったときや、使わなくなったときは、マニフェストを直します。直さないとテストが失敗します。
   - Info.plistの`ITSAppUsesNonExemptEncryption`は`NO`です。暗号の機能（CryptoKit）はハッシュの計算にしか使わないため、輸出規制の質問の対象外です。
+- **スクリーンショット**：App Store ConnectのiPhoneの枠（6.1インチ・6.3インチ用）は、2556×1179・2622×1206とその縦向きだけを受け付けます。6.9インチの機種で撮った画像（例：2796×1290）は「サイズが無効」になるので、`sips --resampleHeight 1206`で縮め、`sips --padToHeightWidth 1206 2622 --padColor 000000`で黒の余白を足して2622×1206にします。登録した画像は[app-store-iphone-geq.png](images/app-store-iphone-geq.png)です（撮影日時などのメタ情報は外しています）。
 - **プライバシーポリシー**：[プライバシーポリシー](privacy-policy.md)のGitHub上のURLを、App Store ConnectのプライバシーポリシーのURLとして登録しています。場所を変えるとURLが切れるので、ファイルを移動しません。
 
 ### シミュレータで確かめるための起動引数

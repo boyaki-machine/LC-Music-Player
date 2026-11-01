@@ -90,7 +90,7 @@ make ios-test
 | `Tests/` | 各モジュールの検証と独自のテスト音源 |
 | `assets/` | アプリのアイコンとインストーラーの背景（scriptsで図形から描いた生成物） |
 | `scripts/` | Swiftの実行、アプリの作成・署名、バージョンの決定、インストーラーの作成、アイコンと背景の描画、テスト音源の生成と、それらのテスト。拍とボーカルの正解を記録する道具（`beat-annotator.html`） |
-| `docs/` | ビルド・配置手順と設計書（[文書一覧](docs/README.md)）、READMEの画像 |
+| `docs/` | ビルド・配置手順と設計書（[文書一覧](docs/README.md)）、READMEとApp Storeの画像 |
 | `Makefile` | ビルド、ZIPの作成、インストーラー、テスト、iPhone版のビルド・導入・App Storeへの提出の入口 |
 | `Package.swift` | SwiftPMの定義（パッケージの依存はありません） |
 | `AGENTS.md`／`CLAUDE.md` | コーディングエージェント向けの作業指示 |
