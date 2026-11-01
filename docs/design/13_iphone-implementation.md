@@ -171,6 +171,8 @@
 - Info.plistはビルド設定から生成し、`iOS/LCMPiOS-Info.plist`の項目（バックグラウンドの音声、URLスキーム`lcmp`、App Groupの名前）を合わせる。
 - ウィジェット拡張のターゲットは`LCMPWidgets`（バンドルIDは`$(LCMP_BUNDLE_ID).widgets`）とし、アプリに埋め込む。拡張の最後の段では`scripts/ios_resources.py --version-only`がアプリと同じバージョンだけを書き込む。
 - 最後のビルドの段で`scripts/ios_resources.py`を実行し、LICENSE/NOTICEを`LCMPLicense/`へ、空の依存の索引を`ThirdPartyLicenses/`へ入れ、Gitの履歴から決めたバージョンをInfo.plistへ書き込む。依存を加えたときは、この段で依存のnoticeも入れる必要があり、スクリプトはPackage.resolvedがあると失敗して知らせる。
+- App Storeへの提出のため、アプリとウィジェット拡張のフォルダにプライバシーマニフェスト`PrivacyInfo.xcprivacy`を置く。トラッキングと収集するデータはない。理由の申告が必要なAPIは、アプリがUserDefaults（自身の設定`CA92.1`、App Groupの共有`1C8F.1`）・ファイルの日付（コンテナ内のライブラリのファイル`C617.1`、利用者が選んだ音源の識別`3B52.1`）・起動からの時刻（`mach_absolute_time`による経過時間`35F9.1`）、ウィジェットがUserDefaults（`1C8F.1`）である。アプリのInfo.plistの`ITSAppUsesNonExemptEncryption`は`NO`とする（CryptoKitはハッシュだけに使う）。
+- App Store Connectへの書き出しは`iOS/ExportOptions.plist`（`app-store-connect`へのアップロード、自動署名）で行い、バージョンとビルド番号はXcodeに管理させない（`ios_resources.py`がGitから決めた値を使う）。
 - パッケージにもmacOS版の実行ファイル`LCMP`があるため、iPhoneのターゲットとスキームの名前は`LCMPiOS`とする（アプリの名前は`LCMP.app`）。
 - 指の操作のテストはUIテストのターゲット`LCMPiOSUITests`（`iOS/LCMPiOSUITests/`）に置き、共有のスキーム`LCMPiOS`のテストに含める。
 
@@ -187,6 +189,7 @@
 | 提供元の識別で、別のprocessorでも測定結果を再利用し、revisionが変われば測り直す | `MeasurementCacheTests` |
 | iPhoneのアイコンが不透明な1024pxの正方形である | `scripts/test_app_icon.py` |
 | ビルドの段がライセンスとバージョンを入れる | `scripts/test_ios_resources.py` |
+| プライバシーマニフェストがトラッキング・収集なしで、理由の申告が必要なAPIの区分がコードでの使用と一致する。暗号化の申告と書き出しの設定 | `scripts/test_ios_store.py`。アーカイブ（`make ios-archive`）のアプリとウィジェットに`PrivacyInfo.xcprivacy`が入り、Info.plistに`ITSAppUsesNonExemptEncryption`があることも確かめる |
 | 再生の状態との対応、記号の点灯、App Groupがないときの状態 | `ControlSurfacesTests`（macOSとiOSで実行。記号は画面外に描いて緑の画素を数える） |
 | 常時表示の判定（30%・充電中・残量不明）と、自動ロックの設定が判定の変化のときだけ行われること、表示タブの記号の緑・琥珀の点灯 | `AlwaysOnDisplayTests`、`VisualizationDesignCardTests`の`alwaysOnIconSitsAboveTheCardsAndLightsGreenOrAmber` |
 | ☰のリンクで拡張画面が開く | `make ios-uitest`（`ControlSurfaceTests`） |

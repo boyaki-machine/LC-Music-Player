@@ -302,8 +302,10 @@ iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwif
 | `make ios-uitest` | アプリをシミュレータで起動し、指の操作のテスト（`iOS/LCMPiOSUITests/`）を実行します。 |
 | `make ios-sim` | ビルドしてシミュレータに入れ、起動します。 |
 | `make ios-device` | 署名して実機向けにビルドし、接続したiPhoneに入れて起動します。 |
+| `make ios-archive` | App Storeに提出するReleaseのアーカイブを`build/ios/LCMP.xcarchive`に作り、そのバージョンを表示します。 |
+| `make ios-upload` | `make ios-archive`のアーカイブを、配布用に署名し直してApp Store Connectへ送ります。 |
 
-- 上書きできる変数は`IOS_CONFIGURATION`（Debug／Release）、`IOS_SIMULATOR`（シミュレータの名前、既定は`iPhone 18 Pro Max`）、`IOS_DEVICE`（実機の名前か識別子）です。
+- 上書きできる変数は`IOS_CONFIGURATION`（Debug／Release）、`IOS_SIMULATOR`（シミュレータの名前、既定は`iPhone 18 Pro Max`）、`IOS_DEVICE`（実機の名前か識別子）、`IOS_ARCHIVE`（アーカイブの出力先）です。
 - 実機向けの署名には、Git管理外の`iOS/Local.xcconfig`に`DEVELOPMENT_TEAM`（Team ID）を書きます。ないときはシミュレータ向けにだけビルドできます。
 - 識別子は`iOS/Shared.xcconfig`の`LCMP_BUNDLE_ID`（既定は`io.github.boyaki-machine.LC-Music-Player`、macOS版と同じ）から作ります。
 
@@ -323,6 +325,28 @@ iPhone版は`iOS/LCMPiOS.xcodeproj`でビルドします。macOS版と同じSwif
   ```
 - バージョンはmacOS版と同じく、ビルドの最後の段（`scripts/ios_resources.py`）がGitの履歴から決めてInfo.plistへ書き込みます。同じ段で、LCMPのLICENSE/NOTICEと依存の索引（空）をアプリへ入れます。ウィジェット拡張には同じバージョンだけを書き込みます（`--version-only`）。
 - アイコンは`scripts/render-app-icon.swift --ios`で、macOS版と同じ図形から角の丸みと余白のない1024pxの画像を描きます。
+### App Storeへの提出
+
+iPhone版は、個人のApple Developer Programのチームで、無料のアプリとしてApp Storeに提出します。
+
+- **必要なもの**
+  - Xcode 26以降（iOS 26 SDK以降でビルドしたものだけがアップロードできます）
+  - `iOS/Local.xcconfig`の有料のチームのTeam ID
+  - Xcode › Settings… › AccountsでサインインしたApple Account
+- **提出の手順**
+  1. `develop`か、そこから作ったブランチでビルドします。バージョンはGitの履歴から決まり、App Store Connectは同じバージョンのビルドを2度受け付けないので、提出のたびに新しいコミットからビルドします。
+  2. `make ios-archive`でアーカイブを作り、表示されたバージョンを確かめます。
+  3. `make ios-upload`でApp Store Connectへ送ります。Xcodeの自動署名が配布用の証明書とプロファイルを用意します。設定は`iOS/ExportOptions.plist`です（Team IDは書かず、バージョンとビルド番号はXcodeに変えさせません）。
+  4. 処理が終わると、App Store Connectの「TestFlight」にビルドが出ます。TestFlightで実機を確かめてから、審査に提出します。
+- Xcodeの画面で行う場合は、宛先を「Any iOS Device」にして Product › Archive を選び、Organizerの「Distribute App」→「App Store Connect」で送ります。
+- **申告の設定**（`scripts/test_ios_store.py`で検査します）
+  - アプリとウィジェットには、プライバシーマニフェスト`PrivacyInfo.xcprivacy`を入れます。トラッキングはなく、集めるデータもありません。
+  - 理由の申告が必要なAPI（UserDefaults・ファイルの日付・起動からの時刻など）を新しく使ったときや、使わなくなったときは、マニフェストを直します。直さないとテストが失敗します。
+  - Info.plistの`ITSAppUsesNonExemptEncryption`は`NO`です。暗号の機能（CryptoKit）はハッシュの計算にしか使わないため、輸出規制の質問の対象外です。
+- **プライバシーポリシー**：[プライバシーポリシー](privacy-policy.md)のGitHub上のURLを、App Store ConnectのプライバシーポリシーのURLとして登録しています。場所を変えるとURLが切れるので、ファイルを移動しません。
+
+### シミュレータで確かめるための起動引数
+
 - DEBUGビルドには、シミュレータで確かめるための起動引数があります。`-LCMPImportPaths <パス>,<パス>`はMac上のファイル・フォルダを選択画面なしで現在のリストに登録し、`-LCMPAutoplay YES`で再生を始めます。`-LCMPOrientation landscape`は横置きに（`-LCMPOrientationDelay <秒>`で回すまでの待ち時間）、`-LCMPExtension NO`は拡張画面を閉じた状態で起動します。`-LCMPControlSurfaces YES`はウィジェットの見本を各状態で並べます。
 
 ## ライセンス情報の更新
