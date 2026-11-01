@@ -75,7 +75,7 @@ LCMP_TEST_AUDIO_OUTPUT=1 ./scripts/swift.sh test --no-parallel
 make ios-test
 ```
 
-- 1つ目は通常のテストで、音声を出力しません。scriptsのPythonのテスト（Pythonの版・ライセンス索引・バージョン・アイコン・DMG・署名・iPhone版のリソース）も実行し、テストが`~/Library/Preferences`に設定ファイルを残していないことも確かめます。
+- 1つ目は通常のテストで、音声を出力しません。scriptsのPythonのテスト（Pythonの版・ライセンス索引・バージョン・アイコン・DMG・署名・iPhone版のリソースとApp Storeの申告）も実行し、テストが`~/Library/Preferences`に設定ファイルを残していないことも確かめます。
 - 2つ目は、既定の出力先へ小さいテスト音を送る実再生のテストです。`--no-parallel`を外して並列に実行しても成功します。
 - 3つ目は、共用モジュールのテストをiOSシミュレータで実行します。iPhoneのアプリの指の操作のテストは`make ios-uitest`です。
 - 詳しくは[ビルド・配置手順のテスト](docs/build-and-deploy.md#テスト)を参照してください。
@@ -91,7 +91,7 @@ make ios-test
 | `assets/` | アプリのアイコンとインストーラーの背景（scriptsで図形から描いた生成物） |
 | `scripts/` | Swiftの実行、アプリの作成・署名、バージョンの決定、インストーラーの作成、アイコンと背景の描画、テスト音源の生成と、それらのテスト。拍とボーカルの正解を記録する道具（`beat-annotator.html`） |
 | `docs/` | ビルド・配置手順と設計書（[文書一覧](docs/README.md)）、READMEの画像 |
-| `Makefile` | ビルド、ZIPの作成、インストーラー、テスト、iPhone版のビルドと導入の入口 |
+| `Makefile` | ビルド、ZIPの作成、インストーラー、テスト、iPhone版のビルド・導入・App Storeへの提出の入口 |
 | `Package.swift` | SwiftPMの定義（パッケージの依存はありません） |
 | `AGENTS.md`／`CLAUDE.md` | コーディングエージェント向けの作業指示 |
 
@@ -117,6 +117,10 @@ make ios-test
 - `main`への統合、タグ付け、pushは、開発者の指示があるときだけ行います。pushするときは、`main`・`develop`とタグを`origin`へ送ります。
 
 設計書には合意した仕様と実装済みの設計を記載します。作業の進め方と記録の扱いは[AGENTS.md](AGENTS.md)に定めています。
+
+## プライバシー
+
+LCMPは利用者の情報を集めず、外部へ送りません。詳しくは[プライバシーポリシー](docs/privacy-policy.md)を参照してください。
 
 ## ライセンス
 

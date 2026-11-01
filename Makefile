@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := help
 # SwiftPM products are shared by these targets, even with make -j.
 .NOTPARALLEL:
-.PHONY: help python-check release debug archive dmg test ios-build ios-test ios-uitest ios-sim ios-device
+.PHONY: help python-check release debug archive dmg test ios-build ios-test ios-uitest ios-sim ios-device ios-signing-check ios-archive ios-upload
 
 PYTHON ?= python3
 RELEASE_OUTPUT ?= build/release/LCMP.app
@@ -16,6 +16,7 @@ IOS_DEVICE ?=
 IOS_XCODEBUILD = xcodebuild -project iOS/LCMPiOS.xcodeproj -scheme LCMPiOS -configuration $(IOS_CONFIGURATION)
 IOS_SIM_APP = build/ios/app/Build/Products/$(IOS_CONFIGURATION)-iphonesimulator/LCMP.app
 IOS_DEVICE_APP = build/ios/device/Build/Products/$(IOS_CONFIGURATION)-iphoneos/LCMP.app
+IOS_ARCHIVE ?= build/ios/LCMP.xcarchive
 
 help:
 	@printf '%s\n' 'make release  Release app: $(RELEASE_OUTPUT)' \
@@ -28,8 +29,10 @@ help:
 	  'make ios-uitest  Touch tests of the iPhone app on the simulator' \
 	  'make ios-sim     Build, install and launch on the simulator' \
 	  'make ios-device  Build, sign, install and launch on a connected iPhone' \
+	  'make ios-archive Release archive of the iPhone app for the App Store: $(IOS_ARCHIVE)' \
+	  'make ios-upload  Upload the archive to App Store Connect' \
 	  'Overrides: PYTHON, RELEASE_OUTPUT, DEBUG_OUTPUT, ARCHIVE, DMG_OUTPUT, DMG_APP,' \
-	  '           IOS_CONFIGURATION, IOS_SIMULATOR, IOS_DEVICE'
+	  '           IOS_CONFIGURATION, IOS_SIMULATOR, IOS_DEVICE, IOS_ARCHIVE'
 
 # The macOS build and test scripts need a supported Python; macOS's /usr/bin/python3 is too old.
 python-check:
@@ -61,6 +64,7 @@ test: python-check
 	$(PYTHON) scripts/test_build_dmg.py
 	$(PYTHON) scripts/test_signing.py
 	$(PYTHON) scripts/test_ios_resources.py
+	$(PYTHON) scripts/test_ios_store.py
 	@# Tests must not leave UserDefaults suite plists behind.
 	@set -eu; \
 	  count() { find "$$HOME/Library/Preferences" -maxdepth 1 -name 'lcmp-*.plist' 2>/dev/null | wc -l | tr -d ' '; }; \
@@ -88,11 +92,26 @@ ios-sim: ios-build
 	xcrun simctl install "$(IOS_SIMULATOR)" "$(IOS_SIM_APP)"
 	xcrun simctl launch "$(IOS_SIMULATOR)" "$$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$(IOS_SIM_APP)/Info.plist")"
 
-ios-device:
+ios-signing-check:
 	@test -f iOS/Local.xcconfig || { printf '%s\n' 'Create iOS/Local.xcconfig with DEVELOPMENT_TEAM (see docs/build-and-deploy.md).' >&2; exit 1; }
 	@grep -Eq '^[[:space:]]*DEVELOPMENT_TEAM[[:space:]]*=[[:space:]]*[A-Z0-9]{10}[[:space:]]*$$' iOS/Local.xcconfig || { printf '%s\n' 'DEVELOPMENT_TEAM in iOS/Local.xcconfig must be the 10-character team ID, not an e-mail address or a name.' >&2; exit 1; }
+
+ios-device: ios-signing-check
 	@# Building for the connected iPhone lets Xcode register it with the team for the provisioning profile.
 	udid=$$($(PYTHON) scripts/ios_install.py udid "$(IOS_DEVICE)") && \
 	  $(IOS_XCODEBUILD) -destination "platform=iOS,id=$$udid" -derivedDataPath build/ios/device \
 	    -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 	$(PYTHON) scripts/ios_install.py install "$(IOS_DEVICE_APP)" "$(IOS_DEVICE)"
+
+# The archive is always Release. Xcode signs it for distribution when it is exported.
+ios-archive: ios-signing-check
+	rm -rf "$(IOS_ARCHIVE)"
+	xcodebuild -project iOS/LCMPiOS.xcodeproj -scheme LCMPiOS -configuration Release -destination 'generic/platform=iOS' \
+	  -derivedDataPath build/ios/archive -archivePath "$(IOS_ARCHIVE)" -allowProvisioningUpdates archive
+	@/usr/libexec/PlistBuddy -c 'Print :ApplicationProperties:CFBundleShortVersionString' "$(IOS_ARCHIVE)/Info.plist"
+
+# Uploads with the Apple Account signed in to Xcode (Settings > Accounts). The build then appears in App Store Connect.
+ios-upload: ios-signing-check
+	@test -d "$(IOS_ARCHIVE)" || { printf '%s\n' 'Run make ios-archive first.' >&2; exit 1; }
+	xcodebuild -exportArchive -archivePath "$(IOS_ARCHIVE)" -exportOptionsPlist iOS/ExportOptions.plist \
+	  -exportPath build/ios/export -allowProvisioningUpdates
