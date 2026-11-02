@@ -44,6 +44,9 @@ import AudioProcessingCore
     let farPriority: TaskPriority = .background
     #endif
     private var energyObservers: [any NSObjectProtocol] = []
+    /// In the background the sweep measures levels only; the tracks measured meanwhile are mapped back in the foreground.
+    private(set) var isInBackground = false
+    private var unmapped: Set<UUID> = []
     private var publishedCurrent: UUID?
     private var currentURL: URL?
     private var currentLease: FileLease?
@@ -124,7 +127,7 @@ import AudioProcessingCore
             outputObserver = PlaylistOutputObserver { [weak self] in self?.outputChanged() }
         }
         guard newProfile != nil else { retireActive(); return }
-        let desired = pending.first ?? preparedNextCandidate
+        let desired = pending.first ?? unmappedCandidate ?? preparedNextCandidate
         if let active, active.trackID != desired?.track.id || active.reference != desired?.track.reference || active.profile != profile {
             retireActive()
         }
@@ -135,6 +138,11 @@ import AudioProcessingCore
     }
 
     private var pending: [Candidate] { candidates.filter { attempts[$0.track.id] == nil } }
+    /// A measured track whose map was left out in the background. None while still in the background.
+    private var unmappedCandidate: Candidate? {
+        guard !isInBackground else { return nil }
+        return candidates.first { unmapped.contains($0.track.id) && attempts[$0.track.id]?.source != nil }
+    }
     private var preparedNextCandidate: Candidate? {
         guard let nextCandidate, attempts[nextCandidate.track.id]?.source != nil else { return nil }
         return nextCandidate
@@ -172,6 +180,16 @@ import AudioProcessingCore
         active = nil; task = nil
     }
 
+    /// Called when the app moves to or from the background.
+    func backgroundChanged(_ background: Bool) {
+        guard isInBackground != background else { return }
+        isInBackground = background
+        guard !suspended, !background, let mapping = unmappedCandidate, pending.isEmpty else { return }
+        // A prefix held for the next track gives way to the maps left out in the background.
+        if let active, active.trackID != mapping.track.id { retireActive() }
+        pump()
+    }
+
     /// Called when Low Power Mode or the thermal state changes.
     func energyStateChanged() { if !suspended { pump() } }
 
@@ -186,11 +204,13 @@ import AudioProcessingCore
     }
 
     private func pump() {
-        guard !suspended, active == nil, let profile, let candidate = pending.first ?? preparedNextCandidate else { return }
+        guard !suspended, active == nil, let profile, let candidate = pending.first ?? unmappedCandidate ?? preparedNextCandidate else { return }
         let near = candidate.track.id == currentID || candidate.track.id == nextCandidate?.track.id || candidate.track.id == previousID
         if !near, isEnergyConstrained() { observeEnergyState(); return }
         let measure = attempts[candidate.track.id] == nil
-        let prefix = candidate.entry == nextCandidate?.entry
+        let mapOnly = !measure && !isInBackground && unmapped.contains(candidate.track.id)
+        // Mapping alone keeps no prefix: the next track's is prepared again once the maps are done.
+        let prefix = candidate.entry == nextCandidate?.entry && !mapOnly
         let request = NextPreparation(entry: candidate.entry, reference: candidate.track.reference, trackID: candidate.track.id)
         request.profile = profile
         if !measure, let metrics = nextMetrics, metrics.0 == candidate.track.id {
@@ -203,6 +223,7 @@ import AudioProcessingCore
         // The current track and its neighbours run at utility, behind a listener's request. The rest of
         // the sweep runs at background, on the efficiency cores: about a sixth of the energy, six times slower.
         task = Task(priority: near ? .utility : farPriority) { [weak self] in
+            var mapped = false
             do {
                 await previous?.value
                 try request.cancellation.check()
@@ -216,9 +237,13 @@ import AudioProcessingCore
                 if measure {
                     request.levels = try await worker.measureLevels(url, profile: profile, cancellation: request.cancellation, ownerID: candidate.track.id)
                     request.peak = request.levels?.sourcePeak
-                    // A new level scan maps the track as well; a track measured before track maps existed, or
-                    // with other analyzers, is scanned for its map once. A track that cannot be mapped still counts as measured.
+                }
+                // A new level scan maps the track as well; a track measured before track maps existed, or
+                // with other analyzers, is scanned for its map once. A track that cannot be mapped still counts as measured.
+                // In the background the map waits for the foreground.
+                if (measure || mapOnly), self?.isInBackground == false {
                     _ = try? await worker.trackMap(url, cancellation: request.cancellation, ownerID: candidate.track.id)
+                    mapped = true
                 }
                 try request.cancellation.check()
                 guard let self else { return }
@@ -226,18 +251,20 @@ import AudioProcessingCore
                 if let levels = request.levels { try levels.source.validate() }
                 guard self.active === request else { return } // A foreground consumer owns it now.
                 if measure { self.attempts[candidate.track.id] = Attempt(reference: request.reference, profile: profile, source: request.levels?.source) }
+                if mapped { self.unmapped.remove(candidate.track.id) } else if measure { self.unmapped.insert(candidate.track.id) }
                 if let levels = request.levels {
                     if candidate.track.id == self.nextCandidate?.track.id { self.nextMetrics = (candidate.track.id, levels) }
                     if candidate.track.id == self.currentID { self.publishedCurrent = candidate.track.id }
                     self.onMeasured?(candidate.track.id, levels)
                 }
-                self.finish(request, retainPrefix: prefix && self.pending.isEmpty)
+                self.finish(request, retainPrefix: prefix && self.pending.isEmpty && self.unmappedCandidate == nil)
             } catch {
                 request.failure = error
                 guard let self, self.active === request else { return }
                 // Measured for an output that changed meanwhile: the sweep starts over for the output it has now.
                 if (error as? AudioProcessingFailure) == .outputChanged { self.outputChanged(); return }
-                if !(error is CancellationError) {
+                if mapOnly { if !(error is CancellationError) { self.unmapped.remove(candidate.track.id) } }
+                else if !(error is CancellationError) {
                     self.attempts[candidate.track.id] = Attempt(reference: request.reference, profile: profile, source: nil)
                 }
                 self.finish(request, retainPrefix: false)

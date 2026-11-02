@@ -67,6 +67,33 @@ private struct MapFixture {
         #expect(beatsMap.durationMilliseconds == 12_000 && map.vocals.durationMilliseconds == 12_000)
     }
 
+    /// In the background a scan measures the levels without the map, and rests after each chunk as long as the
+    /// chunk took, so that it uses half a core. A listener's request keeps its pace; the foreground does not rest.
+    @Test func backgroundScansLeaveOutTheMapAndRest() async throws {
+        let f = try MapFixture(); defer { f.cleanup() }
+        let url = try f.kicks(), other = try f.kicks("other.wav"), third = try f.kicks("third.wav")
+        let processor = AudioPreprocessor(cache: f.configuration)
+        processor.setBackground(true)
+        _ = try await Task(priority: .utility) { try await processor.measureLevels(url, profile: profile()) }.value
+        var stats = await processor.statistics()
+        #expect(stats.pacedWorkSeconds > 0)
+        #expect(abs(stats.restSeconds - stats.pacedWorkSeconds * (1 - AudioPreprocessor.backgroundShare) / AudioPreprocessor.backgroundShare) < 1e-9)
+        let rested = stats.restSeconds
+        _ = try await Task(priority: .userInitiated) { try await processor.measureLevels(other, profile: profile()) }.value
+        stats = await processor.statistics()
+        #expect(stats.restSeconds == rested)
+
+        processor.setBackground(false)
+        _ = try await Task(priority: .utility) { try await processor.measureLevels(third, profile: profile()) }.value
+        _ = try await processor.trackMap(third)
+        stats = await processor.statistics()
+        #expect(stats.restSeconds == rested && stats.mapScans == 0)
+        // The maps of the background scans are made by scans of their own.
+        _ = try await processor.trackMap(url); _ = try await processor.trackMap(other)
+        stats = await processor.statistics()
+        #expect(stats.mapScans == 2)
+    }
+
     /// Another detector maps the track again from a scan of its own, and keeps the measured levels.
     @Test func anotherDetectorScansOnlyTheBeats() async throws {
         let f = try MapFixture(); defer { f.cleanup() }

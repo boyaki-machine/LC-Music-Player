@@ -13,10 +13,13 @@ public protocol AudioPreprocessing: Sendable {
     func reconcileCacheOwners(_ owners: Set<UUID>) async
     /// A listener now waits for the work this cancellation belongs to: what is left runs at user-initiated QoS.
     func promote(_ cancellation: PreparationCancellation)
+    /// The app moved to or from the background, where scans make no track maps and keep to a share of a core.
+    func setBackground(_ background: Bool)
 }
 
 public extension AudioPreprocessing {
     func promote(_ cancellation: PreparationCancellation) {}
+    func setBackground(_ background: Bool) {}
     /// Workers that do not map tracks leave the visualizations to estimate the beat while playing.
     func trackMap(_ url: URL, cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackMap {
         throw PreprocessingFailure.invalidAudio

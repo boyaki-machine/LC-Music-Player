@@ -42,6 +42,23 @@ public final class AudioPreprocessor: AudioPreprocessing {
             for job in self.state.mapJobs.values where job.waiters.contains(where: { $0.cancellation === cancellation }) { job.raise(.userInitiated) }
         }
     }
+    /// The share of one core that scans may use while the app is in the background. iOS ends an app in the
+    /// background that uses 80% of a core over 60 seconds, even one that plays music.
+    public static let backgroundShare = 0.5
+    /// In the background, new scans leave out the track map, and work below user-initiated QoS rests after each
+    /// chunk, so that it uses at most `backgroundShare` of a core. A listener's request keeps its pace.
+    public func setBackground(_ background: Bool) {
+        queue.async(qos: .userInitiated) { self.state.background = background }
+    }
+    /// Runs the next chunk of a scan whose last chunk took `worked` nanoseconds of its thread's CPU time.
+    private func scheduleNext(_ qos: DispatchQoS, worked: UInt64, _ next: @escaping @Sendable () -> Void) {
+        guard state.background, qos.qosClass.rawValue.rawValue < DispatchQoS.QoSClass.userInitiated.rawValue.rawValue else {
+            queue.async(qos: qos, flags: .enforceQoS, execute: next); return
+        }
+        let rest = Double(worked) / 1e9 * (1 - Self.backgroundShare) / Self.backgroundShare
+        state.statistics.pacedWorkSeconds += Double(worked) / 1e9; state.statistics.restSeconds += rest
+        queue.asyncAfter(deadline: .now() + rest, qos: qos, flags: .enforceQoS, execute: next)
+    }
     /// The QoS class a request from the current task runs at, for tests.
     func executionQoS() async -> qos_class_t {
         let qos = Self.requestedQoS
@@ -77,7 +94,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
                         }
                         self.state.statistics.cacheMisses += 1
                         let scan = try LevelScan(url: url, profile: profile, cancellation: .init(), collectTimings: self.state.collectTimings,
-                                                 maps: self.state.maps)
+                                                 maps: self.state.background ? nil : self.state.maps)
                         let job = LevelJob(scan: scan, request: request, waiters: [waiter], qos: qos)
                         self.state.levels[key] = job; self.state.statistics.levelScans += 1
                         self.stepLevels(job, key: key)
@@ -87,6 +104,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
         } onCancel: { cancellation.cancel() }
     }
     private func stepLevels(_ job: LevelJob, key: MeasurementJobKey) {
+        let started = threadCPUTime()
         do {
             guard job.isActive else { throw CancellationError() }
             if let result = try job.scan.read(checkActive: { guard job.isActive else { throw CancellationError() } }) {
@@ -113,7 +131,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
                     for waiter in job.mapWaiters { waiter.finish(.success(map)) }
                 } else { for waiter in job.mapWaiters { waiter.finish(.failure(PreprocessingFailure.invalidAudio)) } }
                 for waiter in job.waiters { waiter.finish(.success(result)) }
-            } else { queue.async(qos: job.qos, flags: .enforceQoS) { self.stepLevels(job, key: key) } }
+            } else { scheduleNext(job.qos, worked: threadCPUTime() - started) { self.stepLevels(job, key: key) } }
         } catch {
             job.scan.close(); state.levels[key] = nil
             for waiter in job.waiters { waiter.finish(.failure(error)) }
@@ -156,6 +174,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
         } onCancel: { cancellation.cancel() }
     }
     private func stepMap(_ job: MapJob, key: MeasurementJobKey) {
+        let started = threadCPUTime()
         do {
             guard job.isActive else { throw CancellationError() }
             if let map = try job.scan.read() {
@@ -163,7 +182,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
                 job.scan.close(); state.mapJobs[key] = nil
                 saveMap(map, url: key.source.url, owners: job.waiters.map(\.owner), isCurrent: { job.isActive })
                 for waiter in job.waiters { waiter.finish(.success(map)) }
-            } else { queue.async(qos: job.qos, flags: .enforceQoS) { self.stepMap(job, key: key) } }
+            } else { scheduleNext(job.qos, worked: threadCPUTime() - started) { self.stepMap(job, key: key) } }
         } catch {
             job.scan.close(); state.mapJobs[key] = nil
             for waiter in job.waiters { waiter.finish(.failure(error)) }
@@ -258,6 +277,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
         } onCancel: { cancellation.cancel() }
     }
     private func step(_ job: PeakJob, key: MeasurementJobKey) {
+        let started = threadCPUTime()
         do {
             guard job.waiters.contains(where: { (try? $0.cancellation.check()) != nil }) else { throw CancellationError() }
             if let result = try job.scan.read() {
@@ -272,7 +292,7 @@ public final class AudioPreprocessor: AudioPreprocessing {
                 }
                 job.scan.close(); state.peaks[key] = nil
                 for waiter in job.waiters { waiter.finish(.success(result)) }
-            } else { queue.async(qos: job.qos, flags: .enforceQoS) { self.step(job, key: key) } }
+            } else { scheduleNext(job.qos, worked: threadCPUTime() - started) { self.step(job, key: key) } }
         } catch {
             job.scan.close(); state.peaks[key] = nil
             for waiter in job.waiters { waiter.finish(.failure(error)) }
@@ -290,7 +310,11 @@ public struct MeasurementStatistics: Sendable {
     public internal(set) var cacheWriteFailures = 0
     public internal(set) var measurementWorkSeconds = 0.0
     public internal(set) var nativePeakWorkSeconds = 0.0
+    /// CPU time of the chunks that rested in the background, and the rests after them.
+    public internal(set) var pacedWorkSeconds = 0.0
+    public internal(set) var restSeconds = 0.0
 }
+private func threadCPUTime() -> UInt64 { clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) }
 private struct MeasurementJobKey: Hashable {
     let source: SourceFingerprint
     let rate: Double?
@@ -344,6 +368,8 @@ private final class PreprocessingState: @unchecked Sendable {
     let collectTimings: Bool
     let maps: TrackAnalyzers
     var statistics = MeasurementStatistics()
+    /// The app is in the background (`AudioPreprocessor.setBackground`).
+    var background = false
     var levels: [MeasurementJobKey: LevelJob] = [:]
     var peaks: [MeasurementJobKey: PeakJob] = [:]
     var mapJobs: [MeasurementJobKey: MapJob] = [:]

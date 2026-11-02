@@ -107,6 +107,8 @@ struct LCMPiOSApp: App {
         let visible = phase == .active
         if !visible { presentation.closeOverlays() }
         presentation.visualizationVisible = visible
+        // iOS ends an app that uses most of a core in the background, even one that plays music.
+        library.isInBackground = !visible
         let configuration = visible ? LCMPDefaultGEQ.configuration : nil
         if playback.analysisConfiguration != configuration { playback.configureAnalysis(configuration) }
     }
