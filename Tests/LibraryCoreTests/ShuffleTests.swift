@@ -252,9 +252,9 @@ private func cycleOrder(_ list: MusicPlaylist, first: UUID? = nil, using random:
         }
         let entries = doc.playlists[0].entries
         doc.currentPlaylistID = doc.playlists[0].id; doc.currentEntryID = entries[1].id
-        let ranked = PlaylistPreprocessing.ordered(doc, playing: true, adjacent: (entries[4], entries[3])).map(\.entry)
+        let ranked = PlaylistPreprocessing.ordered(doc, adjacent: (entries[4], entries[3])).map(\.entry)
         #expect(Array(ranked.prefix(3)) == [entries[1].id, entries[4].id, entries[3].id])
-        let plain = PlaylistPreprocessing.ordered(doc, playing: true).map(\.entry)
+        let plain = PlaylistPreprocessing.ordered(doc).map(\.entry)
         #expect(Array(plain.prefix(3)) == [entries[1].id, entries[2].id, entries[0].id])
     }
 

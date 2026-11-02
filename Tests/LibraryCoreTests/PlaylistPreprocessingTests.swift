@@ -73,13 +73,95 @@ private actor PlaylistWorker: AudioPreprocessing {
         doc.playlists[0].entries.append(PlaylistEntry(trackID: doc.tracks[index].id))
         let other = MusicPlaylist(name: "other", entries: [PlaylistEntry(trackID: doc.tracks[1].id)])
         doc.playlists.append(other)
-        let order = PlaylistPreprocessing.ordered(doc, playing: true).map(\.track.id)
+        let order = PlaylistPreprocessing.ordered(doc).map(\.track.id)
         var expected = [index]
         if index < 4 { expected.append(index + 1) }
         if index > 0 { expected.append(index - 1) }
         expected += (0..<5).filter { !expected.contains($0) }
         #expect(order == expected.map { doc.tracks[$0].id })
-        #expect(PlaylistPreprocessing.ordered(doc, playing: false).map(\.track.id) == doc.tracks.map(\.id))
+        // Without a current entry, the list's order.
+        doc.currentEntryID = nil
+        #expect(PlaylistPreprocessing.ordered(doc).map(\.track.id) == doc.tracks.map(\.id))
+    }
+
+    /// A track chosen while nothing plays is measured first, then the ones play would move to, near the
+    /// listener's priority: pressing play then waits for no measurement.
+    @Test func aTrackChosenWhileStoppedIsMeasuredFirstWithItsNeighbours() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        var doc = try playlistFixture(f.root)
+        doc.currentEntryID = nil
+        let store = MemoryStore(), worker = PlaylistWorker()
+        store.document = doc
+        let first = doc.tracks[0].reference.lastKnownURL
+        await worker.block(first)
+        let model = LibraryController(playback: PlaybackController(fileAccess: NoFileAccess()), store: store, references: TestReferences(),
+                                      preprocessingEnabled: true, playlistPreprocessingEnabled: true,
+                                      preferences: MemoryPreferences(), preprocessor: worker)
+        defer { model.shutdown() }
+        try await sweepWait { await worker.starts == [first] }
+        let list = try #require(model.document.currentPlaylistID)
+        model.clickEntry(doc.playlists[0].entries[3].id, in: list, clickCount: 1)
+        try await sweepWait { await worker.starts.count >= 4 }
+        #expect(model.playback.state == .ready && model.currentIndex == 3)
+        let near = [3, 4, 2].map { doc.tracks[$0].reference.lastKnownURL }
+        #expect(Array(await worker.starts.prefix(4)) == [first] + near)
+        let priorities = await worker.priorities
+        #expect(near.allSatisfy { priorities[$0] == .utility })
+    }
+
+    /// Paused or stopped, the sweep measures the current track and its neighbours only; the rest waits.
+    @Test func aSweepOfTheNeighboursStopsBeforeTheRest() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        var doc = try playlistFixture(f.root)
+        doc.currentEntryID = doc.playlists[0].entries[2].id
+        let worker = PlaylistWorker(), playback = PlaybackController(makeBackend: { _ in TestBackend() })
+        let queue = PlaylistPreprocessing(references: TestReferences(), worker: worker, profile: { try MeasurementProfile(sampleRate: 48000, channels: 2) })
+        queue.farPriority = .utility
+        let urls = doc.tracks.map { $0.reference.lastKnownURL }
+        queue.update(doc, playback: playback, after: nil, nearOnly: true)
+        try await sweepWait { await worker.starts.count == 3 && queue.active == nil }
+        await queue.retirement?.value
+        #expect(queue.active == nil)
+        #expect(await worker.starts == [2, 3, 1].map { urls[$0] })
+        queue.update(doc, playback: playback, after: nil)
+        try await sweepWait { await worker.starts.count == 5 && queue.active == nil }
+        #expect(Array(await worker.starts.suffix(2)) == [0, 4].map { urls[$0] })
+        queue.suspend()
+    }
+
+    /// Stopped, the neighbours of the current track are still measured, the far tracks are not, and
+    /// choosing a track goes on with the rest.
+    @Test func stoppingMeasuresOnlyTheNeighbours() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        var doc = try playlistFixture(f.root)
+        doc.currentEntryID = nil
+        let store = MemoryStore(), worker = PlaylistWorker()
+        store.document = doc
+        let urls = doc.tracks.map { $0.reference.lastKnownURL }
+        await worker.block(urls[0])
+        let model = LibraryController(playback: PlaybackController(fileAccess: NoFileAccess()), store: store, references: TestReferences(),
+                                      preprocessingEnabled: true, playlistPreprocessingEnabled: true,
+                                      preferences: MemoryPreferences(), preprocessor: worker)
+        defer { model.shutdown() }
+        try await sweepWait { await worker.starts == [urls[0]] }
+        // The next track is held, so it is still unmeasured when playback stops.
+        await worker.block(urls[4])
+        let list = try #require(model.document.currentPlaylistID)
+        model.clickEntry(doc.playlists[0].entries[3].id, in: list, clickCount: 1)
+        try await sweepWait { await worker.starts.last == urls[4] }
+        model.stop()
+        #expect(model.playback.state == .stopped && model.currentIndex == 3)
+        let before = await worker.starts.count
+        try await sweepWait { await worker.starts.count > before }
+        #expect(await worker.starts.last == urls[4])
+        await worker.release(urls[4])
+        try await sweepWait { await worker.starts.last == urls[2] }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await worker.starts.last == urls[2])
+        #expect(!(await worker.starts.contains(urls[1])))
+        await worker.release(urls[0])
+        model.clickEntry(doc.playlists[0].entries[2].id, in: list, clickCount: 1)
+        try await sweepWait { await worker.starts.contains(urls[1]) }
     }
 
     @Test func serialSweepSkipsFailuresAndFillsOtherPlaylistsOnce() async throws {
@@ -438,8 +520,12 @@ private actor PlaylistWorker: AudioPreprocessing {
         if action == "other" { model.selectEntry(entries[1].id, in: list, autoPlay: true) }
         await worker.release(targetURL)
         try await sweepWait { !model.isPreparing }
-        if action == "play" || action == "off" {
+        if action == "play" || action == "off" || action == "repair" || action == "settings" {
+            // A repaired track or a changed setting prepares the choice again: it still plays.
             #expect(model.currentIndex == 2 && playback.state == .playing)
+        } else if action == "pause" {
+            // Pausing keeps the chosen track chosen, without playing it.
+            #expect(model.currentIndex == 2 && playback.state == .ready)
         } else if action == "natural" {
             #expect(model.currentEntry?.id == entries[2].id && playback.state == .playing)
         } else if action == "other" {
@@ -448,7 +534,6 @@ private actor PlaylistWorker: AudioPreprocessing {
             #expect(model.currentIndex == 0)
             if action == "saveFailure" { #expect(model.error != nil && playback.state == .playing) }
             if action == "pause" { #expect(playback.state == .paused) }
-            if action == "settings" { #expect(playback.state == .playing) }
         }
         if action == "play" || action == "natural" { #expect((await worker.starts).filter { $0 == targetURL }.count == 1) }
         model.stop(); try await sweepWait { refs.scopes.active == 0 }

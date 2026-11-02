@@ -102,13 +102,16 @@ public final class PlaybackController {
         }
     }
 
+    /// Holds a track without reading it. `access` is the library's access to the file, kept so that moving
+    /// within it before it plays needs none of its own (a Music library song or a provider's file has none).
     @discardableResult
-    public func selectMetadata(url: URL, duration: Double, supportsSeeking: Bool,
+    public func selectMetadata(url: URL, duration: Double, supportsSeeking: Bool, using access: FileLease? = nil,
                                committing: () throws -> Void = {}) -> Bool {
         do {
             guard duration.isFinite, duration > 0 else { throw PlaybackError.inaccessibleFile }
             try committing()
             endRun(retiring: true)
+            lease = access
             backend = AudioEngineBackend(url: url, duration: duration, supportsSeeking: supportsSeeking)
             backend?.volume = outputVolume
             backend?.bassEnhancement = bassEnhancement

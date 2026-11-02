@@ -105,7 +105,8 @@
 
 ### ロック画面の操作
 
-- `MPRemoteCommandCenter`の再生・一時停止・切り替え・停止・次の曲・前の曲を、LibraryControllerの操作へつなぐ。再生位置の変更と早送り・早戻しは無効にする。
+- `MPRemoteCommandCenter`の再生・一時停止・切り替え・停止・次の曲・前の曲を、LibraryControllerの操作へつなぐ。再生と切り替えは`LibraryController.canPlay`で受け付け、起動直後の先読みが確定する前や失敗した後でも、現在の曲を準備して再生する。再生位置の変更と早送り・早戻しは無効にする。
+- バックグラウンドへの移行（`scenePhase`がactive以外、画面のロックを含む）で、現在の曲の再生位置を保存する。アプリの切り替え画面からの終了で届く`UIApplication.willTerminateNotification`では、Macの終了処理と同じく`LibraryController.shutdown()`を呼んで保存する。iOSはサスペンド中の終了・CPUやメモリの制限による終了を通知しないので、再生中はライブラリが5秒ごとにも保存する（[ライブラリの実装設計](03_library-implementation.md)）。
 - `MPNowPlayingInfoCenter`には、タイトル「LC Music Player」、アートワークとしてアプリのアイコン、再生速度（再生中1・一時停止0）だけを渡す。長さと経過時間は渡さず、経過時間のバーを出さない。アプリのアイコンは画像として読めないため、同じ画像をアセット`NowPlayingArtwork`として持つ。
 
 ### ウィジェット

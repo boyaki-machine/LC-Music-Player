@@ -249,7 +249,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(chooseFile), #selector(importPlaylist): return !presentation.selectingFile && library.canEdit
-        case #selector(playPause): return playback.canPlay
+        case #selector(playPause): return library.canPlay
         case #selector(stopPlayback): return playback.canStop || library.isPreparing
         default: return true
         }

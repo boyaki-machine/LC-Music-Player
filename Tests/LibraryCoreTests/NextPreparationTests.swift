@@ -94,14 +94,15 @@ private actor HeldPreprocessor: AudioPreprocessing {
         if action == "stop" {
             try await wait { !model.isPreparing }
             #expect(model.currentIndex == 0 && playback.state != .playing)
-        } else if action == "settings" {
-            // The changed setting replaces the pending move: the current track plays on with it.
-            try await wait { !model.isPreparing }
-            #expect(model.currentIndex == 0 && playback.state == .playing)
+        } else if ["settings", "repair"].contains(action) {
+            // The pending move survives: the next track is prepared again with the new setting or file, and plays.
+            try await wait { model.currentIndex == 1 && playback.state == .playing && !model.isPreparing }
+            #expect(playback.normalizationPlan != nil)
+            if action == "repair" { #expect(playback.selectedURL?.lastPathComponent == "repaired.wav") }
         } else if ["saveFailure", "measurementFailure"].contains(action) {
             try await wait { !model.isPreparing }
             #expect(model.currentIndex == 0 && model.error != nil)
-        } else if ["removed", "repair"].contains(action) {
+        } else if action == "removed" {
             try await wait { !model.isPreparing }
             #expect(model.currentIndex == 0)
         } else {
@@ -157,6 +158,11 @@ private actor HeldPreprocessor: AudioPreprocessing {
             #expect((playback.normalizationPlan != nil) == normalize)
             #expect(await worker.levelCalls[url, default: 0] == (normalize ? 1 : 0))
             #expect(await worker.prefixCalls[url] == 1)
+        } else if action == "settings" || action == "repair" {
+            // Only stopping or another choice gives up the chosen track: it is prepared again and still plays.
+            try await wait { playback.state == .playing }
+            #expect(model.currentEntry?.id == entry.id && model.error == nil)
+            if action == "repair" { #expect(playback.selectedURL?.lastPathComponent == "replacement.wav") }
         } else {
             #expect(playback.state != .playing)
             if action == "saveFailure" { #expect(model.error != nil) }

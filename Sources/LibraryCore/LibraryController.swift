@@ -78,9 +78,15 @@ import AudioProcessingCore
     @ObservationIgnored private var mapRequestURL: URL?
     /// The app is in the background (iOS): measurements keep to a share of a core, and track maps wait for the foreground.
     @ObservationIgnored public var isInBackground = false {
-        didSet { if isInBackground != oldValue { backgroundChanged() } }
+        didSet { if isInBackground != oldValue { backgroundChanged(); if isInBackground { rememberPosition() } } }
     }
     @ObservationIgnored private var pendingAdvance = false
+    /// Where the current track was left, as last saved (`ResumePosition`).
+    @ObservationIgnored private var resumePosition: ResumePosition?
+    /// The file the player holds and what identifies it, for the positions saved while it plays.
+    @ObservationIgnored private var heldSource: (url: URL, source: ResumeSource)?
+    @ObservationIgnored private var positionClock: Task<Void, Never>?
+    @ObservationIgnored private let positionSaveInterval: Duration
     @ObservationIgnored private var shuttingDown = false
     @ObservationIgnored private let tagReader: (any TrackTagReading)?
     @ObservationIgnored private var tagTask: Task<Void, Never>?
@@ -97,8 +103,10 @@ import AudioProcessingCore
                 preprocessor: any AudioPreprocessing = AudioPreprocessor.shared,
                 random: any RandomNumberGenerator = SystemRandomNumberGenerator(),
                 preparationNoticeDelay: Duration = .milliseconds(300), sleepFadeInterval: Duration = .milliseconds(500),
-                sleepRestoreDuration: Duration = .milliseconds(2500), tagReader: (any TrackTagReading)? = nil) {
+                sleepRestoreDuration: Duration = .milliseconds(2500), tagReader: (any TrackTagReading)? = nil,
+                positionSaveInterval: Duration = .seconds(5)) {
         self.playback = playback; self.store = store; self.references = references; self.tagReader = tagReader
+        self.positionSaveInterval = positionSaveInterval
         self.sleepFadeInterval = sleepFadeInterval; self.sleepRestoreDuration = sleepRestoreDuration
         self.preparationNoticeDelay = preparationNoticeDelay
         self.preprocessor = preprocessor; self.random = AnyRandomNumberGenerator(random)
@@ -121,9 +129,11 @@ import AudioProcessingCore
            let settings = try? NormalizationSettings(targetLUFS: target) { normalizationSettings = settings }
         playback.requireNormalization(normalizesVolume)
         levelMeasurement = normalizesVolume ? .pending : .disabled
-        if preprocessingEnabled { playback.onActivityChange = { [weak self] in self?.updatePreprocessing() } }
-        do { publish(try store.load().prunedShuffleCycles()); message = store.recoveryMessage; auditMeasurementCache() }
-        catch { self.error = error.localizedDescription; editsEnabled = false }
+        playback.onActivityChange = { [weak self] in self?.playbackActivityChanged() }
+        do {
+            publish(try store.load().prunedShuffleCycles()); message = store.recoveryMessage; auditMeasurementCache()
+            resumePosition = store.loadPosition()
+        } catch { self.error = error.localizedDescription; editsEnabled = false }
         readMissingTags()
         if playlistPreprocessing != nil {
             Task { [weak self] in self?.resumePlaylistPreprocessing() }
@@ -143,6 +153,9 @@ import AudioProcessingCore
     public var currentIndex: Int? { currentPlaylist?.entries.firstIndex { $0.id == document.currentEntryID } }
     public var canPrevious: Bool { canEdit && adjacentEntry(-1) != nil }
     public var canNext: Bool { canEdit && adjacentEntry(1) != nil }
+    /// Play works whenever there is a current entry: the library prepares it when the player does not
+    /// hold it yet, so neither a preparation on its way nor one that failed or was cancelled disables it.
+    public var canPlay: Bool { playback.canPlay || (currentTrack != nil && editsEnabled) }
 
     // MARK: Document lookup
 
@@ -304,17 +317,30 @@ import AudioProcessingCore
             next.tracks[i].tags = nil
             if commit(next) {
                 unavailable[id] = nil; tagFailures.remove(id); readMissingTags()
-                if currentTrack?.id == id, playback.state == .empty,
-                   let list = document.currentPlaylistID, let entry = document.currentEntryID {
+                // Another file: a preparation of the old one, or the old one held idle, is prepared again.
+                if let intent = selectionIntent, trackForEntry(intent.entry, in: intent.playlist)?.id == id {
+                    Logger.selection.notice("Track repaired while it was prepared: preparing it again")
+                    beginPreparedSelection(intent.entry, playlistID: intent.playlist, autoPlay: intent.autoPlay, position: 0,
+                                           shuffle: intent.shuffle, startsTrack: intent.startsTrack, cause: "repair")
+                } else if currentTrack?.id == id, playback.state != .playing, playback.state != .paused,
+                          let list = document.currentPlaylistID, let entry = document.currentEntryID {
                     selectEntry(entry, in: list)
                 }
                 message = "ファイル参照を更新しました。"
             }
         } catch { self.error = error.localizedDescription }
     }
-    /// Selects the last song first; the whole library is then checked in the background.
+    /// Reads ahead the last song, at the position where it was left, so that play starts at once and the
+    /// seek bar works before it; the whole library is checked in the background. Nothing waits for the
+    /// read-ahead: play prepares the current entry itself if it is not ready (`togglePlayPause`).
     public func restore() {
-        if let list = document.currentPlaylistID, let entry = document.currentEntryID { selectEntry(entry, in: list) }
+        if canEdit, let list = document.currentPlaylistID, let entry = document.currentEntryID, currentTrack != nil {
+            let resume = resumePosition.flatMap { $0.playlistID == list && $0.entryID == entry ? $0 : nil }
+            Logger.selection.notice("Restoring the last track\(resume == nil ? "" : " at its saved position", privacy: .public)")
+            if preprocessingEnabled {
+                beginPreparedSelection(entry, playlistID: list, autoPlay: false, startsTrack: true, resume: resume, cause: "restore")
+            } else if selectEntry(entry, in: list), let resume { applyResume(resume) }
+        }
         refreshAvailability()
     }
     /// Readability is transient. A missing file never removes a persisted entry.
@@ -349,7 +375,9 @@ import AudioProcessingCore
             for i in next.tracks.indices {
                 if let change = refreshed[next.tracks[i].id], next.tracks[i].reference == change.old { next.tracks[i].reference = change.new }
             }
-            if next != self.document { _ = self.commit(next) }
+            // Saving the refreshed references leaves a failure shown meanwhile, such as the last track's, in place.
+            let shown = self.error
+            if next != self.document, self.commit(next) { self.error = shown }
         }
         return availabilityTask
     }
@@ -378,6 +406,8 @@ import AudioProcessingCore
             guard success else { self.error = playback.error?.localizedDescription; return false }
             if changesTrack { trackChangeID = UUID() }
             publish(next); unavailable[track.id] = nil; error = nil; message = nil
+            heldSource = (try? SourceFingerprint(url: resolved.url)).map { (resolved.url, ResumeSource($0, duration: playback.duration)) }
+            rememberPosition()
             if autoPlay { playback.togglePlayPause(using: resolved.lease) }
             return true
         } catch {
@@ -388,10 +418,9 @@ import AudioProcessingCore
     /// A second click upgrades the pending selection instead of opening another decoder.
     public func clickEntry(_ entryID: UUID, in playlistID: UUID, clickCount: Int) {
         guard canEdit, !shuttingDown, clickCount == 1 || clickCount == 2,
-              let reference = currentReference(entryID, in: playlistID) else { return }
+              currentReference(entryID, in: playlistID) != nil else { return }
         let play = playback.state == .playing || clickCount == 2
-        if let intent = selectionIntent, intent.entry == entryID, intent.playlist == playlistID,
-           intent.reference == reference {
+        if let intent = selectionIntent, intent.entry == entryID, intent.playlist == playlistID, !intent.followsPlayback {
             if play { intent.autoPlay = true }
             return
         }
@@ -423,6 +452,12 @@ import AudioProcessingCore
         playback.seek(to: seconds)
     }
     public func togglePlayPause() {
+        // A chosen track on its way plays when it is ready, in place of a paused one; pressing again changes nothing.
+        if playback.state != .playing, let intent = selectionIntent, !intent.followsPlayback {
+            if !intent.autoPlay { Logger.selection.notice("Play pressed during preparation: plays when ready") }
+            intent.autoPlay = true
+            return
+        }
         if playback.state == .playing || (playback.state == .paused && !normalizationNeedsPreparation && levelsFitOutput) {
             let position = playback.currentTime
             playback.togglePlayPause()
@@ -436,7 +471,10 @@ import AudioProcessingCore
         }
         guard let current = currentTrack, let list = document.currentPlaylistID, let entry = document.currentEntryID else { return }
         if preprocessingEnabled {
-            beginPreparedSelection(entry, playlistID: list, autoPlay: true, position: playback.currentTime == playback.duration ? 0 : playback.currentTime)
+            // The player holds nothing (the read-ahead failed or was cancelled): the saved position is used.
+            let resume = playback.state == .empty ? resumePosition.flatMap { $0.playlistID == list && $0.entryID == entry ? $0 : nil } : nil
+            beginPreparedSelection(entry, playlistID: list, autoPlay: true, position: playback.currentTime == playback.duration ? 0 : playback.currentTime,
+                                   resume: resume, cause: "play")
             return
         }
         do {
@@ -445,7 +483,10 @@ import AudioProcessingCore
                 // Keep an idle/paused seek that has already been prepared by PlaybackCore.
                 playback.togglePlayPause(using: resolved.lease)
                 error = playback.error?.localizedDescription
-            } else { selectEntry(entry, in: list, autoPlay: true) }
+            } else {
+                let resume = playback.state == .empty ? resumePosition.flatMap { $0.entryID == entry ? $0 : nil } : nil
+                if selectEntry(entry, in: list, autoPlay: true), let resume { applyResume(resume) }
+            }
         } catch {
             unavailable[current.id] = LibraryFailure.unavailable.localizedDescription
             self.error = error.localizedDescription
@@ -617,6 +658,8 @@ import AudioProcessingCore
         let logger = Logger.shutdown
         let started = ContinuousClock.now
         logger.notice("Library shutdown: stopping playback")
+        rememberPosition()
+        positionClock?.cancel(); positionClock = nil
         cancelPreparation()
         playback.onActivityChange = nil
         pendingAdvance = false; editsEnabled = false
@@ -826,11 +869,13 @@ extension LibraryController {
     }
     public func setNormalizesVolume(_ enabled: Bool) {
         guard !shuttingDown, normalizesVolume != enabled else { return }
+        let choice = pendingChoice
         cancelPreparation()
         normalizesVolume = enabled; preferences.set(enabled, forKey: "normalizeVolume")
         playback.requireNormalization(enabled); normalizationNeedsPreparation = true
         levelMeasurement = enabled ? .pending : .disabled
-        playOnWithNewSettings()
+        // A chosen track on its way is prepared again with the new settings; otherwise the playing one takes them.
+        if let choice { prepareAgain(choice, autoPlay: choice.autoPlay, cause: "settings") } else { playOnWithNewSettings() }
     }
     /// The playing track takes the new strength at once; the level measurement is of the
     /// unprocessed audio and stays valid.
@@ -843,13 +888,14 @@ extension LibraryController {
     public func setNormalizationTarget(_ target: Double) {
         guard !shuttingDown else { return }
         guard let settings = try? NormalizationSettings(targetLUFS: target), settings != normalizationSettings else { return }
-        let previous = measuredLevels
+        let previous = measuredLevels, choice = pendingChoice
         cancelPreparation(); measuredLevels = previous
         normalizationSettings = settings
         preferences.set(target, forKey: "normalizationTargetLUFS")
         playback.requireNormalization(normalizesVolume); normalizationNeedsPreparation = true
         levelMeasurement = normalizesVolume ? previous.map { .complete($0) } ?? .pending : .disabled
-        playOnWithNewSettings()
+        // A chosen track on its way is prepared again with the new settings; otherwise the playing one takes them.
+        if let choice { prepareAgain(choice, autoPlay: choice.autoPlay, cause: "settings") } else { playOnWithNewSettings() }
     }
     /// A playing track plays on as before while its start for the new settings is prepared (and
     /// measured if needed), then continues with them from where it is by then. A pause, a stop,
@@ -875,7 +921,10 @@ extension LibraryController {
     }
     var preparedNextByteCount: Int { (playlistPreprocessing?.active ?? nextPrepared)?.audio?.bufferedBytes ?? 0 }
 
-    public func stop() { cancelPreparation(); playback.stop() }
+    public func stop() {
+        if selectionIntent != nil { Logger.selection.notice("Preparation ended: stopped by the listener") }
+        cancelPreparation(); playback.stop()
+    }
 
     public func setMeasuresMaximumVolume(_ enabled: Bool) {
         measuresMaximumVolume = enabled
@@ -944,21 +993,25 @@ extension LibraryController {
     /// source is unchanged, otherwise resolves, prepares a prefix and (for normalized
     /// playback) measures. Only the latest preparationID may commit the selection.
     /// A nil `position` follows the playing track: it starts from where that track is at the commit.
+    /// `resume` is a saved position to start from, used only when it was saved in the same file and lies within it.
     private func beginPreparedSelection(_ entryID: UUID, playlistID: UUID, autoPlay: Bool, position: Double? = 0, shuffle: ShuffleStep = .keep,
-                                        startsTrack: Bool = false, outputRetries: Int = 0) {
+                                        startsTrack: Bool = false, resume: ResumePosition? = nil, outputRetries: Int = 0,
+                                        cause: String = "choice") {
         guard !shuttingDown else { return }
         playlistPreprocessingMayStart = true
         let requestedReference = currentReference(entryID, in: playlistID)
-        let intent = SelectionIntent(entry: entryID, playlist: playlistID, reference: requestedReference, autoPlay: autoPlay,
-                                     followsPlayback: position == nil, startsTrack: startsTrack)
+        if let intent = selectionIntent { Logger.selection.notice("Preparation ended: replaced (\(intent.cause, privacy: .public))") }
+        let intent = SelectionIntent(entry: entryID, playlist: playlistID, autoPlay: autoPlay, position: position, shuffle: shuffle,
+                                     startsTrack: startsTrack, resume: resume, cause: cause)
         selectionIntent = intent
+        Logger.selection.notice("Preparation started (\(cause, privacy: .public)): \(autoPlay ? "plays" : "held", privacy: .public)")
         let handoff = takeOverPreparation(entryID, playlistID: playlistID, reference: requestedReference, autoPlay: autoPlay)
         let id = UUID(); preparationID = id
         let previousLevels = measuredLevels
         cancelMeasurement(); measuredTrack = nil
         peakMeasurement = measuresMaximumVolume ? .pending : .disabled
         isPreparing = true
-        preparationStage = "音声を準備しています…"
+        preparationStage = "音源ファイルを開いています…"
         selectionTask = Task { [weak self] in
             defer {
                 if let self, self.preparationID == id, self.isPreparing {
@@ -970,8 +1023,13 @@ extension LibraryController {
                 for retiring in handoff.retiring { await retiring?.value }
                 try handoff.cancellation.check()
                 if let failure = handoff.promoted?.failure { throw failure }
-                guard let self, let entry = self.playlist(playlistID)?.entries.first(where: { $0.id == entryID }),
-                      let track = self.track(entry.trackID), track.reference == requestedReference else { return }
+                // The track, not its reference: the check of the library may refresh the reference of the same file meanwhile.
+                guard let self else { return }
+                guard let entry = self.playlist(playlistID)?.entries.first(where: { $0.id == entryID }),
+                      let track = self.track(entry.trackID) else {
+                    if self.preparationID == id { Logger.selection.notice("Preparation ended: the entry was removed") }
+                    return
+                }
                 let (resolved, prepared) = try await self.selectionAudio(for: track, handoff: handoff)
                 let levels = try await self.selectionLevels(intent, track: track, url: resolved.url, prepared: prepared,
                                                             earlier: handoff.candidate?.levels ?? previousLevels, cancellation: handoff.cancellation)
@@ -982,13 +1040,16 @@ extension LibraryController {
                 // The failed start has already ended this preparation, with the playback's failure.
                 let failedStart = error is StartOnChangedOutput
                 guard let self, self.preparationID == id || failedStart else { return }
+                // The kind of failure only: a description may name the file.
+                let reason = error is CancellationError ? "cancelled" : "failed (\(type(of: error)))"
+                Logger.selection.notice("Preparation ended (\(cause, privacy: .public)): \(reason, privacy: .public)")
                 self.endSelection()
                 if failedStart || PlaybackError(error) == .outputChanged, autoPlay, outputRetries < Self.outputChangeRetries {
                     // The output was still changing (a new device settles its format in a moment):
                     // the track is measured again for the output it has then, and plays on.
                     self.retryAfterOutputChange(entryID, playlistID: playlistID, position: position,
                                                 shuffle: self.document.currentEntryID == entryID ? .keep : shuffle,
-                                                startsTrack: startsTrack, retries: outputRetries + 1)
+                                                startsTrack: startsTrack, resume: resume, retries: outputRetries + 1)
                     return
                 }
                 if !(error is CancellationError) {
@@ -1011,16 +1072,20 @@ extension LibraryController {
     /// Prepares the selection again after a moment. Any other selection, stopping or a changed
     /// setting cancels the wait like a preparation.
     private func retryAfterOutputChange(_ entryID: UUID, playlistID: UUID, position: Double?, shuffle: ShuffleStep,
-                                        startsTrack: Bool, retries: Int) {
+                                        startsTrack: Bool, resume: ResumePosition?, retries: Int) {
         Logger.output.notice("Preparation failed on the output's format: retry \(retries, privacy: .public)")
         let id = UUID(); preparationID = id
+        // The choice stays known while it waits, so play, a repair or a changed setting finds it.
+        selectionIntent = SelectionIntent(entry: entryID, playlist: playlistID, autoPlay: true, position: position, shuffle: shuffle,
+                                          startsTrack: startsTrack, resume: resume, cause: "output")
         isPreparing = true
         preparationStage = "音声出力の切り替えを待っています…"
         selectionTask = Task { [weak self] in
             try? await Task.sleep(for: Self.outputChangeRetryDelay)
             guard !Task.isCancelled, let self, self.preparationID == id else { return }
+            self.selectionIntent = nil
             self.beginPreparedSelection(entryID, playlistID: playlistID, autoPlay: true, position: position, shuffle: shuffle,
-                                        startsTrack: startsTrack, outputRetries: retries)
+                                        startsTrack: startsTrack, resume: resume, outputRetries: retries, cause: "output")
         }
     }
 
@@ -1107,18 +1172,29 @@ extension LibraryController {
     /// changed entry leaves everything as it was.
     private func commitSelection(_ id: UUID, intent: SelectionIntent, track: LibraryTrack, resolved: ResolvedTrack, prepared: PreparedAudio,
                                  levels: TrackAudioMetrics?, earlierPeak: TrackPeak?, position: Double?, shuffle: ShuffleStep) throws {
-        guard preparationID == id, editsEnabled,
-              let latest = playlist(intent.playlist)?.entries.first(where: { $0.id == intent.entry }),
-              latest.trackID == track.id, self.track(track.id)?.reference == track.reference else { return }
+        guard preparationID == id, editsEnabled else { return }
+        // The same entry and track: a reference refreshed meanwhile points to the same file (a repaired
+        // track, another file, has started another preparation).
+        guard let latest = playlist(intent.playlist)?.entries.first(where: { $0.id == intent.entry }), latest.trackID == track.id else {
+            Logger.selection.notice("Preparation ended: the entry was removed or changed")
+            return
+        }
         // Read before the old run ends. A track that no longer plays needs no new start.
         if position == nil, playback.state != .playing { throw CancellationError() }
-        let position = position ?? playback.currentTime
+        var position = position ?? playback.currentTime
+        if let resume = intent.resume {
+            if resume.trackID == track.id, resume.source == ResumeSource(prepared), resume.seconds < prepared.duration { position = resume.seconds }
+            else { Logger.selection.notice("Saved position not used: another file or beyond its end"); position = 0 }
+        }
         let changesTrack = intent.startsTrack && changesTrack(to: intent.entry)
         var next = document
         recordShuffle(&next, entry: intent.entry, playlist: intent.playlist, step: shuffle)
         next.currentPlaylistID = intent.playlist; next.currentEntryID = intent.entry
-        // Only a refreshed reference is written: an unchanged library keeps sharing its storage.
-        if let i = trackIndex[track.id], next.tracks[i].reference != resolved.reference { next.tracks[i].reference = resolved.reference }
+        // Only a refreshed reference is written: an unchanged library keeps sharing its storage. One the
+        // check refreshed meanwhile is newer than the one resolved here and stays.
+        if let i = trackIndex[track.id], next.tracks[i].reference == track.reference, next.tracks[i].reference != resolved.reference {
+            next.tracks[i].reference = resolved.reference
+        }
         if intent.autoPlay {
             guard playback.selectPrepared(prepared, using: resolved.lease, metrics: levels,
                 settings: normalizationSettings, committing: {
@@ -1129,7 +1205,7 @@ extension LibraryController {
             // with the library, so pressing play starts without resolving and reading again;
             // stopping, choosing another entry or quitting releases them.
             guard playback.selectMetadata(url: resolved.url, duration: prepared.duration,
-                supportsSeeking: prepared.supportsSeeking, committing: {
+                supportsSeeking: prepared.supportsSeeking, using: resolved.lease, committing: {
                     if next != self.document { try self.store.save(next) }
                 }) else { throw playback.error ?? PlaybackError.inaccessibleFile }
             let idle = NextPreparation(entry: intent.entry, reference: resolved.reference, trackID: track.id)
@@ -1140,7 +1216,10 @@ extension LibraryController {
         publish(next); unavailable[track.id] = nil; error = nil; message = nil
         isPreparing = false; selectionTask = nil; selectionCancellation = nil; selectionIntent = nil
         preparationStage = nil
+        Logger.selection.notice("Preparation committed (\(intent.cause, privacy: .public)): \(intent.autoPlay ? "plays" : "held", privacy: .public)\(position > 0 ? " from a position" : "", privacy: .public)")
+        heldSource = playback.selectedURL.map { ($0, ResumeSource(prepared)) }
         if position > 0 { playback.seek(to: position) }
+        rememberPosition()
         measuredLevels = levels
         levelMeasurement = normalizesVolume ? levels.map { .complete($0) } ?? .pending : .disabled
         normalizationNeedsPreparation = false
@@ -1176,7 +1255,8 @@ extension LibraryController {
         let barrier = Task { await previous?.value; await audit?.value }
         playlistPreprocessing?.update(document, playback: playback, after: barrier,
                                       completed: measuredLevels, retryFailures: retryFailures,
-                                      adjacent: (adjacentEntry(1), adjacentEntry(-1)))
+                                      adjacent: (adjacentEntry(1), adjacentEntry(-1)),
+                                      nearOnly: playback.state == .paused || playback.state == .stopped)
     }
     private func restartNextPreparation() {
         if playlistPreprocessing != nil {
@@ -1232,8 +1312,11 @@ extension LibraryController {
     private func currentReference(_ entryID: UUID, in playlistID: UUID) -> TrackReference? {
         playlist(playlistID)?.entries.first { $0.id == entryID }.flatMap { track($0.trackID)?.reference }
     }
-    /// Follows playback state: playing starts speculation, paused keeps measured levels,
-    /// any other state retires background work.
+    /// Follows playback state: playing starts speculation, paused keeps measured levels, a held track
+    /// (moved before it plays) keeps its read-ahead, any other state retires background work.
+    /// Paused or stopped, the sweep goes on with the current track and its neighbours only.
+    /// A track the listener chose and that was still being prepared stays chosen: it is prepared again,
+    /// without playing, since only stopping or another choice gives it up.
     private func updatePreprocessing() {
         guard preprocessingEnabled, !shuttingDown else { return }
         if playback.state == .playing {
@@ -1243,14 +1326,38 @@ extension LibraryController {
             if playlistPreprocessing == nil || playlistPreprocessing?.supportsProfile == false { measureCurrent() }
             loadTrackMap()
         } else if playback.state == .paused {
-            let levels = measuredLevels
+            let levels = measuredLevels, choice = pendingChoice
             cancelPreparation()
             measuredLevels = levels
             if normalizesVolume, let levels { levelMeasurement = .complete(levels) }
+            prepareAgain(choice, autoPlay: false, cause: "paused")
+            if choice == nil { resumeNearPreprocessing() }
         } else if playback.state == .finished, selectionTask != nil {
             // Natural advancement has already taken the prepared next entry.
             cancelNext(); cancelMeasurement()
-        } else { cancelPreparation() }
+        } else if playback.state == .ready {
+            // Moved before it plays: the read-ahead it holds still starts it.
+        } else {
+            let choice = pendingChoice
+            cancelPreparation()
+            prepareAgain(choice, autoPlay: false, cause: "\(playback.state)")
+            if choice == nil, playback.state == .stopped { resumeNearPreprocessing() }
+        }
+    }
+    /// Paused or stopped, the current track and its neighbours in the playback order are still prepared
+    /// and measured; the rest of the sweep waits for playback or a choice.
+    private func resumeNearPreprocessing() {
+        guard playlistPreprocessing != nil else { return }
+        playlistPreprocessingMayStart = true
+        resumePlaylistPreprocessing()
+    }
+    /// A track the listener chose (or the last one restored), still being prepared.
+    private var pendingChoice: SelectionIntent? { selectionIntent.flatMap { $0.startsTrack && !$0.followsPlayback ? $0 : nil } }
+    private func prepareAgain(_ choice: SelectionIntent?, autoPlay: Bool, cause: String) {
+        guard let choice, !shuttingDown, selectionIntent == nil else { return }
+        Logger.selection.notice("Preparation cancelled (\(cause, privacy: .public)): preparing the chosen track again")
+        beginPreparedSelection(choice.entry, playlistID: choice.playlist, autoPlay: autoPlay, position: choice.position, shuffle: choice.shuffle,
+                               startsTrack: true, resume: choice.resume, cause: choice.cause)
     }
     private func measureCurrent() {
         if measuresMaximumVolume, let levels = currentTrackMetrics {
@@ -1338,18 +1445,81 @@ extension LibraryController {
 /// choosing a row adds the row (`add`), and playing a whole list starts a new cycle (`restart`).
 enum ShuffleStep { case keep, add, restart }
 
-/// MainActor-owned intent; only the current selection can be upgraded by a row click.
+/// MainActor-owned intent; only the current selection can be upgraded by a row click or play.
 @MainActor private final class SelectionIntent {
     let entry: UUID
     let playlist: UUID
-    let reference: TrackReference?
     var autoPlay: Bool
+    /// Where it starts; nil follows the playing track (a new start for changed settings).
+    let position: Double?
+    let shuffle: ShuffleStep
     /// A new start of the playing track, which plays on until it is ready.
-    let followsPlayback: Bool
+    var followsPlayback: Bool { position == nil }
     /// Chosen as a track to play, rather than started again for settings, a resume or a seek.
     let startsTrack: Bool
-    init(entry: UUID, playlist: UUID, reference: TrackReference?, autoPlay: Bool, followsPlayback: Bool = false, startsTrack: Bool = false) {
-        self.entry = entry; self.playlist = playlist; self.reference = reference; self.autoPlay = autoPlay
-        self.followsPlayback = followsPlayback; self.startsTrack = startsTrack
+    let resume: ResumePosition?
+    /// What started it, for the log.
+    let cause: String
+    init(entry: UUID, playlist: UUID, autoPlay: Bool, position: Double? = 0, shuffle: ShuffleStep = .keep, startsTrack: Bool = false,
+         resume: ResumePosition? = nil, cause: String = "choice") {
+        self.entry = entry; self.playlist = playlist; self.autoPlay = autoPlay; self.position = position; self.shuffle = shuffle
+        self.startsTrack = startsTrack; self.resume = resume; self.cause = cause
     }
+}
+
+// MARK: - Resume position
+
+extension Logger {
+    /// Selections and their preparation: what started them and how they ended, never song names or paths.
+    static let selection = Logger(subsystem: "io.github.boyaki-machine.LC-Music-Player", category: "selection")
+}
+
+extension LibraryController {
+    /// Pausing or moving saves the position; stopping and the natural end forget it. While the track
+    /// plays, a clock saves it every `positionSaveInterval`, since iOS may end the app without a word.
+    func playbackActivityChanged() {
+        switch playback.state {
+        case .playing:
+            rememberPosition(); runPositionClock()
+        case .paused, .ready:
+            stopPositionClock(); rememberPosition()
+        case .stopped, .finished:
+            stopPositionClock(); forgetPosition()
+        case .empty, .failed:
+            stopPositionClock()
+        }
+        updatePreprocessing()
+    }
+    /// Saves where the current track is, when the player holds it. An unchanged position writes nothing.
+    func rememberPosition() {
+        guard [.playing, .paused, .ready].contains(playback.state),
+              let held = heldSource, held.url == playback.selectedURL, let track = currentTrack,
+              let list = document.currentPlaylistID, let entry = document.currentEntryID else { return }
+        savePosition(ResumePosition(playlistID: list, entryID: entry, trackID: track.id, seconds: playback.currentTime, source: held.source))
+    }
+    private func forgetPosition() { savePosition(nil) }
+    private func savePosition(_ position: ResumePosition?) {
+        guard position != resumePosition else { return }
+        do { try store.savePosition(position); resumePosition = position }
+        catch { Logger.selection.error("Position not saved (\(type(of: error), privacy: .public))") }
+    }
+    /// The saved position, on a track selected without preparation, when it was saved in the same file.
+    func applyResume(_ resume: ResumePosition) {
+        guard let held = heldSource, resume.trackID == currentTrack?.id, resume.source == held.source, resume.seconds < playback.duration else { return }
+        playback.seek(to: resume.seconds)
+    }
+    private func runPositionClock() {
+        guard positionClock == nil else { return }
+        let interval = positionSaveInterval
+        positionClock = Task { [weak self] in
+            while true {
+                do { try await Task.sleep(for: interval) } catch { return }
+                guard let self, self.playback.state == .playing else { return }
+                self.rememberPosition()
+            }
+        }
+    }
+    private func stopPositionClock() { positionClock?.cancel(); positionClock = nil }
+    /// The position as last saved. For tests.
+    var savedPosition: ResumePosition? { resumePosition }
 }

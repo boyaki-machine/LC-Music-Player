@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import PlaybackCore
 import LibraryCore
 import PlayerUI
@@ -35,6 +36,7 @@ struct LCMPiOSApp: App {
     @ObservationIgnored private var session: AudioSessionController?
     @ObservationIgnored private var surfaces: ControlSurfaceController?
     @ObservationIgnored private var deviceVolume: DeviceVolumeMemory?
+    @ObservationIgnored private var terminationObserver: (any NSObjectProtocol)?
 
     init() {
         // Music library songs keep their measurements too, identified by the library's values.
@@ -52,6 +54,12 @@ struct LCMPiOSApp: App {
         session = AudioSessionController(playback: playback, library: library)
         deviceVolume = DeviceVolumeMemory(playback: playback, system: AudioSessionOutputVolume(setter: SystemVolumeSlider.shared.set))
         library.restore()
+        // Ended from the app switcher while playing, iOS usually says so: the position is saved then,
+        // as on the Mac. An end without a word loses at most the interval of the playing clock.
+        terminationObserver = NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification,
+                                                                     object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.library.shutdown() }
+        }
         #if DEBUG
         // Device checks of the output latency. Runs with a library of their own (UI tests) leave it
         // off unless `-LCMPLatencyProbe YES` asks for it.

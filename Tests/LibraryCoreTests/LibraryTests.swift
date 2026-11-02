@@ -9,6 +9,9 @@ import PlaybackCore
     var recoveryMessage: String? { nil }
     func load() throws -> LibraryDocument { document }
     func save(_ document: LibraryDocument) throws { if fail { throw LibraryFailure.inaccessible }; self.document = document }
+    var position: ResumePosition?
+    func loadPosition() -> ResumePosition? { position }
+    func savePosition(_ position: ResumePosition?) throws { self.position = position }
 }
 @MainActor final class TestReferences: FileReferenceProvider {
     let scopes = ScopeCounter()

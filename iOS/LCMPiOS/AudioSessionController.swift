@@ -56,7 +56,7 @@ import LibraryCore
                         center.seekForwardCommand, center.seekBackwardCommand] { command.isEnabled = false }
     }
     private func toggle() -> Bool {
-        guard playback.canPlay else { return false }
+        guard library.canPlay else { return false }
         library.togglePlayPause(); return true
     }
 
