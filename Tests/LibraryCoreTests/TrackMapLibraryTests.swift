@@ -1,4 +1,5 @@
 import Foundation
+import os
 import Testing
 import PlaybackCore
 import PreprocessingCore
@@ -9,6 +10,9 @@ import AudioProcessingCore
 private actor MapWorker: AudioPreprocessing {
     let real = AudioPreprocessor()
     private(set) var mapRequests: [(file: String, owner: UUID?)] = []
+    private(set) var measured: [String] = []
+    nonisolated let backgroundCalls = OSAllocatedUnfairLock(initialState: [Bool]())
+    nonisolated func setBackground(_ background: Bool) { backgroundCalls.withLock { $0.append(background) } }
     var failing: Set<String> = []
     var holding = false
     func fail(_ name: String) { failing.insert(name) }
@@ -21,6 +25,7 @@ private actor MapWorker: AudioPreprocessing {
     }
     func measureLevels(_ url: URL, profile: MeasurementProfile, cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackAudioMetrics {
         while holding { try cancellation.check(); try await Task.sleep(for: .milliseconds(2)) }
+        defer { measured.append(url.lastPathComponent) }
         return try await real.measureLevels(url, profile: profile, cancellation: cancellation, ownerID: ownerID)
     }
     func trackMap(_ url: URL, cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackMap {
@@ -95,6 +100,39 @@ private actor MapWorker: AudioPreprocessing {
         try await Task.sleep(for: .milliseconds(300))
         #expect(model.currentTrackMap == nil)
         #expect(await worker.mapRequests.filter { $0.file == "c.wav" }.count == asked)
+        model.stop()
+    }
+
+    /// In the background the levels are measured without maps, and the maps follow in the foreground:
+    /// the current track's for the player, every measured track's for the sweep.
+    @Test func inTheBackgroundTheMapsWaitForTheForeground() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        let files = try ["a.wav", "b.wav", "c.wav"].map { try audioFile(f.root, name: $0, duration: 15) }
+        let worker = MapWorker(), refs = TestReferences()
+        let playback = PlaybackController(makeBackend: { _ in TestBackend() })
+        let model = LibraryController(playback: playback, store: MemoryStore(), references: refs, preprocessingEnabled: true,
+                                      playlistPreprocessingEnabled: true, preferences: MemoryPreferences(), preprocessor: worker)
+        defer { model.shutdown() }
+        let list = try #require(model.document.currentPlaylistID)
+        model.isInBackground = true
+        model.isInBackground = true
+        #expect(worker.backgroundCalls.withLock { $0 } == [true])
+        await worker.hold(true)
+        await model.importFiles(files, into: list)
+        model.selectEntry(try #require(model.playlist(list)?.entries[1].id), in: list, autoPlay: true)
+        try await wait { playback.state == .playing }
+        await worker.hold(false)
+        try await waitAsync { Set(await worker.measured) == ["a.wav", "b.wav", "c.wav"] }
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await worker.mapRequests.isEmpty)
+        #expect(model.currentTrackMap == nil)
+
+        model.isInBackground = false
+        #expect(worker.backgroundCalls.withLock { $0 } == [true, false])
+        try await wait { model.currentTrackMap?.beats.durationMilliseconds == 2000 }
+        try await waitAsync { Set(await worker.mapRequests.map(\.file)) == ["a.wav", "b.wav", "c.wav"] }
+        // The tracks are not measured again for their maps.
+        #expect(await worker.measured.count == 3)
         model.stop()
     }
 

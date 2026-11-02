@@ -14,6 +14,7 @@ private actor PlaylistWorker: AudioPreprocessing {
     var prefixes: [URL] = []
     var cancelled: [URL] = []
     var priorities: [URL: TaskPriority] = [:]
+    var maps: [URL] = []
     init(cache: MeasurementCacheConfiguration? = nil) { real = AudioPreprocessor(cache: cache) }
     func block(_ url: URL) { blocked.insert(url) }
     func release(_ url: URL) { blocked.remove(url) }
@@ -30,6 +31,10 @@ private actor PlaylistWorker: AudioPreprocessing {
             if failed.contains(url) { throw PreprocessingFailure.invalidAudio }
             return try await real.measureLevels(url, profile: profile, cancellation: cancellation, ownerID: ownerID)
         } catch { if error is CancellationError { cancelled.append(url) }; throw error }
+    }
+    /// Records the request; no map, like a worker without analyzers.
+    func trackMap(_ url: URL, cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackMap {
+        maps.append(url); throw PreprocessingFailure.invalidAudio
     }
     func measure(_ url: URL, cancellation: PreparationCancellation, ownerID: UUID?) async throws -> TrackPeak {
         try await real.measure(url, cancellation: cancellation, ownerID: ownerID)
@@ -170,6 +175,39 @@ private actor PlaylistWorker: AudioPreprocessing {
         try await sweepWait { await worker.starts.count == 5 }
         queue.suspend(); await queue.retirement?.value
         playback.stop()
+    }
+
+    /// In the background the sweep measures levels only. Back in the foreground it maps the tracks measured
+    /// meanwhile, without measuring them again; a prefix held for the next track gives way and is prepared again after.
+    @Test func backgroundSweepLeavesTheMapsForTheForeground() async throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        var doc = try playlistFixture(f.root)
+        doc.currentEntryID = doc.playlists[0].entries[2].id
+        let refs = TestReferences(), worker = PlaylistWorker(), playback = PlaybackController(makeBackend: { _ in TestBackend() })
+        let current = try refs.resolve(doc.tracks[2].reference)
+        #expect(playback.select(current.url, using: current.lease))
+        playback.togglePlayPause(using: current.lease)
+        let queue = PlaylistPreprocessing(references: refs, worker: worker, profile: { try MeasurementProfile(sampleRate: 48000, channels: 2) })
+        queue.farPriority = .utility
+        queue.backgroundChanged(true)
+        queue.update(doc, playback: playback, after: nil)
+        try await sweepWait { await worker.starts.count == 5 && queue.active?.trackID == doc.tracks[3].id && queue.active?.audio != nil }
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await worker.maps.isEmpty)
+        queue.backgroundChanged(false)
+        try await sweepWait { await worker.maps.count == 5 && queue.active?.trackID == doc.tracks[3].id && queue.active?.audio != nil }
+        #expect(await worker.maps == [2, 3, 1, 0, 4].map { doc.tracks[$0].reference.lastKnownURL })
+        #expect(await worker.starts.count == 5)
+        // With the measurement, after the sweep, after the maps.
+        #expect(await worker.prefixes == Array(repeating: doc.tracks[3].reference.lastKnownURL, count: 3))
+        // A map that could not be made is not asked for again.
+        queue.backgroundChanged(true); queue.backgroundChanged(false)
+        queue.update(doc, playback: playback, after: nil)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(await worker.maps.count == 5)
+        queue.suspend(); await queue.retirement?.value
+        playback.stop()
+        #expect(refs.scopes.maximum <= 2)
     }
 
     @Test func transfersPendingMeasurementWithoutCancellingOrResolvingAgain() async throws {

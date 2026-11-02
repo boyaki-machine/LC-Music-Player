@@ -76,6 +76,10 @@ import AudioProcessingCore
     @ObservationIgnored private var mapTask: Task<Void, Never>?
     @ObservationIgnored private var mapCancellation: PreparationCancellation?
     @ObservationIgnored private var mapRequestURL: URL?
+    /// The app is in the background (iOS): measurements keep to a share of a core, and track maps wait for the foreground.
+    @ObservationIgnored public var isInBackground = false {
+        didSet { if isInBackground != oldValue { backgroundChanged() } }
+    }
     @ObservationIgnored private var pendingAdvance = false
     @ObservationIgnored private var shuttingDown = false
     @ObservationIgnored private let tagReader: (any TrackTagReading)?
@@ -1288,9 +1292,9 @@ extension LibraryController {
         return loadedTrackMap.map
     }
     /// Reads the current track's map from the cache, or joins or starts the scan that makes it. It shares
-    /// the playing track's file access, so it adds no lease.
+    /// the playing track's file access, so it adds no lease. In the background it waits for the foreground.
     private func loadTrackMap() {
-        guard let url = playback.selectedURL, let lease = playback.activeFileLease, let track = currentTrack,
+        guard !isInBackground, let url = playback.selectedURL, let lease = playback.activeFileLease, let track = currentTrack,
               loadedTrackMap?.url != url, mapRequestURL != url else { return }
         cancelTrackMap()
         mapRequestURL = url
@@ -1303,6 +1307,11 @@ extension LibraryController {
             // After a failure the request stays recorded, so the same track is not scanned again at once.
             if let map { self.loadedTrackMap = LoadedTrackMap(url: url, map: map) }
         }
+    }
+    private func backgroundChanged() {
+        preprocessor.setBackground(isInBackground)
+        playlistPreprocessing?.backgroundChanged(isInBackground)
+        if !isInBackground, playback.state == .playing { loadTrackMap() }
     }
     private func cancelTrackMap() {
         mapCancellation?.cancel(); mapCancellation = nil
