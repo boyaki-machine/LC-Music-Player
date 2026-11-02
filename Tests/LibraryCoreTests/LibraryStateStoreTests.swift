@@ -82,6 +82,43 @@ import Testing
         #expect(throws: LibraryFailure.self) { try first.save(doc) }
     }
 
+    /// The position of the current track has a file of its own: saving it every second writes neither the
+    /// library nor its state, and writing them keeps it.
+    @Test func thePositionIsSavedApartAndSurvivesTheLibrary() throws {
+        let f = try Fixture(); defer { f.cleanup() }
+        let store = JSONLibraryStore(url: f.root.appendingPathComponent("library.json"))
+        #expect(store.loadPosition() == nil)
+        var doc = document(); _ = try store.load(); try store.save(doc)
+        let library = try Data(contentsOf: store.url)
+        let entry = doc.playlists[0].entries[1]
+        let position = ResumePosition(playlistID: doc.playlists[0].id, entryID: entry.id, trackID: entry.trackID, seconds: 83.25,
+                                      source: ResumeSource(size: 1234, modified: 1_700_000_000.5, duration: 240))
+        try store.savePosition(position)
+        #expect(try Data(contentsOf: store.url) == library)
+        #expect(try files(store) == ["library-position.json", "library.json"])
+        #expect(JSONLibraryStore(url: store.url).loadPosition() == position)
+        let attributes = try FileManager.default.attributesOfItem(atPath: store.positionURL.path)
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
+        // Writing the state and then the library leaves the position as it was.
+        doc.currentEntryID = entry.id; try store.save(doc)
+        doc.playlists[0].name = "編集"; try store.save(doc)
+        #expect(JSONLibraryStore(url: store.url).loadPosition() == position)
+        try store.savePosition(nil)
+        #expect(JSONLibraryStore(url: store.url).loadPosition() == nil && !FileManager.default.fileExists(atPath: store.positionURL.path))
+        try store.savePosition(nil)
+        // A damaged, newer or impossible position reads as none.
+        for text in ["broken", #"{"schemaVersion":2}"#] {
+            try Data(text.utf8).write(to: store.positionURL)
+            #expect(JSONLibraryStore(url: store.url).loadPosition() == nil)
+        }
+        var newer = position; newer.schemaVersion = 2
+        try JSONEncoder().encode(newer).write(to: store.positionURL)
+        #expect(JSONLibraryStore(url: store.url).loadPosition() == nil)
+        var negative = position; negative.seconds = -1
+        try JSONEncoder().encode(negative).write(to: store.positionURL)
+        #expect(JSONLibraryStore(url: store.url).loadPosition() == nil)
+    }
+
     @Test func onlyTheNewestDamagedLibrariesAreKept() throws {
         let f = try Fixture(); defer { f.cleanup() }
         let path = f.root.appendingPathComponent("library.json")

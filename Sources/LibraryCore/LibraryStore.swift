@@ -1,10 +1,47 @@
 import Foundation
 import Darwin
+import PreprocessingCore
 
 @MainActor public protocol LibraryPersistence {
     func load() throws -> LibraryDocument
     func save(_ document: LibraryDocument) throws
     var recoveryMessage: String? { get }
+    /// Where the current track was left, as last saved. Read once at launch.
+    func loadPosition() -> ResumePosition?
+    /// Saves where the current track is, or forgets it (nil). Written apart from the library, every second while playing.
+    func savePosition(_ position: ResumePosition?) throws
+}
+extension LibraryPersistence {
+    public func loadPosition() -> ResumePosition? { nil }
+    public func savePosition(_ position: ResumePosition?) throws {}
+}
+
+/// Where a track was left: its entry, its track and file, and the second within it. The library
+/// itself never holds it, so a position that changes every second neither rewrites the library nor
+/// changes the document the lists observe.
+public struct ResumePosition: Codable, Equatable, Sendable {
+    public var schemaVersion = 1
+    public var playlistID: UUID
+    public var entryID: UUID
+    public var trackID: UUID
+    public var seconds: Double
+    public var source: ResumeSource
+    public init(playlistID: UUID, entryID: UUID, trackID: UUID, seconds: Double, source: ResumeSource) {
+        self.playlistID = playlistID; self.entryID = entryID; self.trackID = trackID; self.seconds = seconds; self.source = source
+    }
+}
+/// What tells the file a position was saved in from another: its size, modification time and length.
+/// A Music library song has neither size nor time; its length tells a replaced recording apart.
+public struct ResumeSource: Codable, Equatable, Sendable {
+    public var size: Int
+    /// Seconds since 1970.
+    public var modified: Double
+    public var duration: Double
+    public init(size: Int, modified: Double, duration: Double) { self.size = size; self.modified = modified; self.duration = duration }
+    init(_ fingerprint: SourceFingerprint, duration: Double) {
+        self.init(size: fingerprint.size, modified: fingerprint.modified.timeIntervalSince1970, duration: duration)
+    }
+    init(_ prepared: PreparedAudio) { self.init(prepared.source, duration: prepared.duration) }
 }
 
 /// One main-actor writer. All edits are published only after an atomic save succeeds.
@@ -35,6 +72,7 @@ import Darwin
     }
     public var backupURL: URL { url.appendingPathExtension("backup") }
     public var stateURL: URL { url.deletingLastPathComponent().appendingPathComponent("library-state.json") }
+    public var positionURL: URL { url.deletingLastPathComponent().appendingPathComponent("library-position.json") }
     /// Library files hold music paths and bookmarks: owner read/write only.
     private static func restrict(_ file: URL) throws {
         guard FileManager.default.fileExists(atPath: file.path) else { return }
@@ -115,6 +153,25 @@ import Darwin
         // The library now holds the state; a state file left behind would belong to the old one.
         if fm.fileExists(atPath: stateURL.path) { try fm.removeItem(at: stateURL) }
         expectedState = nil
+    }
+    /// The position is checked against the library's current track and the file when it is used, so a
+    /// file of another library or an older one is harmless. A damaged or newer file reads as none.
+    public func loadPosition() -> ResumePosition? {
+        guard let data = try? Data(contentsOf: positionURL),
+              let position = try? JSONDecoder().decode(ResumePosition.self, from: data), position.schemaVersion == 1,
+              position.seconds.isFinite, position.seconds >= 0 else { return nil }
+        return position
+    }
+    public func savePosition(_ position: ResumePosition?) throws {
+        let fm = FileManager.default
+        guard let position else {
+            if fm.fileExists(atPath: positionURL.path) { try fm.removeItem(at: positionURL) }
+            return
+        }
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                               attributes: [.posixPermissions: 0o700])
+        try write(try JSONEncoder().encode(position), positionURL)
+        try Self.restrict(positionURL)
     }
     /// Copies the library, which is the last good one, to the backup. A clone on APFS writes no data.
     private func backUpLibrary() throws {

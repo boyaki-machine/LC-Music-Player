@@ -29,6 +29,8 @@ struct LCMPDefaultGEQPlayerView: View {
     private var playColor: Color? {
         playback.state == .playing ? .green : playback.state == .paused ? .orange : nil
     }
+    /// With a library, play works whenever there is a current entry (`LibraryController.canPlay`).
+    private var canPlay: Bool { library?.canPlay ?? playback.canPlay }
     private var status: String { playback.state == .playing ? "PLAY" : playback.state == .paused ? "PAUSE" : "STOP" }
     /// Only presses with the pointer or a finger count, not the button's keyboard shortcut.
     private func pressed(_ control: LCMPDefaultGEQControl) {
@@ -107,7 +109,7 @@ struct LCMPDefaultGEQPlayerView: View {
                             Label("再生エラー・詳細を確認", systemImage: "exclamationmark.triangle")
                                 .font(.caption).padding(5).background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 4))
                         }.buttonStyle(.plain)
-                    } else if !playback.canPlay {
+                    } else if !canPlay {
                         Button("メニューから音源を選択") { if !presentation.extensionVisible { toggleExtension() } }
                             .font(.caption).buttonStyle(.plain).padding(.top, 12)
                     }
@@ -132,7 +134,7 @@ struct LCMPDefaultGEQPlayerView: View {
             .frame(maxHeight: metrics.visualizationHeight == nil ? .infinity : nil)
             HStack(spacing: metrics.spacing) {
                 LEDButton(symbol: "backward.end.fill", label: "前の曲", enabled: library?.canPrevious == true) { library?.previous(); pressed(.previous) }
-                LEDButton(symbol: "play.fill", label: playLabel, enabled: playback.canPlay,
+                LEDButton(symbol: "play.fill", label: playLabel, enabled: canPlay,
                           activeColor: playColor, status: status) {
                     if let library { library.togglePlayPause() } else { playback.togglePlayPause() }
                     pressed(.playPause)

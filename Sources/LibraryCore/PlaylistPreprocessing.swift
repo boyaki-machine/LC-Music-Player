@@ -30,7 +30,12 @@ import AudioProcessingCore
     private var nextCandidate: Candidate?
     private var nextMetrics: (UUID, TrackAudioMetrics)?
     private var currentID: UUID?
+    /// The neighbours in the playback order, measured right after the current track, playing or not.
+    private var followingID: UUID?
     private var previousID: UUID?
+    /// Paused or stopped, the sweep measures only the current track and its neighbours, and goes on
+    /// with the rest once playback starts or a track is chosen.
+    private var nearOnly = false
     /// In Low Power Mode or when the device runs hot, the sweep measures only the current track and
     /// its neighbours, and goes on with the rest when the state eases.
     var isEnergyConstrained: @MainActor () -> Bool = {
@@ -68,12 +73,14 @@ import AudioProcessingCore
         return (list.entries.indices.contains(i + 1) ? list.entries[i + 1] : nil, i > 0 ? list.entries[i - 1] : nil)
     }
 
-    /// Deduplicate logical tracks without changing entry identity or playback order.
-    static func ordered(_ document: LibraryDocument, playing: Bool, adjacent: Adjacent? = nil) -> [Candidate] {
+    /// Deduplicate logical tracks without changing entry identity or playback order. The current entry
+    /// and its neighbours come first whether or not it plays: a track chosen while stopped or paused, and
+    /// the ones play would move to, are ready when play is pressed.
+    static func ordered(_ document: LibraryDocument, adjacent: Adjacent? = nil) -> [Candidate] {
         let tracks = Dictionary(uniqueKeysWithValues: document.tracks.map { ($0.id, $0) })
         let current = document.playlists.first { $0.id == document.currentPlaylistID }
         var entries: [PlaylistEntry] = []
-        if playing, let list = current, let i = list.entries.firstIndex(where: { $0.id == document.currentEntryID }) {
+        if let list = current, let i = list.entries.firstIndex(where: { $0.id == document.currentEntryID }) {
             let adjacent = adjacent ?? listAdjacent(document)
             entries.append(list.entries[i])
             if let next = adjacent.next { entries.append(next) }
@@ -89,10 +96,11 @@ import AudioProcessingCore
     }
 
     func update(_ document: LibraryDocument, playback: PlaybackController, after audit: Task<Void, Never>?,
-                completed: TrackAudioMetrics? = nil, retryFailures: Bool = false, adjacent: Adjacent? = nil) {
+                completed: TrackAudioMetrics? = nil, retryFailures: Bool = false, adjacent: Adjacent? = nil, nearOnly: Bool = false) {
+        self.nearOnly = nearOnly
         let newProfile = try? profileProvider()
         let adjacent = adjacent ?? Self.listAdjacent(document)
-        candidates = Self.ordered(document, playing: playback.state == .playing, adjacent: adjacent)
+        candidates = Self.ordered(document, adjacent: adjacent)
         let tracks = Dictionary(uniqueKeysWithValues: candidates.map { ($0.track.id, $0.track) })
         attempts = attempts.filter { id, attempt in
             guard tracks[id]?.reference == attempt.reference, attempt.profile == newProfile else { return false }
@@ -105,6 +113,7 @@ import AudioProcessingCore
             .entries.first { $0.id == document.currentEntryID }?.trackID
         currentURL = playback.selectedURL; currentLease = playback.activeFileLease
         nextCandidate = nil
+        followingID = adjacent.next?.trackID
         previousID = adjacent.previous?.trackID
         if playback.state == .playing, let entry = adjacent.next,
            let track = document.tracks.first(where: { $0.id == entry.trackID }) {
@@ -205,7 +214,8 @@ import AudioProcessingCore
 
     private func pump() {
         guard !suspended, active == nil, let profile, let candidate = pending.first ?? unmappedCandidate ?? preparedNextCandidate else { return }
-        let near = candidate.track.id == currentID || candidate.track.id == nextCandidate?.track.id || candidate.track.id == previousID
+        let near = candidate.track.id == currentID || candidate.track.id == followingID || candidate.track.id == previousID
+        if !near, nearOnly { return }
         if !near, isEnergyConstrained() { observeEnergyState(); return }
         let measure = attempts[candidate.track.id] == nil
         let mapOnly = !measure && !isInBackground && unmapped.contains(candidate.track.id)
