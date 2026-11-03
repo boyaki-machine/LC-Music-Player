@@ -17,11 +17,13 @@ struct PuppetShowScene: Sendable, Equatable {
 
 /// Draws the stage with Metal: the scenery as 2D layers in stage points, then the puppets in 3D through the
 /// mock's camera (12° field of view looking at the stage's center). Loading the art is done once and shared.
+/// It is created off the main thread (compiling the shaders and uploading the textures takes a few tenths of a
+/// second the first time) and then drawn from the main thread.
 @MainActor
 final class PuppetShowRenderer {
-    static let colorFormat = MTLPixelFormat.bgra8Unorm
-    static let depthFormat = MTLPixelFormat.depth32Float
-    static let sampleCount = 4
+    nonisolated static let colorFormat = MTLPixelFormat.bgra8Unorm
+    nonisolated static let depthFormat = MTLPixelFormat.depth32Float
+    nonisolated static let sampleCount = 4
 
     let device: MTLDevice
     let queue: MTLCommandQueue
@@ -29,15 +31,17 @@ final class PuppetShowRenderer {
     private let premultiplied: MTLRenderPipelineState
     private let depthStates: (write: MTLDepthStencilState, read: MTLDepthStencilState, none: MTLDepthStencilState)
     private let clampSampler: MTLSamplerState, repeatSampler: MTLSamplerState, grainSampler: MTLSamplerState
-    private var textures: [PuppetTexture: MTLTexture] = [:]
-    private var pictures: [String: MTLTexture] = [:]
+    // Textures and buffers are not Sendable; they are made by the (nonisolated) initializer, never changed, and then
+    // used only on the main actor.
+    nonisolated(unsafe) private let textures: [PuppetTexture: MTLTexture]
+    nonisolated(unsafe) private let pictures: [String: MTLTexture]
     /// Each cloud's shadow and where it lies around the cloud, in stage points.
-    private var cloudShadows: [(texture: MTLTexture, pad: Double, width: Double, height: Double)] = []
-    private let grain: MTLTexture, white: MTLTexture, glint: MTLTexture, halo: MTLTexture, streak: MTLTexture
-    private(set) var rigs: [PuppetRig] = []
-    private var rigBuffers: [[(vertices: MTLBuffer, indices: MTLBuffer, count: Int)]] = []
+    nonisolated(unsafe) private let cloudShadows: [(texture: MTLTexture, pad: Double, width: Double, height: Double)]
+    nonisolated(unsafe) private let grain: MTLTexture, white: MTLTexture, glint: MTLTexture, halo: MTLTexture, streak: MTLTexture
+    private(set) var rigs: [PuppetRig]
+    nonisolated(unsafe) private let rigBuffers: [[(vertices: MTLBuffer, indices: MTLBuffer, count: Int)]]
 
-    init?(artwork: PuppetShowArtwork, device: MTLDevice? = MTLCreateSystemDefaultDevice()) {
+    nonisolated init?(artwork: PuppetShowArtwork, device: MTLDevice? = MTLCreateSystemDefaultDevice()) {
         guard let device, let queue = device.makeCommandQueue(),
               let library = try? device.makeLibrary(source: PuppetShowShaders.source, options: nil) else { return nil }
         self.device = device; self.queue = queue
@@ -83,22 +87,24 @@ final class PuppetShowRenderer {
         clampSampler = sampler(.clampToEdge); repeatSampler = sampler(.repeat); grainSampler = sampler(.repeat, linear: false)
 
         let upload = Uploader(device: device, queue: queue)
-        grain = upload.texture(PuppetShowPatterns.grain(), srgb: false, mipmaps: false)
-        white = upload.texture(PuppetShowPatterns.white, srgb: false, mipmaps: false)
-        glint = upload.texture(PuppetShowPatterns.glint(), srgb: false)
-        halo = upload.texture(PuppetShowPatterns.halo(), srgb: false)
-        streak = upload.texture(PuppetShowPatterns.streak(), srgb: false)
-        for (name, image) in artwork.pictures { pictures[name] = upload.texture(image, srgb: false) }
-        cloudShadows = artwork.cloudShadows.map { (upload.texture($0.image, srgb: false), $0.pad, $0.width, $0.height) }
-        for (key, image) in artwork.textures { textures[key] = upload.texture(image, srgb: key.isSRGB) }
-        rigs = artwork.rigs
-        rigBuffers = rigs.map { rig in
+        let patterns = (grain: upload.texture(PuppetShowPatterns.grain(), srgb: false, mipmaps: false),
+                        white: upload.texture(PuppetShowPatterns.white, srgb: false, mipmaps: false),
+                        glint: upload.texture(PuppetShowPatterns.glint(), srgb: false),
+                        halo: upload.texture(PuppetShowPatterns.halo(), srgb: false),
+                        streak: upload.texture(PuppetShowPatterns.streak(), srgb: false))
+        let pictures = artwork.pictures.mapValues { upload.texture($0, srgb: false) }
+        let cloudShadows = artwork.cloudShadows.map { (texture: upload.texture($0.image, srgb: false), pad: $0.pad, width: $0.width, height: $0.height) }
+        let textures = Dictionary(uniqueKeysWithValues: artwork.textures.map { key, image in (key, upload.texture(image, srgb: key.isSRGB)) })
+        let rigBuffers = artwork.rigs.map { rig in
             rig.meshes.map { mesh in
-                (device.makeBuffer(bytes: mesh.vertices, length: max(4, mesh.vertices.count * 4))!,
-                 device.makeBuffer(bytes: mesh.indices, length: max(4, mesh.indices.count * 4))!, mesh.indices.count)
+                (vertices: device.makeBuffer(bytes: mesh.vertices, length: max(4, mesh.vertices.count * 4))!,
+                 indices: device.makeBuffer(bytes: mesh.indices, length: max(4, mesh.indices.count * 4))!, count: mesh.indices.count)
             }
         }
         upload.finish()
+        grain = patterns.grain; white = patterns.white; glint = patterns.glint; halo = patterns.halo; streak = patterns.streak
+        self.pictures = pictures; self.cloudShadows = cloudShadows; self.textures = textures
+        rigs = artwork.rigs; self.rigBuffers = rigBuffers
     }
 
     /// Copies pictures into textures and builds their mipmaps on the GPU.
