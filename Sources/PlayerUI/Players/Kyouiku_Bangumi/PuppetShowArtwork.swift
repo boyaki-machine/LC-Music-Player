@@ -80,12 +80,22 @@ final class PuppetShowLoader {
     private(set) var failed = false
     @ObservationIgnored private var task: Task<Void, Never>?
 
-    /// Starts loading if it has not started.
+    /// True while loading; the view then shows that the stage is being prepared.
+    var loading: Bool { task != nil }
+    @ObservationIgnored private let prepare: @Sendable () -> PuppetShowRenderer?
+
+    init(prepare: @escaping @Sendable () -> PuppetShowRenderer? = PuppetShowLoader.prepare) { self.prepare = prepare }
+
+    /// Builds the art and the renderer: compiling the shaders, creating the pipelines and uploading the textures.
+    nonisolated static func prepare() -> PuppetShowRenderer? { PuppetShowArtwork.load().flatMap { PuppetShowRenderer(artwork: $0) } }
+
+    /// Starts loading if it has not started. All of it is done off the main thread, which stays free for the UI.
     func request() {
         guard renderer == nil, !failed, task == nil else { return }
+        let prepare = prepare
         task = Task { @MainActor in
-            let artwork = await Task.detached(priority: .userInitiated) { PuppetShowArtwork.load() }.value
-            if let artwork, let renderer = PuppetShowRenderer(artwork: artwork) { self.renderer = renderer } else { failed = true }
+            let renderer = await Task.detached(priority: .userInitiated) { prepare() }.value
+            if let renderer { self.renderer = renderer } else { failed = true }
             task = nil
         }
     }
@@ -93,7 +103,7 @@ final class PuppetShowLoader {
     /// Loads at once on the calling thread (tests).
     func loadNow() -> PuppetShowRenderer? {
         if let renderer { return renderer }
-        guard let artwork = PuppetShowArtwork.load(), let renderer = PuppetShowRenderer(artwork: artwork) else { failed = true; return nil }
+        guard let renderer = prepare() else { failed = true; return nil }
         self.renderer = renderer
         return renderer
     }
